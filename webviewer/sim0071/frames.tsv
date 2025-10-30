@@ -1,0 +1,2 @@
+#CONFIG {"grid_width":100,"seed":12345,"initial_population":10,"steps":10,"report_interval":1,"mutation_rate":0.01,"mutation_sigma":0.1,"reproduction_cost":5"death_risk":1e-08"max_population":100000"env_time_speed":0.015}
+t	pop	avg_res	frame	prop_moved

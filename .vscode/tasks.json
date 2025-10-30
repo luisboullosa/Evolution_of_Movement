@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: Configure (MinGW Release)",
+      "type": "shell",
+      "command": "cmake -S . -B build/Release -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Release",
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake: Configure (MinGW Debug)",
+      "type": "shell",
+      "command": "cmake -S . -B build/Debug -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Debug",
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake: Build (Debug)",
+      "type": "shell",
+      "command": "cmake --build build/Debug",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake: Build (Release)",
+      "type": "shell",
+      "command": "cmake --build build/Release",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: exe (Debug)",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/Debug/evo-movement-sim.exe",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: exe (Release)",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/Release/evo-movement-sim.exe",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CTest (Debug)",
+      "type": "shell",
+      "command": "ctest --output-on-failure -C Debug",
+      "options": { "cwd": "${workspaceFolder}/build/Debug" },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "Run CTest (Release)",
+      "type": "shell",
+      "command": "ctest --test-dir build/Release --output-on-failure",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

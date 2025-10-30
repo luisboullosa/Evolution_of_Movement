@@ -1,0 +1,14 @@
+Simple correlation analysis between parameters and outcomes
+Parameter,Outcome,PearsonCorr
+maintenance_cost_per_node,prop_moved,0.8271701918685119
+reproduction_threshold,prop_moved,0.1908854288927332
+reproduction_cost,prop_moved,0.06362847629757774
+env_time_speed,prop_moved,0.19088542889273324
+death_risk,prop_moved,-0.06362847629757774
+max_population,prop_moved,1.7622111733595447e-19
+maintenance_cost_per_node,survived,-0.3779644730092271
+reproduction_threshold,survived,0.0
+reproduction_cost,survived,0.0
+env_time_speed,survived,0.3779644730092271
+death_risk,survived,-0.3779644730092269
+max_population,survived,0.0

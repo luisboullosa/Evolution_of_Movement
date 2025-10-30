@@ -1,0 +1,3 @@
+maintenance_cost_per_node,reproduction_threshold,reproduction_cost,env_time_speed,death_risk,max_population
+0.0015,20.0,1.0,0.01,1e-07,20000
+0.0015,20.0,1.0,0.05,1e-07,20000

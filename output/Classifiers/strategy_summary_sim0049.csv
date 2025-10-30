@@ -1,0 +1,5 @@
+category,count,mean_fitness,median_fitness,std_fitness
+stationary,0,,,
+always_left,0,,,
+always_right,0,,,
+switching,0,,,

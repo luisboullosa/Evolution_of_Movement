@@ -1,0 +1,76 @@
+{
+  "_comment": "Example configuration presets for evo-movement-sim. Copy one of the presets to input/config.json or pass it with --config-file. Keys match fields in include/Config.h.",
+
+  "perlin_mode": {
+    "_description": "Environment uses 2D Perlin noise (space × time) for smoothly varying resources.",
+    "env_use_perlin_time": true,
+    "env_perlin_spatial_scale": 0.05,
+    "env_perlin_time_scale": 0.01,
+    "env_time_speed": 1.0,
+    "env_time_amplitude": 1.0,
+    "env_change_rate": 0.0,
+
+    "steps": 20000,
+    "initial_population": 200,
+    "randomize_start_positions": true,
+    "burn_in": 100,
+
+    "write_frames": true,
+    "write_config": true,
+    "show_progress": true,
+
+    "seed": 42,
+    "report_interval": 100,
+    "webviewer_base": "webviewer",
+    "frames_filename": "frames.tsv"
+  },
+
+  "gaussian_mode": {
+    "_description": "Environment changes by additive Gaussian noise each step (no Perlin time component).",
+    "env_use_perlin_time": false,
+    "env_perlin_spatial_scale": 1.0,
+    "env_perlin_time_scale": 1.0,
+    "env_time_speed": 0.0,
+    "env_time_amplitude": 0.0,
+    "env_change_rate": 0.02,
+
+    "steps": 10000,
+    "initial_population": 100,
+    "randomize_start_positions": true,
+    "burn_in": 0,
+
+    "write_frames": true,
+    "write_config": false,
+    "show_progress": true,
+
+    "seed": 12345,
+    "report_interval": 250,
+    "webviewer_base": "webviewer",
+    "frames_filename": "frames.tsv"
+  },
+
+  "test_mode": {
+    "_description": "Small, fast run for tests or debugging (minimal output).",
+    "env_use_perlin_time": true,
+    "env_perlin_spatial_scale": 0.1,
+    "env_perlin_time_scale": 0.1,
+    "env_time_speed": 0.5,
+    "env_time_amplitude": 0.5,
+    "env_change_rate": 0.0,
+
+    "steps": 500,
+    "initial_population": 3,
+    "randomize_start_positions": false,
+    "start_pos": 50,
+    "burn_in": 0,
+
+    "write_frames": true,
+    "write_config": true,
+    "show_progress": false,
+
+    "seed": 0,
+    "report_interval": 50,
+    "webviewer_base": "webviewer",
+    "frames_filename": "frames.tsv"
+  }
+}

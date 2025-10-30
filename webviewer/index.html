@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>evo-movement-sim viewer</title>
+  <style>
+    body { font-family: monospace; background:#111; color:#eee; }
+    #frame { white-space: pre; font-size:12px; line-height:1.0; }
+    #controls { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <h2>evo-movement-sim Viewer</h2>
+  <div id="controls">
+    <input id="file" type="file" accept=".tsv" />
+    <button id="play">Play</button>
+    <button id="pause">Pause</button>
+    <label>FPS: <input id="fps" type="number" value="2" min="1" max="30" /></label>
+  </div>
+  <div id="info"></div>
+  <div id="frame"></div>
+
+  <script>
+    let frames = [];
+    let timer = null;
+    let idx = 0;
+    const frameDiv = document.getElementById('frame');
+    const info = document.getElementById('info');
+
+    document.getElementById('file').addEventListener('change', async (e)=>{
+      const f = e.target.files[0];
+      if (!f) return;
+      const txt = await f.text();
+      parseTSV(txt);
+      idx = 0;
+      render();
+    });
+
+    document.getElementById('play').addEventListener('click', ()=>{
+      start();
+    });
+    document.getElementById('pause').addEventListener('click', ()=>{
+      stop();
+    });
+
+    function parseTSV(text) {
+      frames = [];
+      const lines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+      // skip header if present
+      if (lines.length>0 && lines[0].startsWith('t\t')) lines.shift();
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length < 4) continue;
+        const t = parseInt(parts[0]);
+        const pop = parseInt(parts[1]);
+        const avg = parseFloat(parts[2]);
+          // unescape backslash-newline sequences (we stored '\n' as backslash chars)
+          let frame = parts.slice(3).join('\t');
+          frame = frame.replace(/\\n/g, '\n');
+          frames.push({t, pop, avg, frame});
+      }
+      info.textContent = `Loaded ${frames.length} frames`;
+    }
+
+    function render() {
+      if (frames.length === 0) return;
+  const f = frames[idx % frames.length];
+  frameDiv.textContent = `t=${f.t} pop=${f.pop} avg_res=${f.avg}\n${f.frame}`;
+    }
+
+    function start() {
+      if (timer) return;
+      const fps = Math.max(1, parseInt(document.getElementById('fps').value || 2));
+      timer = setInterval(()=>{ idx++; render(); }, 1000 / fps);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+  </script>
+</body>
+</html>

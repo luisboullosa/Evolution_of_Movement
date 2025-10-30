@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Visualize population",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webviewer/visualize_population.py",
+      "console": "integratedTerminal",
+      "args": [
+
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: Visualize individual",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webviewer/visualize_individual.py",
+      "console": "integratedTerminal",
+      "args": [
+
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    
+    {
+      "name": "C++: Debug evo-movement-sim (gdb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/evo-movement-sim.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "preLaunchTask": "CMake: Build (Debug)",
+      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+      "MIMode": "gdb",
+      "externalConsole": false
+    }
+    ,
+    {
+      "name": "Run Tests (Release)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Release/test_config_output.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "preLaunchTask": "Run CTest (Release)",
+      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+      "MIMode": "gdb",
+      "externalConsole": true
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# PowerShell script to run long evo-movement-sim.exe runs for selected parameter combos
+# Created by generate_long_run_commands.py
+Set-StrictMode -Version Latest
+if (-not (Test-Path ".\build\Release\evo-movement-sim.exe")) { Write-Host "Warning: Release exe not found; ensure path is correct" }
+
+Write-Host "Running: build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=50000 --max-population=10000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=1.0 --env-time-speed=0.01 --write-config --write-frames"
+build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=1000 --max-population=50000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=1.0 --env-time-speed=0.01 --write-config --no-progress --write-frames
+Write-Host "Running: build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=50000 --max-population=100000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=1.0 --env-time-speed=0.01 --write-config --write-frames"
+build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=1000 --max-population=100000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=1.0 --env-time-speed=0.01 --write-config --no-progress --write-frames
+Write-Host "Running: build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=50000 --max-population=100000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=5.0 --env-time-speed=0.01 --write-config --write-frames"
+build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=1000 --max-population=100000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=5.0 --env-time-speed=0.01 --write-config --no-progress --write-frames
+Write-Host "Running: build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=50000 --max-population=10000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=5.0 --env-time-speed=0.01 --write-config --write-frames"
+build\Release\evo-movement-sim.exe --steps=1001000 --burn-in=1000000 --initial-population=1000 --max-population=50000 --death-risk=1e-07 --maintenance-cost-per-node=0.0015 --reproduction-threshold=50.0 --reproduction-cost=5.0 --env-time-speed=0.01 --write-config --no-progress --write-frames
