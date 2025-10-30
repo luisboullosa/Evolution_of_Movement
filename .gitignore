@@ -1,6 +1,9 @@
 build/
+Testing/
 *.exe
 *.obj
 *.vcxproj*
 *.user
 *.sln
+.pytest_cache/
+.venv/.workspace_tmp
