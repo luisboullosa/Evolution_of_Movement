@@ -36,6 +36,7 @@ except Exception:
 import graphs_env as g_env
 import graphs_nn as g_nn
 import graphs_resp_fitness as g_rf
+from matplotlib.collections import LineCollection
 
 
 # --- small inline helpers used only as fallbacks (keeps main code concise) ---
@@ -260,6 +261,40 @@ for _, er in env_list:
 env_idx, env_res = env_list[0]
 
 
+def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, max_width=6.0, color='tab:blue'):
+    """Draw environment as a LineCollection where segment linewidth encodes
+    local individual density. `positions` is an array-like of individual
+    positions (integers); if None or empty, draw plain line with min_width.
+    Returns the created LineCollection.
+    """
+    # Build segments between consecutive points
+    points = np.column_stack([env_idx, env_res])
+    if points.shape[0] < 2:
+        # nothing to draw
+        return None
+    segs = np.stack([points[:-1], points[1:]], axis=1)
+
+    if positions is None or len(positions) == 0:
+        lw = np.full(len(segs), min_width)
+    else:
+        try:
+            counts = np.bincount(np.asarray(positions, dtype=int), minlength=len(env_res))
+            seg_counts = (counts[:-1] + counts[1:]) / 2.0
+            maxc = float(seg_counts.max()) if seg_counts.max() > 0 else 1.0
+            lw = min_width + (max_width - min_width) * (seg_counts / maxc)
+        except Exception:
+            lw = np.full(len(segs), min_width)
+
+    lc = LineCollection(segs, linewidths=lw, colors=color, alpha=0.9, zorder=1)
+    ax.add_collection(lc)
+    try:
+        ax.set_xlim(env_idx.min(), env_idx.max())
+        ax.set_ylim(0, max(env_global_max * 1.2, 1.0))
+    except Exception:
+        pass
+    return lc
+
+
 def setup_visualizer():
     """Create the figure, axes, artists and widgets used by the visualizer.
 
@@ -341,8 +376,8 @@ def setup_visualizer():
 
     # draw the environment line once and update it per-frame for animation
     env_idx, env_res = env_list[0]
-    # draw environment line via helper module
-    ln_env = g_env.draw_env_line(ax_env, env_idx, env_res)
+    # draw environment line via density-aware helper (thicker where more individuals are)
+    ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=[])
     # individual marker in dark grey
     (marker,) = ax_env.plot([], [], marker="o", color="0.0", linestyle="")
     ax_env.set_xlim(env_idx.min(), env_idx.max())
@@ -502,7 +537,9 @@ def on_text_submit(text):
 def step_selected(delta):
     """Step selection through sorted all_ids by delta (-1 or 1).
 
-    This is used by the Prev/Next button callbacks.
+    This remains available but Prev/Next buttons now prefer frame-local
+    stepping (see step_selected_in_frame). This function is preserved for
+    compatibility with other potential callers.
     """
     global selected_id
     if not all_ids:
@@ -524,12 +561,50 @@ def step_selected(delta):
         pass
 
 
+def step_selected_in_frame(delta):
+    """Step selection through individuals present in the current frame only.
+
+    This is used by the Prev/Next buttons so arrows cycle through "live"
+    individuals at the displayed timepoint.
+    """
+    global selected_id
+    try:
+        cur = int(slider.val)
+        ids = ind_list[cur].get("ids", [])
+        if not ids:
+            return
+        # if selected_id present use its index, otherwise start at 0
+        try:
+            idx = ids.index(selected_id) if selected_id in ids else 0
+        except Exception:
+            idx = 0
+        # advance and wrap around within the current frame's IDs
+        idx = (idx + int(delta)) % len(ids)
+        selected_id = ids[idx]
+        try:
+            txtbox.set_val(str(selected_id))
+        except Exception:
+            pass
+        try:
+            update(slider.val)
+        except Exception:
+            pass
+    except Exception:
+        # fallback to global stepping if anything goes wrong
+        try:
+            step_selected(delta)
+        except Exception:
+            pass
+
+
 def on_prev(event):
-    step_selected(-1)
+    # prefer stepping through individuals present in the current frame
+    step_selected_in_frame(-1)
 
 
 def on_next(event):
-    step_selected(1)
+    # prefer stepping through individuals present in the current frame
+    step_selected_in_frame(1)
 
 
 def on_rand(event):
@@ -615,26 +690,26 @@ def update(frame_idx):
         return
     # update env plot marker and animate the environment line itself
     marker.set_data([pos], [env_res[pos]])
-    # update environment line via helper
+    # update environment line: redraw density-aware LineCollection for this frame
     try:
-        g_env.update_env(
-            ax_env,
-            ln_env,
-            env_idx,
-            env_res,
-            pos,
-            env_global_max,
-            times[i],
-            selected_id,
-            resources,
-        )
-    except Exception:
-        # fallback: re-plot if backend requires it
         try:
-            ln_env.remove()
+            if ln_env is not None:
+                # LineCollection supports remove()
+                ln_env.remove()
+        except Exception:
+            # fallback: clear collections from axis
+            try:
+                ax_env.collections.clear()
+            except Exception:
+                pass
+        # draw new density-aware environment line using current individuals positions
+        ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=ind.get('pos', []))
+    except Exception:
+        # fallback to simple line plot
+        try:
+            ln_env = ax_env.plot(env_idx, env_res, label="resource")
         except Exception:
             pass
-        (ln_env,) = ax_env.plot(env_idx, env_res, label="resource")
     ax_env.set_ylim(0, max(env_global_max * 1.2, 1.0))
     ax_env.set_title(
         f'Environment (t={times[i]}) - ind {ind["ids"][sel_index]} '
@@ -732,38 +807,31 @@ def update(frame_idx):
             # local scalar resource value
             existence = existence_map.get(selected_id, None)
             curtime = times[i]
+            # compute fitness rank percentile within this frame's rel_fitness distribution
+            fitness_rank_pct = None
+            try:
+                if i < len(rel_fitness_by_frame):
+                    rel_arr = rel_fitness_by_frame[i]
+                    if rel_arr.size > 0:
+                        # use the individual's relative fitness value from rel_arr when possible
+                        try:
+                            indiv_rel = float(rel_arr[sel_index]) if sel_index < len(rel_arr) else float(fitness)
+                        except Exception:
+                            indiv_rel = float(fitness)
+                        less = float(np.sum(rel_arr < indiv_rel))
+                        equal = float(np.sum(rel_arr == indiv_rel))
+                        fitness_rank_pct = 100.0 * (less + 0.5 * equal) / float(len(rel_arr))
+            except Exception:
+                fitness_rank_pct = None
+
+            # show center value as the local_input in the info box
+            local_input_val = center_val if pos is not None else None
+
             # render info box via graphs_nn if available
             try:
-                # compute position percentile (0-100) using rank among env_idx
-                try:
-                    pos_percentile = None
-                    if env_idx is not None and len(env_idx) > 0:
-                        # find the index of this position in the env index array
-                        # env_idx contains the positions; use index() if present
-                        try:
-                            rank = int(np.where(env_idx == pos)[0][0])
-                        except Exception:
-                            # pos not found; fallback to nearest index by value
-                            try:
-                                rank = int(np.argmin(np.abs(env_idx - pos)))
-                            except Exception:
-                                rank = None
-                        if rank is None:
-                            pos_percentile = None
-                        else:
-                            if len(env_idx) > 1:
-                                pos_percentile = (
-                                    100.0 * float(rank) / float(len(env_idx) - 1)
-                                )
-                            else:
-                                pos_percentile = 0.0
-                    else:
-                        pos_percentile = None
-                except Exception:
-                    pos_percentile = None
-                # show center value as the local_input in the info box
-                local_input_val = center_val if pos is not None else None
-
+                # we intentionally do NOT pass a position-percentile here; the
+                # parenthetical percentile should display next to relative
+                # fitness instead (fitness_rank_pct)
                 g_nn.draw_info(
                     ax_nn,
                     ax_info,
@@ -773,14 +841,16 @@ def update(frame_idx):
                     resources=resources,
                     output_vec=output_vec,
                     fitness=fitness,
+                    fitness_rank_pct=fitness_rank_pct,
                     existence=existence,
                     current_time=curtime,
                     times=times,
                     pos=pos,
-                    pos_percentile=pos_percentile,
+                    pos_percentile=None,
                     local_input=local_input_val,
                 )
             except Exception:
+                pass
                 pass
 
     # update response curve using the selected individual's NN (or global fallback)

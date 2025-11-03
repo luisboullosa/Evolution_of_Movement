@@ -372,6 +372,7 @@ def draw_info(
     resources=None,
     output_vec=None,
     fitness=None,
+    fitness_rank_pct=None,
     existence=None,
     current_time=None,
     times=None,
@@ -399,9 +400,15 @@ def draw_info(
         except Exception:
             pass
     # show relative fitness (label as 'rel fitness') when available
+    # append the rank-percentile in parentheses if available
     if fitness is not None:
         try:
-            info_lines.append(f"rel fitness: {float(fitness):.3f}")
+            if fitness_rank_pct is not None:
+                info_lines.append(
+                    f"rel fitness: {float(fitness):.3f} ({fitness_rank_pct:.1f}%)"
+                )
+            else:
+                info_lines.append(f"rel fitness: {float(fitness):.3f}")
         except Exception:
             pass
     # show position and percentile if available
