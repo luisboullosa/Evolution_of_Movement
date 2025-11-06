@@ -1,8 +1,9 @@
 sim*/
-__pycache__/
+__*/
 *.exe
 *.obj
 *.vcxproj*
 *.user
 *.sln
 *.html
+*.tsv
