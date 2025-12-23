@@ -1,5 +1,6 @@
 use crate::neural_network::NeuralNetwork;
 use rand::Rng;
+use rand_distr::Normal;
 
 #[derive(Clone, Debug)]
 pub struct Individual {
@@ -22,17 +23,49 @@ impl Individual {
         Individual { nn, resources: 10.0, position: pos, id, age: 0 }
     }
 
-    pub fn act(&mut self, left: f64, center: f64, right: f64, local_population: i32, rng: &mut impl Rng) -> f64 {
+    pub fn act(&mut self, _left: f64, center: f64, _right: f64, _local_population: i32, _rng: &mut impl Rng) -> f64 {
         // Placeholder: choose to gather at current pos; return movement cost 0.0
         self.resources += center;
         self.age += 1;
         0.0
     }
 
-    pub fn reproduce(&mut self, rng: &mut impl Rng, next_id: &mut i32) -> Option<Individual> {
+    pub fn reproduce(&mut self, _rng: &mut impl Rng, next_id: &mut i32) -> Option<Individual> {
         if self.resources >= Self::REPRODUCTION_THRESHOLD {
             self.resources -= Self::REPRODUCTION_COST;
-            let child_nn = self.nn.clone();
+            // clone and apply mutations
+            let mut child_nn = self.nn.clone();
+            let normal = Normal::new(0.0, Self::MUTATION_SIGMA).unwrap();
+            // mutate legacy weights
+            for w in child_nn.weights.iter_mut() {
+                if rand::random::<f64>() < Self::MUTATION_RATE {
+                    *w += normal.sample(&mut rand::thread_rng());
+                }
+            }
+            // mutate multi weights
+            for w in child_nn.weights_multi.iter_mut() {
+                if rand::random::<f64>() < Self::MUTATION_RATE {
+                    *w += normal.sample(&mut rand::thread_rng());
+                }
+            }
+            // mutate biases
+            for b in child_nn.biases.iter_mut() {
+                if rand::random::<f64>() < Self::MUTATION_RATE {
+                    *b += normal.sample(&mut rand::thread_rng());
+                }
+            }
+            // mutate second-layer weights/biases
+            for w in child_nn.weights2.iter_mut() {
+                if rand::random::<f64>() < Self::MUTATION_RATE {
+                    *w += normal.sample(&mut rand::thread_rng());
+                }
+            }
+            for b in child_nn.biases2.iter_mut() {
+                if rand::random::<f64>() < Self::MUTATION_RATE {
+                    *b += normal.sample(&mut rand::thread_rng());
+                }
+            }
+
             let child = Individual::new(child_nn, self.position, *next_id);
             *next_id += 1;
             Some(child)

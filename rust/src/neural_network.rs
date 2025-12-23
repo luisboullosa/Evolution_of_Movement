@@ -22,9 +22,9 @@ impl NeuralNetwork {
         let n = nodes;
         NeuralNetwork {
             weights: vec![0.0; n],
-            weights_multi: vec![0.0; n*inputs],
+            weights_multi: vec![0.0; n.saturating_mul(inputs)],
             biases: vec![0.0; n],
-            weights2: vec![0.0; n * nodes2],
+            weights2: vec![0.0; n.saturating_mul(nodes2)],
             biases2: vec![0.0; nodes2],
             nodes: n,
             inputs,
@@ -34,27 +34,63 @@ impl NeuralNetwork {
         }
     }
 
+    #[inline]
+    fn activate(x: f64) -> f64 { x.tanh() }
+
     pub fn forward_single(&self, input: f64) -> (f64, f64) {
-        // placeholder: sum weight*input + bias
-        let mut s = 0.0;
+        // compute first layer activations
+        let mut hidden = vec![0.0; self.nodes];
         for i in 0..self.nodes {
-            s += self.weights[i] * input + self.biases[i];
+            let v = self.weights.get(i).copied().unwrap_or(0.0) * input + self.biases.get(i).copied().unwrap_or(0.0);
+            hidden[i] = Self::activate(v);
         }
-        (s, 0.0)
+
+        // if two-layer network, compute second layer then sum
+        if self.layers == 2 && self.nodes2 > 0 {
+            let mut out2 = vec![0.0; self.nodes2];
+            for j in 0..self.nodes2 {
+                let mut acc = self.biases2.get(j).copied().unwrap_or(0.0);
+                for i in 0..self.nodes {
+                    let idx = i.saturating_mul(self.nodes2).saturating_add(j);
+                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * hidden[i];
+                }
+                out2[j] = Self::activate(acc);
+            }
+            let sum: f64 = out2.iter().sum();
+            (sum, 0.0)
+        } else {
+            let sum: f64 = hidden.iter().sum();
+            (sum, 0.0)
+        }
     }
 
     pub fn forward_multi(&self, input: &[f64]) -> (f64, f64) {
-        // placeholder: compute simple dot-product per node then sum
-        let mut s = 0.0;
+        // compute first layer activations using weights_multi
+        let mut hidden = vec![0.0; self.nodes];
         for i in 0..self.nodes {
-            let mut node = 0.0;
-            for j in 0..self.inputs {
-                let idx = i * self.inputs + j;
-                node += self.weights_multi.get(idx).copied().unwrap_or(0.0) * input[j];
+            let mut acc = self.biases.get(i).copied().unwrap_or(0.0);
+            for j in 0..self.inputs.min(input.len()) {
+                let idx = i.saturating_mul(self.inputs).saturating_add(j);
+                acc += self.weights_multi.get(idx).copied().unwrap_or(0.0) * input[j];
             }
-            node += self.biases[i];
-            s += node;
+            hidden[i] = Self::activate(acc);
         }
-        (s, 0.0)
+
+        if self.layers == 2 && self.nodes2 > 0 {
+            let mut out2 = vec![0.0; self.nodes2];
+            for j in 0..self.nodes2 {
+                let mut acc = self.biases2.get(j).copied().unwrap_or(0.0);
+                for i in 0..self.nodes {
+                    let idx = i.saturating_mul(self.nodes2).saturating_add(j);
+                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * hidden[i];
+                }
+                out2[j] = Self::activate(acc);
+            }
+            let sum: f64 = out2.iter().sum();
+            (sum, 0.0)
+        } else {
+            let sum: f64 = hidden.iter().sum();
+            (sum, 0.0)
+        }
     }
 }
