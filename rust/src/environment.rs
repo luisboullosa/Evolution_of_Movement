@@ -32,10 +32,25 @@ impl Environment {
         self.resources.get(pos % self.width).copied().unwrap_or(0.0)
     }
 
-    pub fn step(&mut self, change_rate: f64, seed: u64, use_perlin_time: bool, time_speed: f64, time_amplitude: f64, spatial_scale: f64, time_scale: f64) {
+    pub fn step(
+        &mut self,
+        change_rate: f64,
+        seed: u64,
+        use_perlin_time: bool,
+        time_speed: f64,
+        time_amplitude: f64,
+        spatial_scale: f64,
+        time_scale: f64,
+    ) {
         if use_perlin_time {
             self.perlin_time += time_speed;
-            let slice = Perlin::sample_time_slice(self.width, seed, self.perlin_time, spatial_scale, time_scale);
+            let slice = Perlin::sample_time_slice(
+                self.width,
+                seed,
+                self.perlin_time,
+                spatial_scale,
+                time_scale,
+            );
             for i in 0..self.width {
                 self.resources[i] = self.perlin_base[i] + slice[i] * time_amplitude;
             }

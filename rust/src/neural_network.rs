@@ -1,7 +1,10 @@
 use std::vec::Vec;
 
 #[derive(Clone, Debug)]
-pub enum NNType { SingleInput, MultiInput }
+pub enum NNType {
+    SingleInput,
+    MultiInput,
+}
 
 #[derive(Clone, Debug)]
 pub struct NeuralNetwork {
@@ -30,18 +33,25 @@ impl NeuralNetwork {
             inputs,
             nodes2,
             layers,
-            nn_type: if inputs <= 1 { NNType::SingleInput } else { NNType::MultiInput },
+            nn_type: if inputs <= 1 {
+                NNType::SingleInput
+            } else {
+                NNType::MultiInput
+            },
         }
     }
 
     #[inline]
-    fn activate(x: f64) -> f64 { x.tanh() }
+    fn activate(x: f64) -> f64 {
+        x.tanh()
+    }
 
     pub fn forward_single(&self, input: f64) -> (f64, f64) {
         // compute first layer activations
         let mut hidden = vec![0.0; self.nodes];
         for i in 0..self.nodes {
-            let v = self.weights.get(i).copied().unwrap_or(0.0) * input + self.biases.get(i).copied().unwrap_or(0.0);
+            let v = self.weights.get(i).copied().unwrap_or(0.0) * input
+                + self.biases.get(i).copied().unwrap_or(0.0);
             hidden[i] = Self::activate(v);
         }
 
@@ -92,5 +102,25 @@ impl NeuralNetwork {
             let sum: f64 = hidden.iter().sum();
             (sum, 0.0)
         }
+    }
+
+    /// Return a small preview of weights useful for quick debugging.
+    pub fn weights_preview(&self, max: usize) -> Vec<f64> {
+        let mut out = Vec::new();
+        for &w in self.weights.iter().take(max) {
+            out.push(w);
+        }
+        for &w in self.weights_multi.iter().take(max) {
+            out.push(w);
+        }
+        for &w in self.weights2.iter().take(max) {
+            out.push(w);
+        }
+        out
+    }
+
+    /// Return the network shape: (nodes, inputs, nodes2, layers)
+    pub fn shape(&self) -> (usize, usize, usize, i32) {
+        (self.nodes, self.inputs, self.nodes2, self.layers)
     }
 }
