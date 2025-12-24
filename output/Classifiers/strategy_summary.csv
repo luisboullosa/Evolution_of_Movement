@@ -1,5 +1,0 @@
-category,count,mean_fitness,median_fitness,std_fitness
-stationary,0,,,
-always_left,9904,0.419517,0.440594,0.201689
-always_right,11570,0.432162,0.437335,0.180077
-switching,77429,0.434378,0.434675,0.170018

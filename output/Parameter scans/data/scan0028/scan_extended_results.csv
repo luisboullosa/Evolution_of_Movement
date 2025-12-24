@@ -1,2 +1,0 @@
-maintenance_cost_per_node,reproduction_threshold,reproduction_cost,env_time_speed,death_risk,max_population,extinction_time,survived,recorded_steps,mean_move,median_move,max_move,prop_moved
-0.0015,20.0,1.0,0.01,1e-07,20000,2000,1,2000,0.03778558729043715,0.0051781692406692404,10.0,0.8064733648010789
