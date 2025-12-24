@@ -51,8 +51,15 @@ impl Simulation {
     }
 
     pub fn run(&mut self) {
-        for _ in 0..self.config.steps {
+        for i in 0..self.config.steps {
             self.step();
+            if self.config.step_mode {
+                println!("Completed step {}/{} — press Enter to continue...", i+1, self.config.steps);
+                use std::io::{self, Write};
+                let _ = io::stdout().flush();
+                let mut buf = String::new();
+                let _ = io::stdin().read_line(&mut buf);
+            }
         }
     }
 }

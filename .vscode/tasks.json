@@ -56,5 +56,14 @@
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
     }
+    ,
+    {
+      "label": "Cargo: build (debug)",
+      "type": "shell",
+      "command": "cargo build",
+      "options": { "cwd": "${workspaceFolder}/rust" },
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": false }
+    }
   ]
 }
