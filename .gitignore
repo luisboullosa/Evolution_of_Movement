@@ -37,3 +37,17 @@ webviewer/sim*/
 Thumbs.db
 .DS_Store
 *.log
+
+# Data files: tabular outputs and ndjson logs
+*.tsv
+*.jsonl
+
+# ignore tsv/jsonl under output and webviewer sim folders
+output/**/*.tsv
+output/**/*.jsonl
+webviewer/**/*.tsv
+webviewer/**/*.jsonl
+
+# ignore generated sim directories (e.g., webviewer/sim0061)
+webviewer/sim*/
+output/**/sim*/
