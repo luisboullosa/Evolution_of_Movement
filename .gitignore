@@ -51,3 +51,4 @@ webviewer/**/*.jsonl
 # ignore generated sim directories (e.g., webviewer/sim0061)
 webviewer/sim*/
 output/**/sim*/
+rust/webviewer/sim*/
