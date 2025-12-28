@@ -202,11 +202,13 @@ def make_progress_writer(outdir):
                     final_pop = int(row[8])
                     prop_moved = float(row[9])
                 else:
-                    # best-effort: keep original behavior
-                    mv = float(row[0])
-                    mc = float(row[1])
-                    final_pop = int(row[-2])
-                    prop_moved = float(row[-1])
+                    # unexpected short row: raise an informative exception so callers see diagnostics
+                    raise ValueError(
+                        f"Progress writer: unexpected short result row (length {len(row)}). "
+                        f"Expected a list/tuple with 10 elements: [movement_cost_factor, maintenance_cost_per_node, "
+                        f"reproduction_threshold, reproduction_cost, env_time_speed, death_risk, resource_scale, grid_width, "
+                        f"final_population, prop_moved]. Row: {row!r}"
+                    )
             elif isinstance(row, dict):
                 mv = float(row.get('movement_cost_factor') or 0)
                 mc = float(row.get('maintenance_cost_per_node') or 0)
