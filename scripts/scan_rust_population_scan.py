@@ -142,6 +142,9 @@ for idx, tpl in enumerate(pairs):
         "webviewer_base": os.path.normpath(jobs_dir),
         "sim_prefix": f"job{idx}_",
     }
+    # For pilot runs, introduce phenotypic variation via ratiate multiplier
+    if args.pilot:
+        cfg['ratiate'] = 10
     tf = tempfile.NamedTemporaryFile(prefix=f"scan_job_{idx}_", suffix=".json", delete=False, mode="w", encoding="utf-8")
     json.dump(cfg, tf)
     tf.flush()
