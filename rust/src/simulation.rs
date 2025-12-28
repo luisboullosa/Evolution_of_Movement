@@ -3,6 +3,7 @@ use crate::environment::Environment;
 use crate::individual::Individual;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand_distr::Normal;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::fs::File;
@@ -70,21 +71,60 @@ impl Simulation {
                 self.config.nn_layers,
                 self.config.nn_nodes2 as usize,
             );
-            // initialize weights randomly
-            for w in nn.weights.iter_mut() {
-                *w = self.rng.sample(wrand);
-            }
-            for w in nn.weights_multi.iter_mut() {
-                *w = self.rng.sample(wrand);
-            }
-            for b in nn.biases.iter_mut() {
-                *b = self.rng.sample(wrand);
-            }
-            for w in nn.weights2.iter_mut() {
-                *w = self.rng.sample(wrand);
-            }
-            for b in nn.biases2.iter_mut() {
-                *b = self.rng.sample(wrand);
+            // initialize weights.
+            // If `ratiate` is set (>0) we start from default weights (zeros)
+            // and apply simulated mutations at effective rate = mutation_rate * ratiate.
+            if self.config.ratiate > 0 {
+                let mut eff = (self.config.mutation_rate as f64) * (self.config.ratiate as f64);
+                if eff.is_nan() || eff < 0.0 {
+                    eff = 0.0;
+                }
+                if eff > 1.0 {
+                    eff = 1.0;
+                }
+                let normal = Normal::new(0.0, self.config.mutation_sigma).unwrap();
+                for w in nn.weights.iter_mut() {
+                    if self.rng.gen::<f64>() < eff {
+                        *w += normal.sample(&mut self.rng);
+                    }
+                }
+                for w in nn.weights_multi.iter_mut() {
+                    if self.rng.gen::<f64>() < eff {
+                        *w += normal.sample(&mut self.rng);
+                    }
+                }
+                for b in nn.biases.iter_mut() {
+                    if self.rng.gen::<f64>() < eff {
+                        *b += normal.sample(&mut self.rng);
+                    }
+                }
+                for w in nn.weights2.iter_mut() {
+                    if self.rng.gen::<f64>() < eff {
+                        *w += normal.sample(&mut self.rng);
+                    }
+                }
+                for b in nn.biases2.iter_mut() {
+                    if self.rng.gen::<f64>() < eff {
+                        *b += normal.sample(&mut self.rng);
+                    }
+                }
+            } else {
+                // initialize weights randomly (uniform -1..1)
+                for w in nn.weights.iter_mut() {
+                    *w = self.rng.sample(wrand);
+                }
+                for w in nn.weights_multi.iter_mut() {
+                    *w = self.rng.sample(wrand);
+                }
+                for b in nn.biases.iter_mut() {
+                    *b = self.rng.sample(wrand);
+                }
+                for w in nn.weights2.iter_mut() {
+                    *w = self.rng.sample(wrand);
+                }
+                for b in nn.biases2.iter_mut() {
+                    *b = self.rng.sample(wrand);
+                }
             }
             let pos = if self.config.randomize_start_positions {
                 self.rng.sample(pdist)
