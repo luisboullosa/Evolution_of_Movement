@@ -19,10 +19,56 @@ Run (Release):
 
 This project is intentionally small and dependency-free (uses only the C++ standard library).
 
+Rust port
+---------
+A Rust port of the simulator lives in the `rust/` subdirectory. To build and run the Rust
+binary use Cargo:
+
+```powershell
+pushd rust
+cargo build --release
+./target/release/evo_movement_rust.exe --help
+popd
+```
+
+Note: Perlin temporal evolution is always enabled in the Rust port (the previous
+`--perlin-time`/`--no-perlin-time` toggle and `env_change_rate` additive-noise option
+have been removed). Use the `--env-time-speed`, `--env-time-amplitude`,
+`--env-perlin-spatial-scale` and `--env-perlin-time-scale` flags to tune the time-varying
+component.
+
 Web viewer
 ----------
 The simulator can write frames to `webviewer/frames.tsv`. After running the simulation (the default build target
 writes to that path), open `webviewer/index.html` in your browser and load the `frames.tsv` file using the file picker.
+
+Scan driver (Rust)
+------------------
+A convenience driver for batch parameter scans using the Rust binary is provided at `scripts/scan_rust_population_scan.py`.
+It performs a grid or sampled parameter sweep and writes summary outputs for consumption by the webviewer.
+
+Key flags:
+- `--outdir`: output base directory (default `output/scan_population`). A single timestamped `jobs...` folder will be created under this path containing summary files.
+- `--workers`: number of parallel workers for the sweep.
+- `--steps`: number of simulation steps for short/pilot runs.
+- `--initial-population`: initial population size for short runs.
+- `--pilot`: use a smaller, pilot parameter grid.
+- `--no-write-outputs`: tell the Rust simulator to suppress per-step outputs (env.jsonl, individuals.jsonl, frames, nn_index).
+- `--no-deep`: do not run deeper follow-up simulations for promising parameter sets.
+- `--deep-steps` / `--deep-population`: when deep runs are enabled, control their length and starting population.
+
+Behavior:
+- The driver writes per-job temporary config files to the system temp directory so the output folder only contains the summary files.
+- It forces `report_interval` to be larger than the number of steps and sets `write_outputs`/`write_frames` to `false` by default to avoid producing per-step files when possible.
+- Summary files produced in the jobs folder include `results_short.csv`, `deep_results.csv` (if deep runs executed), `progress.json`, and `promising.csv`.
+
+Example (short pilot, no deep runs):
+
+```powershell
+python scripts\scan_rust_population_scan.py --pilot --workers 2 --steps 200 --initial-population 100 --outdir output/scan_population --no-deep
+```
+
+After the scan starts, open the webviewer at `webviewer/scan_live.html` served from a local HTTP server (see below) to watch `progress.json` updates.
 
 Cleaning webviewer output
 -------------------------

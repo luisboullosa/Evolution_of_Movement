@@ -378,6 +378,7 @@ def draw_info(
     times=None,
     pos=None,
     pos_percentile=None,
+    pop=None,
     local_input=None,
 ):
     """
@@ -418,6 +419,12 @@ def draw_info(
                 info_lines.append(f"pos: {int(pos)} ({pos_percentile:.1f}%)")
             else:
                 info_lines.append(f"pos: {int(pos)}")
+        except Exception:
+            pass
+    # show population size when available
+    if pop is not None:
+        try:
+            info_lines.append(f"pop: {int(pop)}")
         except Exception:
             pass
     # show the local NN input value (resource at local site)

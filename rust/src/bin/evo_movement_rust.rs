@@ -22,7 +22,7 @@ fn print_help() {
     println!("  --env-time-speed=N            Perlin time speed (double)");
     println!("  --env-time-amplitude=N        Perlin time amplitude (double)");
     println!("  --env-change-rate=N           Gaussian env noise sigma (double)");
-    println!("  --perlin-time / --no-perlin-time    Enable/disable perlin-time evolution");
+    println!("  (Perlin temporal evolution always enabled)");
     println!("  --seed=N                      RNG seed (unsigned)");
     println!("  --steps=N                     Number of timesteps to run (int)");
     println!("  --report-interval=N           Reporting interval (int)");
@@ -34,13 +34,15 @@ fn print_help() {
 }
 
 fn parse_arg_value<T: std::str::FromStr>(arg: &str, flag: &str) -> Option<T> {
-    if arg.starts_with(flag) {
-        if arg.len() > flag.len() && arg.as_bytes()[flag.len()] == b'=' {
-            return arg[flag.len() + 1..].parse::<T>().ok();
-        }
+    if arg.starts_with(flag)
+        && arg.len() > flag.len()
+        && arg.as_bytes()[flag.len()] == b'='
+    {
+        return arg[flag.len() + 1..].parse::<T>().ok();
     }
     None
 }
+
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -55,11 +57,10 @@ fn main() {
         }
         if a.starts_with("--config-file") {
             if let Some(p) = if a.contains('=') {
-                a.splitn(2, '=').nth(1).map(|s| s.to_string())
+                a.split_once('=').map(|x| x.1.to_string())
             } else {
                 args.next()
             } {
-                // try load from file (panic on error to surface mistakes)
                 match Config::from_file(&p) {
                     Ok(c) => cfg = Some(c),
                     Err(e) => {
@@ -74,7 +75,7 @@ fn main() {
     }
 
     // start with loaded or default config
-    let mut cfg = cfg.unwrap_or_else(|| Config::default());
+    let mut cfg = cfg.unwrap_or_default();
 
     // re-parse remaining args to apply overrides
     let mut it = remaining.into_iter();
@@ -132,17 +133,7 @@ fn main() {
             }
         }
 
-        if a.starts_with("--env-change-rate") {
-            if let Some(v) = parse_arg_value::<f64>(&a, "--env-change-rate") {
-                cfg.env_change_rate = v;
-                continue;
-            } else if let Some(p) = it.next() {
-                if let Ok(v) = p.parse::<f64>() {
-                    cfg.env_change_rate = v;
-                    continue;
-                }
-            }
-        }
+        // --env-change-rate removed (additive noise no longer used)
 
         if a.starts_with("--movement-cost-factor") {
             if let Some(v) = parse_arg_value::<f64>(&a, "--movement-cost-factor") {
@@ -168,14 +159,7 @@ fn main() {
             }
         }
 
-        if a == "--no-perlin-time" {
-            cfg.env_use_perlin_time = false;
-            continue;
-        }
-        if a == "--perlin-time" {
-            cfg.env_use_perlin_time = true;
-            continue;
-        }
+        // Perlin temporal evolution is always enabled; flags removed.
         if a == "--no-progress" {
             cfg.show_progress = false;
             continue;
@@ -260,7 +244,7 @@ fn main() {
         if a.starts_with("--config-out") {
             cfg.write_config = true;
             if a.contains('=') {
-                if let Some(v) = a.splitn(2, '=').nth(1) {
+                if let Some(v) = a.split_once('=').map(|x| x.1) {
                     cfg.config_out_path = sanitize_basename(v);
                 }
             } else if let Some(p) = it.next() {

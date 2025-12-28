@@ -479,7 +479,7 @@ def setup_visualizer():
 
     # create a GUI timer to advance frames when playing; don't start it here
     try:
-        timer = fig.canvas.new_timer(interval=200)
+        timer = fig.canvas.new_timer(interval=int(round(1000.0 / 24.0)))
         timer.add_callback(anim_step)
     except Exception:
         # some backends may not support timers; ignore
@@ -659,6 +659,7 @@ def update(frame_idx):
     # update called for frame i
     env_idx, env_res = env_list[i]
     ind = ind_list[i]
+    pop = len(ind.get("ids", []))
     # select chosen individual id in this frame (if present)
     if len(ind["ids"]) == 0:
         marker.set_data([], [])
@@ -713,7 +714,7 @@ def update(frame_idx):
     ax_env.set_ylim(0, max(env_global_max * 1.2, 1.0))
     ax_env.set_title(
         f'Environment (t={times[i]}) - ind {ind["ids"][sel_index]} '
-        f'pos={pos} res={resources:.2f}'
+        f'pos={pos} res={resources:.2f} pop={pop}'
     )
     ax_env.set_xlabel("position")
     ax_env.set_ylabel("resource")
@@ -847,6 +848,7 @@ def update(frame_idx):
                     times=times,
                     pos=pos,
                     pos_percentile=None,
+                    pop=pop,
                     local_input=local_input_val,
                 )
             except Exception:

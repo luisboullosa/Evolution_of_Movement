@@ -4,6 +4,8 @@ import csv
 import threading
 import queue
 import time
+import os
+from collections.abc import Iterable
 
 
 def _parse_extinction(output_text):
@@ -27,129 +29,223 @@ def run_param_sweep(
     timeout=1200,
     writer_mode="w",
     result_row_builder=None,
+    progress_callback=None,
+    stream_live_output=False,
 ):
     """Run a parameter sweep in parallel using worker threads.
 
-    pairs: iterable of job parameters (e.g., (mv, mc))
-    cmd_builder: callable(job) -> list(command parts)
+    pairs: iterable of job parameters (e.g., tuples)
+    cmd_builder: callable(job) -> list(command parts) where job == (idx, params)
     outpath: CSV file to write rows to
     header: list of CSV column names
     workers: number of threads
     timeout: per-process timeout in seconds
     writer_mode: file mode for CSV (default 'w')
+    result_row_builder: callable to convert (job, out_text) -> csv row (flexible signatures supported)
+    progress_callback: callable(completed, total, csv_row, job) called after each job completes
     """
+    pairs_list = list(pairs)
+    total = len(pairs_list)
+    if total == 0:
+        print("No jobs to run.")
+        return
+
     job_q = queue.Queue()
-    pairs = list(pairs)
-    total = len(pairs)
-    for p in pairs:
-        job_q.put(p)
+    for idx in range(total):
+        job_q.put(idx)
 
     writer_lock = threading.Lock()
     active_procs = set()
     active_lock = threading.Lock()
-    stats = {"completed": 0, "start_time": None}
+    stats = {"completed": 0, "start_time": time.time(), "last_params": None, "last_elapsed": 0.0}
+
+    # open CSV file once
+    os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
+    csvf = open(outpath, writer_mode, newline="", encoding="utf-8")
+    writer = csv.writer(csvf)
+    if writer_mode == "w":
+        writer.writerow(header)
+        csvf.flush()
 
     def worker(thread_id):
+        nonlocal stats
         while True:
             try:
-                job = job_q.get_nowait()
+                idx = job_q.get_nowait()
             except queue.Empty:
                 return
+            i = idx
+            row = pairs_list[idx]
+            job = (i, row)
             cmd = cmd_builder(job)
             start = time.time()
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             with active_lock:
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
                 active_procs.add(proc)
             try:
-                out, err = proc.communicate(timeout=timeout)
-                out_text = (out or "") + "\n" + (err or "")
-            except subprocess.TimeoutExpired:
-                with active_lock:
+                if stream_live_output and proc.stdout is not None:
+                    # stream stdout lines to console with job prefix but also collect
+                    # the lines into `collected` so callers can inspect full output
+                    # after the process ends.
+                    collected = []
+
+                    def _stream_output(rfile, jid, buf):
+                        try:
+                            last_print = 0.0
+                            last_line = None
+                            interval = 30.0  # seconds between printed live updates per job
+                            for raw in rfile:
+                                line = raw.rstrip('\n')
+                                if not line:
+                                    continue
+                                now = time.time()
+                                last_line = line
+                                buf.append(line)
+                                # always print important messages immediately
+                                if 'population extinct at t=' in line or 'Done.' in line:
+                                    print(f"[job {i}] {line}")
+                                    last_print = now
+                                    last_line = None
+                                    continue
+                                if (now - last_print) >= interval:
+                                    # print last observed line as a concise update
+                                    print(f"[job {i}] {last_line}")
+                                    last_print = now
+                                    last_line = None
+                            # on stream end, flush last observed line once
+                            if last_line:
+                                print(f"[job {i}] {last_line}")
+                        except Exception:
+                            pass
+
+                    t_stream = threading.Thread(target=_stream_output, args=(proc.stdout, i, collected), daemon=True)
+                    t_stream.start()
                     try:
-                        proc.kill()
+                        proc.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    # ensure stream thread finishes
+                    try:
+                        t_stream.join(timeout=0.5)
                     except Exception:
                         pass
-                    active_procs.discard(proc)
-                out_text = ""
-            with active_lock:
-                active_procs.discard(proc)
-
-            # try to parse extinction and produce a canonical row
-            extinct = _parse_extinction(out_text)
-            survived = 1 if extinct is None else 0
-
-            # ensure mv/mc exist for logging fallback
-            mv = None
-            mc = None
-            try:
-                # attempt to unpack common (mv, mc) tuple if present
-                mv, mc = job
-            except Exception:
-                # ignore - job may be a different shape
-                pass
-
-            # If a custom row builder was provided, use it to generate the CSV row.
-            row = None
-            if callable(result_row_builder):
-                try:
-                    row = result_row_builder(job, extinct, out_text)
-                except Exception:
-                    row = None
-
-            # fallback to backward-compatible rows if no custom row produced
-            if row is None:
-                # if header expects only survived (coarse scan), adapt
-                if header == [
-                    "movement_cost_factor",
-                    "maintenance_cost_per_node",
-                    "survived",
-                ]:
-                    row = [mv, mc, int(survived)]
+                    # use the collected buffer as the captured output
+                    try:
+                        out = "\n".join(collected)
+                    except Exception:
+                        out = ''
+                    err = ''
                 else:
-                    # default extinction_time column assumed to exist
-                    # use 50000 as default max if extinction is None
-                    max_steps = 50000
-                    row = [mv, mc, extinct if extinct is not None else max_steps, survived]
+                    out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                out, err = proc.communicate()
+            out_text = (out or "") + "\n" + (err or "")
+            with active_lock:
+                try:
+                    active_procs.discard(proc)
+                except Exception:
+                    pass
+
+            # build csv row using flexible result_row_builder
+            csv_row = None
+            if callable(result_row_builder):
+                exc_val = _parse_extinction(out_text)
+                tried = False
+                # try common signatures, swallow and log exceptions so threads don't die
+                try:
+                    csv_row = result_row_builder(job, out_text)
+                    tried = True
+                except Exception as e:
+                    # try next signature
+                    try:
+                        csv_row = result_row_builder(job, exc_val, out_text)
+                        tried = True
+                    except Exception:
+                        try:
+                            csv_row = result_row_builder(row, out_text)
+                            tried = True
+                        except Exception:
+                            try:
+                                csv_row = result_row_builder(row, out_text, exc_val)
+                                tried = True
+                            except Exception:
+                                try:
+                                    csv_row = result_row_builder(job)
+                                    tried = True
+                                except Exception:
+                                    csv_row = None
+
+            if csv_row is None:
+                # fallback: flatten row
+                csv_row = list(row) if isinstance(row, (list, tuple)) else [row]
 
             elapsed = time.time() - start
+
+            # normalize csv_row to an iterable of fields (avoid passing non-iterable or string)
+            if not isinstance(csv_row, Iterable) or isinstance(csv_row, (str, bytes)):
+                csv_row = [csv_row]
+            else:
+                csv_row = list(csv_row)
+
+            # write row safely
             with writer_lock:
-                writer.writerow(row)
+                writer.writerow(csv_row)
                 csvf.flush()
                 stats["completed"] += 1
-                completed = stats["completed"]
-                elapsed_total = time.time() - stats["start_time"]
+                stats["last_params"] = str(row)
+                stats["last_elapsed"] = elapsed
+
+            # call progress callback
+            try:
+                if callable(progress_callback):
+                    progress_callback(stats["completed"], total, csv_row, job)
+            except Exception:
+                pass
+
+            job_q.task_done()
+
+    # start threads
+    threads = []
+    for tid in range(min(workers, total)):
+        t = threading.Thread(target=worker, args=(tid,), daemon=True)
+        t.start()
+        threads.append(t)
+
+    # monitor progress
+    try:
+        last_print_time = 0
+        last_completed = -1
+        throttle = 2.0  # seconds between progress updates
+        while any(t.is_alive() for t in threads):
+            completed = stats.get("completed", 0)
+            now = time.time()
+            # print only when completed changed or at most every `throttle` seconds
+            if completed != last_completed or (now - last_print_time) >= throttle:
+                elapsed_total = now - stats["start_time"]
                 avg = elapsed_total / completed if completed > 0 else 0
                 remaining = max(0, total - completed)
                 eta_seconds = int(remaining * avg)
                 hrs, rem = divmod(eta_seconds, 3600)
                 mins, secs = divmod(rem, 60)
                 rem_str = f"{hrs}:{mins:02d}:{secs:02d}"
-                pct = completed / total * 100
-                # show last job parameters (if available)
-                last_params = (
-                    f"{mv},{mc}" if (mv is not None and mc is not None) else str(job)
-                )
-                print(
-                    f"sim {completed}/{total} ({pct:.1f}%) - last {last_params} "
-                    f"took {elapsed:.1f}s - time remaining {rem_str}"
-                )
-
-    # open writer and start threads
-    try:
-        csvf = open(outpath, writer_mode, newline="")
-        writer = csv.writer(csvf)
-        writer.writerow(header)
-        stats["start_time"] = time.time()
-        threads = []
-        for i in range(max(1, workers)):
-            t = threading.Thread(target=worker, args=(i,), daemon=True)
-            t.start()
-            threads.append(t)
-        while any(t.is_alive() for t in threads):
+                pct = (completed / total * 100) if total > 0 else 0.0
+                last = stats.get("last_params", "-")
+                last_elapsed = stats.get("last_elapsed", 0.0)
+                bar_len = 40
+                filled = int(bar_len * (completed / total)) if total > 0 else 0
+                bar = "#" * filled + "-" * (bar_len - filled)
+                print(f"[{bar}] {completed}/{total} ({pct:.1f}%) last={last} t={last_elapsed:.1f}s ETA={rem_str}", end="\r", flush=True)
+                last_print_time = now
+                last_completed = completed
             try:
-                time.sleep(0.5)
+                time.sleep(0.25)
             except KeyboardInterrupt:
                 print("\nInterrupted by user. Terminating running simulations...")
                 with active_lock:
@@ -159,6 +255,7 @@ def run_param_sweep(
                         except Exception:
                             pass
                 break
+        print()
         for t in threads:
             t.join()
     except KeyboardInterrupt:

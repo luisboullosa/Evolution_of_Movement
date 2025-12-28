@@ -37,21 +37,35 @@ impl Individual {
         local_population: i32,
         movement_cost_factor: f64,
         _rng: &mut impl Rng,
+        hidden_buf: &mut [f64],
+        out2_buf: &mut [f64],
     ) -> f64 {
-        // Build inputs vector similar to C++: left, center, right, occupancy, internal resources
-        let mut inputs: Vec<f64> = Vec::with_capacity(5);
-        inputs.push(left);
-        inputs.push(center);
-        inputs.push(right);
-        inputs.push(local_population as f64);
-        inputs.push(self.resources);
+        // Build inputs on the stack to avoid heap allocation: left, center, right, occupancy, internal resources
+        let mut stack_inputs = [0.0f64; 5];
+        stack_inputs[0] = left;
+        stack_inputs[1] = center;
+        stack_inputs[2] = right;
+        stack_inputs[3] = local_population as f64;
+        stack_inputs[4] = self.resources;
 
         // Call appropriate NN forward depending on NN input shape
-        let (direction, magnitude) = if self.nn.inputs <= 1 {
-            // historically, single-input nets receive the local resource
-            self.nn.forward_single(center)
+        // Allow benchmarking the impact of buffer reuse by disabling via env var.
+        // Set `DISABLE_NN_BUFFERS=1` to force the allocator-allocating codepaths.
+        let disable_buf = std::env::var("DISABLE_NN_BUFFERS").map(|v| v == "1" || v.to_lowercase() == "true").unwrap_or(false);
+        let (direction, magnitude) = if disable_buf {
+            if self.nn.inputs <= 1 {
+                self.nn.forward_single(center)
+            } else {
+                self.nn.forward_multi(&stack_inputs)
+            }
         } else {
-            self.nn.forward_multi(&inputs)
+            if self.nn.inputs <= 1 {
+                // historically, single-input nets receive the local resource
+                self.nn.forward_single_buf(center, hidden_buf, out2_buf)
+            } else {
+                // pass a slice view of the stack array; forward_multi will only read up to `self.inputs`
+                self.nn.forward_multi_buf(&stack_inputs, hidden_buf, out2_buf)
+            }
         };
 
         // Decision: gather if magnitude < 0.5, otherwise move and spend

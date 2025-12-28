@@ -1,0 +1,9 @@
+[debug] initial dump to D:\Development\Movement\output\test_sim_runs\testsim0006 individuals=5 
+[debug] dump_env_to_dir called simdir=D:\Development\Movement\output\test_sim_runs\testsim0006 individuals=5
+[debug] env path computed D:\Development\Movement\output\test_sim_runs\testsim0006\env.jsonl
+[debug] dump_individuals_to_dir called simdir=D:\Development\Movement\output\test_sim_runs\testsim0006 individuals=5
+[debug] individuals path computed D:\Development\Movement\output\test_sim_runs\testsim0006\individuals.jsonl
+[debug] dump_env_to_dir called simdir=D:\Development\Movement\output\test_sim_runs\testsim0006 individuals=5
+[debug] env path computed D:\Development\Movement\output\test_sim_runs\testsim0006\env.jsonl
+[debug] dump_individuals_to_dir called simdir=D:\Development\Movement\output\test_sim_runs\testsim0006 individuals=5
+[debug] individuals path computed D:\Development\Movement\output\test_sim_runs\testsim0006\individuals.jsonl

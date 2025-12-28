@@ -1,7 +1,6 @@
 {
   "steps": 500,
   "report_interval": 5,
-  "env_use_perlin_time": true,
   "env_perlin_spatial_scale": 0.02,
   "env_perlin_time_scale": 0.03,
   "env_time_speed": 0.2,

@@ -1,0 +1,16 @@
+{
+  "sim_prefix": "sim",
+  "show_progress": false,
+  "steps": 1000000,
+  "initial_population": 5000,
+  "burn_in": 999000,
+  "sim_number": -1,
+  "webviewer_base": "webviewer",
+  "write_frames": true,
+  "write_config": true,
+  "report_interval": 1,
+  "env_time_speed": 0.00000001,
+  "env time_amplitude": 1.0,
+  "env_perlin_time_scale": 0.00001,
+  "resource_scale": 10.0
+}

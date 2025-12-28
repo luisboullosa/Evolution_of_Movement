@@ -1,0 +1,8 @@
+{
+  "steps": 1000,
+  "initial_population": 500,
+  "show_progress": true,
+  "write_frames": true,
+  "webviewer_base": "webviewer",
+  "sim_prefix": "demo_"
+}

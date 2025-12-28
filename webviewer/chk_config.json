@@ -1,0 +1,12 @@
+{
+  "show_progress": false,
+  "sim_number": -1,
+  "steps": 5,
+  "write_frames": true,
+  "initial_population": 5,
+  "sim_prefix": "chk_",
+  "webviewer_base": "webviewer",
+  "burn_in": 0,
+  "report_interval": 1,
+  "write_config": true
+}

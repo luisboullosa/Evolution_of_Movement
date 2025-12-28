@@ -1,0 +1,16 @@
+{
+  "steps": 5,
+  "initial_population": 10,
+  "show_progress": false,
+  "write_frames": true,
+  "write_config": true,
+  "webviewer_base": "webviewer",
+  "sim_prefix": "tst_",
+  "sim_number": -1,
+  "sim_digits": 4,
+  "frames_filename": "frames.tsv",
+  "env_out_path": "webviewer/tst_sim/env.tsv",
+  "individuals_out_path": "webviewer/tst_sim/individuals.jsonl",
+  "report_interval": 1,
+  "burn_in": 0
+}

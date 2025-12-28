@@ -11,12 +11,12 @@
 //!   "grid_width": 100,
 //!   "seed": 12345,
 //!   "resource_scale": 1.0,
-//!   "env_use_perlin_time": true,
+//!   (Perlin temporal evolution is always enabled),
 //!   "env_time_speed": 0.015,
 //!   "env_time_amplitude": 1.0,
 //!   "env_perlin_spatial_scale": 0.05,
 //!   "env_perlin_time_scale": 0.05,
-//!   "env_change_rate": 0.1,
+//!   (additive `env_change_rate` removed; Perlin time is used)
 //!   "perlin_octaves": 5,
 //!   "perlin_persistence": 0.5,
 //!   "perlin_lacunarity": 2.0,
@@ -53,8 +53,6 @@ pub struct ExampleConfig {
     pub resource_scale: f64,
 
     // --- environment dynamics ---
-    /// If true, environment uses Perlin/fBm time component.
-    pub env_use_perlin_time: bool,
 
     /// Speed of temporal changes in the environment.
     /// Example: 0.0 (static), 0.001 (slow), 0.01 (fast)
@@ -68,9 +66,6 @@ pub struct ExampleConfig {
 
     /// Time scale applied to Perlin evaluation.
     pub env_perlin_time_scale: f64,
-
-    /// Fractional rate controlling environment change magnitude.
-    pub env_change_rate: f64,
 
     // --- perlin / fBm parameters ---
     pub perlin_octaves: usize,
@@ -148,12 +143,11 @@ impl Default for ExampleConfig {
             grid_width: 100,
             seed: 12345,
             resource_scale: 1.0,
-            env_use_perlin_time: true,
+            // perlin time always enabled
             env_time_speed: 0.015,
             env_time_amplitude: 1.0,
             env_perlin_spatial_scale: 0.05,
             env_perlin_time_scale: 0.05,
-            env_change_rate: 0.1,
             perlin_octaves: 5,
             perlin_persistence: 0.5,
             perlin_lacunarity: 2.0,

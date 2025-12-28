@@ -17,8 +17,12 @@ impl Environment {
         }
     }
 
-    pub fn init_perlin(&mut self, seed: u64) {
+    pub fn init_perlin(&mut self, seed: u64, resource_scale: f64) {
         self.perlin_base = Perlin::generate(self.width, seed);
+        // apply resource scale to the perlin base and initialize resources
+        for (i, v) in self.perlin_base.iter_mut().enumerate().take(self.width) {
+            *v = *v * resource_scale;
+        }
         self.resources = self.perlin_base.clone();
     }
 
@@ -34,31 +38,25 @@ impl Environment {
 
     pub fn step(
         &mut self,
-        change_rate: f64,
         seed: u64,
-        use_perlin_time: bool,
         time_speed: f64,
         time_amplitude: f64,
         spatial_scale: f64,
         time_scale: f64,
+        resource_scale: f64,
     ) {
-        if use_perlin_time {
-            self.perlin_time += time_speed;
-            let slice = Perlin::sample_time_slice(
-                self.width,
-                seed,
-                self.perlin_time,
-                spatial_scale,
-                time_scale,
-            );
-            for i in 0..self.width {
-                self.resources[i] = self.perlin_base[i] + slice[i] * time_amplitude;
-            }
-        } else {
-            // simple additive noise
-            for i in 0..self.width {
-                self.resources[i] += change_rate;
-            }
+        // Always advance Perlin temporal evolution slice
+        self.perlin_time += time_speed;
+        let slice = Perlin::sample_time_slice(
+            self.width,
+            seed,
+            self.perlin_time,
+            spatial_scale,
+            time_scale,
+        );
+        for (i, v) in slice.iter().enumerate().take(self.width) {
+            // apply temporal variation and then scale resources by resource_scale
+            self.resources[i] = (self.perlin_base[i] + v * time_amplitude) * resource_scale;
         }
     }
 }

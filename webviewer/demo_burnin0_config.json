@@ -1,0 +1,16 @@
+{
+  "steps": 20,
+  "report_interval": 1,
+  "burn_in": 0,
+  "write_frames": true,
+  "write_config": true,
+  "webviewer_base": "webviewer",
+  "sim_prefix": "sim",
+  "sim_number": 9999,
+  "sim_digits": 4,
+  "frames_filename": "sim9999/frames.tsv",
+  "env_out_path": "sim9999/env.tsv",
+  "individuals_out_path": "sim9999/individuals.jsonl",
+  "initial_population": 100,
+  "show_progress": false
+}

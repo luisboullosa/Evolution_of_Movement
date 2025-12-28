@@ -11,7 +11,7 @@ fn main() {
                 cfg_path = Some(p);
             }
         } else if a.starts_with("--config=") {
-            cfg_path = a.splitn(2, '=').nth(1).map(|s| s.to_string());
+            cfg_path = a.split_once('=').map(|x| x.1.to_string());
         }
     }
     let cfg = if let Some(p) = cfg_path {
