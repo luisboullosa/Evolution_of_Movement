@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Population-stability scan driver using the Rust simulator.
-Performs a 2D sweep over `movement_cost_factor` and `maintenance_cost_per_node`,
+Performs a sweep over an expanded parameter grid. The scan,
 runs short sims, records final population size, then runs deeper sims for promising
 parameter sets (final_pop >= threshold).
 
 Usage:
-  python scripts/scan_rust_population_scan.py --workers 4 --steps 2000 --initial-population 500
+  python scripts/scan_rust_population_scan.py --workers 4 --steps 2000 --initial-population 500 --pilot --no-deep --no-write-outputs 
 """
 import os
 import json
@@ -73,35 +73,19 @@ else:
 # build product or sampled set
 pairs = None
 if args.sample and args.sample > 0:
-    # sampling mode: draw values uniformly across the min/max of each list
+    # sampling mode (discrete): draw parameter values by randomly choosing
+    # from the provided discrete lists so sampled values remain on the grid.
     if args.seed is not None:
         random.seed(args.seed)
-    def sample_range(values, log=False):
-        lo = min(values)
-        hi = max(values)
-        if log:
-            # sample log-uniform; avoid math domain errors when zeros or negatives are present
-            pos = [v for v in values if v > 0]
-            if pos:
-                lo_p = min(pos)
-                hi_p = max(pos)
-                return 10 ** random.uniform(math.log10(lo_p), math.log10(hi_p))
-            else:
-                # no positive values to do log-sampling on; fallback to uniform
-                return random.uniform(lo, hi)
-        else:
-            return random.uniform(lo, hi)
-
-    import math
     sampled = []
     for i in range(args.sample):
-        mv = sample_range(movement_vals, log=False)
-        mc = sample_range(maintenance_vals, log=True)
-        repro_thr = sample_range(repro_thresholds, log=False)
-        repro_cost = sample_range(repro_costs, log=False)
-        env_time_speed = sample_range(env_time_speeds, log=False)
-        death_risk = sample_range(death_risks, log=True)
-        # sample grid width discretely from grid_vals
+        mv = random.choice(movement_vals)
+        mc = random.choice(maintenance_vals)
+        repro_thr = random.choice(repro_thresholds)
+        repro_cost = random.choice(repro_costs)
+        env_time_speed = random.choice(env_time_speeds)
+        death_risk = random.choice(death_risks)
+        # sample grid width and resource scale discretely
         gw = random.choice(grid_vals)
         rscales = random.choice(resource_scales)
         sampled.append((mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw))
@@ -114,6 +98,121 @@ os.makedirs(os.path.dirname(outdir) or '.', exist_ok=True)
 # create a single timestamped jobs folder to hold only the three summary files
 jobs_dir = os.path.join(outdir, f"jobs{int(time.time())}")
 os.makedirs(jobs_dir, exist_ok=True)
+
+# Write a small manifest describing the planned scan so a live Plotly viewer
+# can initialize axes and know how many jobs to expect.
+try:
+        manifest = {
+                'total_jobs': len(pairs),
+                'movement_vals': movement_vals,
+                'maintenance_vals': maintenance_vals,
+                'resource_scales': resource_scales,
+                'grid_widths': grid_vals,
+                'param_names': ['movement_cost_factor', 'maintenance_cost_per_node', 'reproduction_threshold', 'reproduction_cost', 'env_time_speed', 'death_risk', 'resource_scale', 'grid_width']
+        }
+        manifest_path = os.path.join(jobs_dir, 'scan_manifest.json')
+        with open(manifest_path, 'w', encoding='utf-8') as mf:
+                json.dump(manifest, mf)
+        # also write a tiny Plotly HTML viewer into the jobs dir that polls progress.json
+        html_path = os.path.join(jobs_dir, 'plotly_live.html')
+        html_content = r'''
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Scan Live Viewer</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>body{font-family:Arial,Helvetica,sans-serif;margin:8px} #controls{margin-bottom:8px}</style>
+</head>
+<body>
+    <h3>Scan Live Viewer</h3>
+    <div id="controls">
+        Response: <select id="resp"><option value="final_population">final_population</option><option value="prop_moved">prop_moved</option><option value="survived">survived</option></select>
+        Resource scale: <select id="rs"></select>
+        Grid width: <select id="gw"></select>
+        Poll interval (s): <input id="interval" type="number" value="5" style="width:60px" />
+        <button id="start">Start</button>
+        <button id="stop">Stop</button>
+    </div>
+    <div id="plot" style="width:100%;height:700px"></div>
+
+    <script>
+    const manifestUrl = 'scan_manifest.json';
+    const progressUrl = 'progress.json';
+    let manifest = null;
+    let pollTimer = null;
+
+    async function loadManifest(){
+        try{ manifest = await fetch(manifestUrl).then(r=>r.json()); }
+        catch(e){ console.warn('Could not load manifest', e); manifest = null; }
+        if(!manifest) return;
+        const rsSel = document.getElementById('rs');
+        const gwSel = document.getElementById('gw');
+        rsSel.innerHTML = manifest.resource_scales.map(v=>`<option value="${v}">${v}</option>`).join('');
+        gwSel.innerHTML = manifest.grid_widths.map(v=>`<option value="${v}">${v}</option>`).join('');
+    }
+
+    function makeEmptyGrid(movement_vals, maintenance_vals){
+        const z = [];
+        for(let i=0;i<maintenance_vals.length;i++){
+            z.push(new Array(movement_vals.length).fill(null));
+        }
+        return z;
+    }
+
+    async function pollAndUpdate(){
+        try{
+            const data = await fetch(progressUrl).then(r=>r.json());
+            // data is array of entries
+            const resp = document.getElementById('resp').value;
+            const rs = parseFloat(document.getElementById('rs').value);
+            const gw = parseInt(document.getElementById('gw').value);
+            const movement_vals = manifest.movement_vals;
+            const maintenance_vals = manifest.maintenance_vals;
+            // build mapping from (mv,mc,rs,gw) -> metric
+            const metrics = {};
+            for(const e of data){
+                const key = `${e.movement_cost_factor}|${e.maintenance_cost_per_node}|${e.resource_scale}|${e.grid_width}`;
+                metrics[key] = e;
+            }
+            const z = makeEmptyGrid(movement_vals, maintenance_vals);
+            for(let i=0;i<maintenance_vals.length;i++){
+                for(let j=0;j<movement_vals.length;j++){
+                    const key = `${movement_vals[j]}|${maintenance_vals[i]}|${rs}|${gw}`;
+                    const obj = metrics[key];
+                    if(obj){
+                        if(resp==='survived') z[i][j] = (obj.final_population>0)?1:0;
+                        else z[i][j] = obj[resp]!=null?obj[resp]:null;
+                    } else { z[i][j] = null; }
+                }
+            }
+            const dataPlot = [{ z: z, x: movement_vals, y: maintenance_vals, type: 'heatmap', colorscale: resp==='survived'?[[0,'black'],[1,'yellow']]:undefined, hoverongaps:false }];
+            const layout = { title: `${resp} (rs=${rs}, gw=${gw})`, xaxis:{title:'movement_cost_factor'}, yaxis:{title:'maintenance_cost_per_node'}};
+            Plotly.react('plot', dataPlot, layout, {responsive:true});
+        }catch(e){ console.warn('poll error', e); }
+    }
+
+    document.getElementById('start').addEventListener('click', ()=>{
+        const iv = Math.max(1, parseInt(document.getElementById('interval').value)||5);
+        if(pollTimer) clearInterval(pollTimer);
+        pollAndUpdate();
+        pollTimer = setInterval(pollAndUpdate, iv*1000);
+    });
+    document.getElementById('stop').addEventListener('click', ()=>{ if(pollTimer) clearInterval(pollTimer); pollTimer=null; });
+
+    loadManifest();
+    </script>
+</body>
+</html>
+'''
+        try:
+                with open(html_path, 'w', encoding='utf-8') as hf:
+                        hf.write(html_content)
+        except Exception:
+                pass
+        print(f'Wrote scan manifest: {manifest_path} and live viewer: {html_path}')
+except Exception:
+        pass
 
 # create temp config files (in system temp dir) so the jobs folder doesn't
 # accumulate per-job JSON files; these temp files will be removed later.
@@ -142,9 +241,9 @@ for idx, tpl in enumerate(pairs):
         "webviewer_base": os.path.normpath(jobs_dir),
         "sim_prefix": f"job{idx}_",
     }
-    # For pilot runs, introduce phenotypic variation via ratiate multiplier
+    # For pilot runs, introduce phenotypic variation via radiate multiplier
     if args.pilot:
-        cfg['ratiate'] = 10
+        cfg['radiate'] = 1000
     tf = tempfile.NamedTemporaryFile(prefix=f"scan_job_{idx}_", suffix=".json", delete=False, mode="w", encoding="utf-8")
     json.dump(cfg, tf)
     tf.flush()
@@ -486,6 +585,137 @@ with open(prom_csv, 'w', encoding='utf-8') as pf:
         mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw, fp = entry
         pf.write(f"{mv},{mc},{rscales},{gw},{fp}\n")
 
+# ---- Post-processing: matrix-of-matrices heatmap generator ----
+def plot_matrix_of_matrices(results_csv, out_dir):
+    try:
+        import numpy as np
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib import colors
+    except Exception:
+        print('Matplotlib / numpy not available; skipping heatmap generation')
+        return
+
+    # read results into list of dicts
+    rows = []
+    with open(results_csv, 'r', encoding='utf-8') as rf:
+        r = csv.DictReader(rf)
+        for row in r:
+            rows.append(row)
+
+    if not rows:
+        print('No results to plot')
+        return
+
+    # detect unique axes
+    def unique_sorted(key, cast=float):
+        vals = set()
+        for row in rows:
+            try:
+                vals.add(cast(row.get(key, '') or 0))
+            except Exception:
+                pass
+        return sorted(vals)
+
+    movement_vals_r = unique_sorted('movement_cost_factor', float)
+    maintenance_vals_r = unique_sorted('maintenance_cost_per_node', float)
+    resource_scales_r = unique_sorted('resource_scale', float)
+    grid_widths_r = unique_sorted('grid_width', int)
+
+    if not movement_vals_r or not maintenance_vals_r:
+        print('Insufficient parameter axes for plotting')
+        return
+
+    # build mapping from parameter tuple -> metrics
+    metrics = {}
+    for row in rows:
+        try:
+            mv = float(row.get('movement_cost_factor') or 0)
+            mc = float(row.get('maintenance_cost_per_node') or 0)
+            rs = float(row.get('resource_scale') or 0)
+            gw = int(float(row.get('grid_width') or 0))
+            fp = float(row.get('final_population') or 0)
+            pm = float(row.get('prop_moved') or 0)
+            metrics[(mv, mc, rs, gw)] = {'final_population': fp, 'prop_moved': pm}
+        except Exception:
+            continue
+
+    # helper to build inner matrix for a given resource_scale & grid_width
+    def inner_matrix(rs, gw, key):
+        M = np.full((len(maintenance_vals_r), len(movement_vals_r)), np.nan, dtype=float)
+        for i, mc in enumerate(maintenance_vals_r):
+            for j, mv in enumerate(movement_vals_r):
+                val = metrics.get((mv, mc, rs, gw))
+                if val is not None:
+                    if key == 'survived':
+                        M[i, j] = 1.0 if float(val.get('final_population', 0)) > 0 else 0.0
+                    else:
+                        M[i, j] = float(val.get(key, np.nan))
+        return M
+
+    # responses to plot
+    responses = {
+        'final_population': dict(cmap='viridis', title='Final population'),
+        'prop_moved': dict(cmap='plasma', title='Proportion moved'),
+        'survived': dict(cmap=colors.ListedColormap(['black', 'yellow']), title='Survived (binary)')
+    }
+
+    # create outer grid (rows = resource_scales, cols = grid_widths)
+    rows_out = len(resource_scales_r)
+    cols_out = len(grid_widths_r)
+
+    for resp_key, opts in responses.items():
+        fig_w = max(6, cols_out * 2)
+        fig_h = max(4, rows_out * 2)
+        fig, axes = plt.subplots(rows_out, cols_out, figsize=(fig_w, fig_h), squeeze=False)
+
+        # find global vmin/vmax for consistent color scaling (except for binary 'survived')
+        if resp_key != 'survived':
+            all_vals = []
+            for rs in resource_scales_r:
+                for gw in grid_widths_r:
+                    M = inner_matrix(rs, gw, resp_key)
+                    all_vals.append(M)
+            all_concat = np.concatenate([m.flatten() for m in all_vals]) if all_vals else np.array([])
+            finite = all_concat[np.isfinite(all_concat)]
+            if finite.size:
+                vmin = float(np.nanmin(finite))
+                vmax = float(np.nanmax(finite))
+                if vmin == vmax:
+                    vmax = vmin + 1.0
+            else:
+                vmin, vmax = 0.0, 1.0
+        else:
+            vmin, vmax = 0.0, 1.0
+
+        for i, rs in enumerate(resource_scales_r):
+            for j, gw in enumerate(grid_widths_r):
+                ax = axes[i][j]
+                M = inner_matrix(rs, gw, resp_key)
+                # mask NaNs to show as light gray
+                M_masked = np.ma.masked_invalid(M)
+                im = ax.imshow(M_masked, aspect='auto', interpolation='nearest', cmap=opts.get('cmap'), vmin=vmin, vmax=vmax)
+                ax.set_xticks(range(len(movement_vals_r)))
+                ax.set_xticklabels([str(v) for v in movement_vals_r], rotation=90, fontsize=6)
+                ax.set_yticks(range(len(maintenance_vals_r)))
+                ax.set_yticklabels([str(v) for v in maintenance_vals_r], fontsize=6)
+                ax.set_title(f"rs={rs}, gw={gw}", fontsize=8)
+                ax.tick_params(axis='both', which='both', length=0)
+        # colorbar
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6)
+        fig.suptitle(opts.get('title', resp_key))
+        out_path = os.path.join(out_dir, f'heatmap_{resp_key}.png')
+        fig.tight_layout(rect=(0, 0.03, 1, 0.95))
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        print(f'Wrote heatmap: {out_path}')
+
+# generate heatmaps from the short-run results
+try:
+    plot_matrix_of_matrices(results_csv, jobs_dir)
+except Exception as e:
+    print('Error generating heatmaps:', e)
 if promising:
     if args.no_deep:
         print(f"Found {len(promising)} promising parameter sets but --no-deep specified; skipping deep sims")

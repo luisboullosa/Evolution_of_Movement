@@ -4,6 +4,7 @@ use crate::individual::Individual;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand_distr::Normal;
+use rand_distr::Distribution;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::fs::File;
@@ -28,6 +29,54 @@ pub struct Simulation {
     // reusable NN buffers to avoid per-step allocations
     pub nn_hidden_buf: Vec<f64>,
     pub nn_out2_buf: Vec<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_and_init_population() {
+        let mut cfg = Config::default();
+        cfg.grid_width = 10;
+        cfg.nn_nodes = 2;
+        cfg.nn_inputs = 1;
+        cfg.nn_layers = 1;
+        cfg.nn_nodes2 = 0;
+        cfg.randomize_start_positions = true;
+        cfg.radiate = 0;
+        cfg.seed = 42;
+
+        let mut sim = Simulation::new(&cfg);
+        assert_eq!(sim.individuals.len(), 0);
+        sim.init_population(5);
+        assert_eq!(sim.individuals.len(), 5);
+        assert_eq!(sim.next_id, 6);
+        for ind in sim.individuals.iter() {
+            assert!(ind.position < cfg.grid_width as usize);
+            assert!(ind.resources > 0.0);
+        }
+    }
+
+    #[test]
+    fn step_and_visualization_runs() {
+        let mut cfg = Config::default();
+        cfg.grid_width = 8;
+        cfg.nn_nodes = 2;
+        cfg.nn_inputs = 1;
+        cfg.nn_layers = 1;
+        cfg.nn_nodes2 = 0;
+        cfg.randomize_start_positions = true;
+        cfg.radiate = 0;
+        cfg.seed = 7;
+        cfg.vis_height = 6;
+
+        let mut sim = Simulation::new(&cfg);
+        sim.init_population(3);
+        sim.step();
+        let out = sim.get_visualization(4, cfg.vis_height as usize);
+        assert!(!out.is_empty());
+    }
 }
 
 impl Simulation {
@@ -72,15 +121,12 @@ impl Simulation {
                 self.config.nn_nodes2 as usize,
             );
             // initialize weights.
-            // If `ratiate` is set (>0) we start from default weights (zeros)
-            // and apply simulated mutations at effective rate = mutation_rate * ratiate.
-            if self.config.ratiate > 0 {
-                let mut eff = (self.config.mutation_rate as f64) * (self.config.ratiate as f64);
+            // If `radiate` is set (>0) we start from default weights (zeros)
+            // and apply simulated mutations at effective rate = mutation_rate * radiate.
+            if self.config.radiate > 0 {
+                let mut eff = (self.config.mutation_rate as f64) * (self.config.radiate as f64);
                 if eff.is_nan() || eff < 0.0 {
                     eff = 0.0;
-                }
-                if eff > 1.0 {
-                    eff = 1.0;
                 }
                 let normal = Normal::new(0.0, self.config.mutation_sigma).unwrap();
                 for w in nn.weights.iter_mut() {

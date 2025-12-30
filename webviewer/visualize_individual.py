@@ -17,26 +17,48 @@ import glob
 import sys
 import json
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button, TextBox
+import matplotlib
+
+# Decide headless mode early (before importing pyplot) so we can set a
+# non-interactive backend when running in headless/screenshot mode.
+explicit_headless = False
+if "--headless" in sys.argv or "--screenshot" in sys.argv:
+    explicit_headless = True
+if os.environ.get("WEBVIEWER_HEADLESS", "").lower() in ("1", "true", "yes"):
+    explicit_headless = True
+if explicit_headless:
+    try:
+        matplotlib.use('Agg')
+    except Exception:
+        pass
+
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.widgets import Slider, Button, TextBox  # noqa: E402
+from typing import Optional, Any  # noqa: E402
 
 # helper modules import their own patches/networkx when needed
-import random
+import random  # noqa: E402
 
 # try to import networkx for richer graph layouts; fall back if not available
 try:
     # presence of networkx is useful for better NN layouts in graphs_nn
     import importlib
 
-    HAS_NX = importlib.util.find_spec("networkx") is not None
+    # importlib.util may not be exposed to some static analyzers or runtimes;
+    # access it safely and provide a fallback to importlib.find_spec when needed.
+    _util = getattr(importlib, "util", None)
+    if _util is not None and getattr(_util, "find_spec", None) is not None:
+        HAS_NX = _util.find_spec("networkx") is not None
+    else:
+        # fallback to top-level find_spec if available, otherwise assume absent
+        HAS_NX = getattr(importlib, "find_spec", lambda name: None)("networkx") is not None
 except Exception:
     HAS_NX = False
 
 # import modular graph helpers (they live in the same directory)
-import graphs_env as g_env
-import graphs_nn as g_nn
-import graphs_resp_fitness as g_rf
-from matplotlib.collections import LineCollection
+import graphs_nn as g_nn  # noqa: E402
+import graphs_resp_fitness as g_rf  # noqa: E402
+from matplotlib.collections import LineCollection  # noqa: E402
 
 
 # --- small inline helpers used only as fallbacks (keeps main code concise) ---
@@ -47,13 +69,48 @@ arg = sys.argv[1] if len(sys.argv) > 1 else "webviewer"
 base = arg
 
 # widget placeholders (defined later in setup_visualizer)
-btn = None
-btn_resp = None
-btn_prev = None
-btn_next = None
-btn_rand = None
-txtbox = None
-slider = None
+btn: Optional[Button] = None
+btn_resp: Optional[Button] = None
+btn_prev: Optional[Button] = None
+btn_next: Optional[Button] = None
+btn_rand: Optional[Button] = None
+txtbox: Optional[TextBox] = None
+slider: Optional[Slider] = None
+
+
+def _safe_set_label(widget: Optional[Any], text: str) -> None:
+    if widget is None:
+        return
+    lab = getattr(widget, "label", None)
+    if lab is None:
+        return
+    try:
+        lab.set_text(text)
+    except Exception:
+        pass
+
+
+def _set_lines_ydata(lines_obj: Any, ydata: Any) -> None:
+    """Safely set y-data on a Line2D or nested tuple/list of Line2D objects.
+
+    This guards against the common pattern where plotting helpers return
+    nested tuples/tuples-of-tuples. It recursively descends and calls
+    `set_ydata` on any object that exposes that method.
+    """
+    if lines_obj is None:
+        return
+    # direct Line2D-like object
+    if hasattr(lines_obj, "set_ydata"):
+        try:
+            lines_obj.set_ydata(ydata)
+        except Exception:
+            pass
+        return
+    # iterable (tuple/list/numpy array) of line objects
+    if isinstance(lines_obj, (list, tuple, np.ndarray)):
+        for elem in lines_obj:
+            _set_lines_ydata(elem, ydata)
+        return
 
 # Layout / UI coordinates (moved here from webviewer/graph_coords.py)
 # Tweak these values to adjust figure layout without editing other code.
@@ -229,10 +286,10 @@ else:
             }
         )
 # build list of unique IDs across frames and default selected ID
-all_ids = set()
+all_ids_set = set()
 for ind in ind_list:
-    all_ids.update(ind["ids"])
-all_ids = sorted(list(all_ids))
+    all_ids_set.update(ind["ids"])
+all_ids: list = sorted(list(all_ids_set))
 selected_id = all_ids[0] if len(all_ids) > 0 else None
 sel_index = 0
 
@@ -285,7 +342,9 @@ def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, m
         except Exception:
             lw = np.full(len(segs), min_width)
 
-    lc = LineCollection(segs, linewidths=lw, colors=color, alpha=0.9, zorder=1)
+    # matplotlib LineCollection expects a sequence of segments (list of array-likes).
+    # Convert the numpy ndarray to a list to satisfy type-checkers and some backends.
+    lc = LineCollection(segs.tolist(), linewidths=lw, colors=color, alpha=0.9, zorder=1)
     ax.add_collection(lc)
     try:
         ax.set_xlim(env_idx.min(), env_idx.max())
@@ -349,12 +408,12 @@ def setup_visualizer():
         pass
     # place a dedicated info area inside the sidebar (top portion)
     sp = ax_sidebar.get_position()
-    info_pos = [
+    info_pos = (
         sp.x0 + 0.03 * sp.width,
         sp.y0 + 0.45 * sp.height,
         0.94 * sp.width,
         0.5 * sp.height,
-    ]
+    )
     ax_info = fig.add_axes(info_pos)
     ax_info.axis("off")
     ax_info.patch.set_facecolor("white")
@@ -409,12 +468,12 @@ def setup_visualizer():
 
     # slider (place at bottom of sidebar)
     sp = ax_sidebar.get_position()
-    slider_pos = [
+    slider_pos = (
         sp.x0 + 0.03 * sp.width,
         sp.y0 + 0.04 * sp.height,
         0.94 * sp.width,
         0.06 * sp.height,
-    ]
+    )
     ax_slider = fig.add_axes(slider_pos)
     slider = Slider(ax_slider, "timepoint", 0, n_frames - 1, valinit=0, valstep=1)
     ax_slider.set_facecolor(AX_SLIDER_FACECOLOR)
@@ -436,34 +495,34 @@ def setup_visualizer():
     # top area start
     top_y = sp.y0 + 0.16 * sp.height + 4 * (btn_h + gap)
     # Play button (full width)
-    play_pos = [sp.x0 + 0.03 * sp.width, top_y, 0.94 * sp.width, btn_h]
+    play_pos = (sp.x0 + 0.03 * sp.width, top_y, 0.94 * sp.width, btn_h)
     ax_play = fig.add_axes(play_pos)
     ax_play.set_zorder(50)
     btn = Button(ax_play, "Play")
     # play button created
     # Resp toggle beneath play
-    resp_pos = [sp.x0 + 0.03 * sp.width, top_y - (btn_h + gap), 0.94 * sp.width, btn_h]
+    resp_pos = (sp.x0 + 0.03 * sp.width, top_y - (btn_h + gap), 0.94 * sp.width, btn_h)
     ax_resp_toggle = fig.add_axes(resp_pos)
     ax_resp_toggle.set_zorder(50)
     btn_resp = Button(ax_resp_toggle, "Abs")
     # Prev/Next/Random row
     row_y = top_y - 2 * (btn_h + gap)
-    ax_prev = fig.add_axes([left_x, row_y, btn_w, btn_h])
+    ax_prev = fig.add_axes((left_x, row_y, btn_w, btn_h))
     ax_prev.set_zorder(50)
     btn_prev = Button(ax_prev, "<")
-    ax_next = fig.add_axes([right_x, row_y, btn_w, btn_h])
+    ax_next = fig.add_axes((right_x, row_y, btn_w, btn_h))
     ax_next.set_zorder(50)
     btn_next = Button(ax_next, ">")
-    ax_rand = fig.add_axes([left_x, row_y - (btn_h + gap), btn_w, btn_h])
+    ax_rand = fig.add_axes((left_x, row_y - (btn_h + gap), btn_w, btn_h))
     ax_rand.set_zorder(50)
     btn_rand = Button(ax_rand, "R")
     # Text box for ID entry below random
-    txt_pos = [
+    txt_pos = (
         left_x,
         row_y - 2 * (btn_h + gap),
         btn_w + (0.5 * sp.width - btn_w),
         btn_h,
-    ]
+    )
     ax_text = fig.add_axes(txt_pos)
     ax_text.set_zorder(50)
     txtbox = TextBox(ax_text, "ID ")
@@ -504,21 +563,15 @@ def toggle(event):
                     pass
     except Exception:
         pass
-    try:
-        btn.label.set_text("Pause" if playing["val"] else "Play")
-    except Exception:
-        pass
+    _safe_set_label(btn, "Pause" if playing.get("val", False) else "Play")
 
 
 def toggle_resp(event):
     resp_abs_mode["val"] = not resp_abs_mode["val"]
-    try:
-        btn_resp.label.set_text("Abs" if resp_abs_mode["val"] else "Signed")
-    except Exception:
-        pass
+    _safe_set_label(btn_resp, "Abs" if resp_abs_mode.get("val", False) else "Signed")
     # force a redraw with current slider value
     try:
-        update(slider.val)
+        update(getattr(slider, "val", 0))
     except Exception:
         pass
 
@@ -528,7 +581,7 @@ def on_text_submit(text):
     try:
         val = int(text)
         selected_id = val
-        update(slider.val)
+        update(getattr(slider, "val", 0))
     except ValueError:
         # ignore invalid integer input
         pass
@@ -551,12 +604,13 @@ def step_selected(delta):
         idx = 0
     idx = max(0, min(len(all_ids) - 1, idx + int(delta)))
     selected_id = all_ids[idx]
+    if txtbox is not None:
+        try:
+            txtbox.set_val(str(selected_id))
+        except Exception:
+            pass
     try:
-        txtbox.set_val(str(selected_id))
-    except Exception:
-        pass
-    try:
-        update(slider.val)
+        update(getattr(slider, "val", 0))
     except Exception:
         pass
 
@@ -569,7 +623,7 @@ def step_selected_in_frame(delta):
     """
     global selected_id
     try:
-        cur = int(slider.val)
+        cur = int(getattr(slider, "val", 0))
         ids = ind_list[cur].get("ids", [])
         if not ids:
             return
@@ -581,12 +635,13 @@ def step_selected_in_frame(delta):
         # advance and wrap around within the current frame's IDs
         idx = (idx + int(delta)) % len(ids)
         selected_id = ids[idx]
+        if txtbox is not None:
+            try:
+                txtbox.set_val(str(selected_id))
+            except Exception:
+                pass
         try:
-            txtbox.set_val(str(selected_id))
-        except Exception:
-            pass
-        try:
-            update(slider.val)
+            update(getattr(slider, "val", 0))
         except Exception:
             pass
     except Exception:
@@ -611,16 +666,17 @@ def on_rand(event):
     global selected_id
     # pick a random individual present in the current frame
     try:
-        i = int(slider.val)
+        i = int(getattr(slider, "val", 0))
         ind = ind_list[i]
         if len(ind["ids"]) == 0:
             return
         selected_id = random.choice(ind["ids"])
-        try:
-            txtbox.set_val(str(selected_id))
-        except Exception:
-            pass
-        update(slider.val)
+        if txtbox is not None:
+            try:
+                txtbox.set_val(str(selected_id))
+            except Exception:
+                pass
+        update(getattr(slider, "val", 0))
     except Exception:
         pass
 
@@ -629,9 +685,13 @@ def anim_step():
     # advance frames while playing; stop at final frame instead of wrapping
     if playing.get("val", False):
         try:
-            cur = int(slider.val)
+            cur = int(getattr(slider, "val", 0))
             if cur < n_frames - 1:
-                slider.set_val(cur + 1)
+                if slider is not None:
+                    try:
+                        slider.set_val(cur + 1)
+                    except Exception:
+                        pass
             else:
                 # reached the last frame: stop playing and timer
                 playing["val"] = False
@@ -640,10 +700,7 @@ def anim_step():
                         timer.stop()
                 except Exception:
                     pass
-                try:
-                    btn.label.set_text("Play")
-                except Exception:
-                    pass
+                _safe_set_label(btn, "Play")
         except Exception:
             pass
 
@@ -700,7 +757,7 @@ def update(frame_idx):
         except Exception:
             # fallback: clear collections from axis
             try:
-                ax_env.collections.clear()
+                ax_env.collections.clear()  # type: ignore[attr-defined]
             except Exception:
                 pass
         # draw new density-aware environment line using current individuals positions
@@ -865,14 +922,24 @@ def update(frame_idx):
     #  - flat: center varies but neighbors set to same constant (flat landscape)
     try:
         # prepare constant neighbor and occupancy values
-        left_const = left_val
-        right_const = right_val
-        occ_const = float(occupancy)
+        # ensure local variables are defined even if NN is missing
+        try:
+            left_const = left_val
+        except NameError:
+            left_const = 0.0
+        try:
+            right_const = right_val
+        except NameError:
+            right_const = 0.0
+        try:
+            occ_const = float(occupancy)
+        except NameError:
+            occ_const = 0.0
         # helper to make an input vector for given center value
-        def make_input(cval, l=left_const, r=right_const, o=occ_const, res_val=float(resources)):
+        def make_input(cval, left=left_const, right=right_const, occ=occ_const, res_val=float(resources)):
             # build vector with left, center, right, occupancy, internal resources
             if use_nn is None:
-                return [l, cval, r, o, res_val]
+                return [left, cval, right, occ, res_val]
             # respect nn_use_occupancy if present in the nn dict
             try:
                 nn_use_occ = True
@@ -880,43 +947,104 @@ def update(frame_idx):
                     nn_use_occ = bool(use_nn.get("nn_use_occupancy", True))
             except Exception:
                 nn_use_occ = True
-            vec = [l, cval, r]
+            vec = [left, cval, right]
             if nn_use_occ:
-                vec.append(o)
+                vec.append(occ)
             # always append individual's internal resources as last input
             vec.append(res_val)
             return vec
 
         ys_peak = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval))
         # slope right: use center values but bias inputs to the right by mixing towards right_const
-        ys_slope_r = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=(left_const + right_const) / 2.0, r=right_const))
+        ys_slope_r = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(
+                xval, left=(left_const + right_const) / 2.0, right=right_const
+            ),
+        )
         # slope left: bias towards left
-        ys_slope_l = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=left_const, r=(left_const + right_const) / 2.0))
+        ys_slope_l = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(
+                xval, left=left_const, right=(left_const + right_const) / 2.0
+            ),
+        )
         # sink: invert center magnitude to simulate sink-like response
-        ys_sink = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(-xval, l=left_const, r=right_const))
+        ys_sink = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(-xval, left=left_const, right=right_const),
+        )
         # flat: neighbors equal to center value (flat landscape)
-        ys_flat = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=xval, r=xval))
+        ys_flat = g_nn.compute_nn_response_for(
+            xs, use_nn, input_builder=lambda xval: make_input(xval, left=xval, right=xval)
+        )
 
         # now compute 'full occupancy' variants with occupancy forced to a large number (1000)
         FULL_OCC = 1000.0
-        ys_peak_full = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, o=FULL_OCC))
-        ys_slope_r_full = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=(left_const + right_const) / 2.0, r=right_const, o=FULL_OCC))
-        ys_slope_l_full = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=left_const, r=(left_const + right_const) / 2.0, o=FULL_OCC))
-        ys_sink_full = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(-xval, l=left_const, r=right_const, o=FULL_OCC))
-        ys_flat_full = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xval: make_input(xval, l=xval, r=xval, o=FULL_OCC))
+        ys_peak_full = g_nn.compute_nn_response_for(
+            xs, use_nn, input_builder=lambda xval: make_input(xval, occ=FULL_OCC)
+        )
+        ys_slope_r_full = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(
+                xval, left=(left_const + right_const) / 2.0, right=right_const, occ=FULL_OCC
+            ),
+        )
+        ys_slope_l_full = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(
+                xval, left=left_const, right=(left_const + right_const) / 2.0, occ=FULL_OCC
+            ),
+        )
+        ys_sink_full = g_nn.compute_nn_response_for(
+            xs,
+            use_nn,
+            input_builder=lambda xval: make_input(
+                -xval, left=left_const, right=right_const, occ=FULL_OCC
+            ),
+        )
+        ys_flat_full = g_nn.compute_nn_response_for(
+            xs, use_nn, input_builder=lambda xval: make_input(xval, left=xval, right=xval, occ=FULL_OCC)
+        )
+
+        # ensure boolean and array-typed results to keep type-checkers happy
+        resp_abs = bool(resp_abs_mode.get("val", False))
+
+        def _ensure_arr(x: Any) -> np.ndarray:
+            try:
+                return np.asarray(x, dtype=float)
+            except Exception:
+                return np.full_like(xs, np.nan, dtype=float)
+
+        ys_peak_a = _ensure_arr(ys_peak)
+        ys_slope_r_a = _ensure_arr(ys_slope_r)
+        ys_slope_l_a = _ensure_arr(ys_slope_l)
+        ys_sink_a = _ensure_arr(ys_sink)
+        ys_flat_a = _ensure_arr(ys_flat)
+
+        ys_peak_full_a = _ensure_arr(ys_peak_full)
+        ys_slope_r_full_a = _ensure_arr(ys_slope_r_full)
+        ys_slope_l_full_a = _ensure_arr(ys_slope_l_full)
+        ys_sink_full_a = _ensure_arr(ys_sink_full)
+        ys_flat_full_a = _ensure_arr(ys_flat_full)
 
         ys_display_dict = {
-            "peak": np.abs(ys_peak) if resp_abs_mode.get("val", False) else ys_peak,
-            "slope_r": np.abs(ys_slope_r) if resp_abs_mode.get("val", False) else ys_slope_r,
-            "slope_l": np.abs(ys_slope_l) if resp_abs_mode.get("val", False) else ys_slope_l,
-            "sink": np.abs(ys_sink) if resp_abs_mode.get("val", False) else ys_sink,
-            "flat": np.abs(ys_flat) if resp_abs_mode.get("val", False) else ys_flat,
+            "peak": np.abs(ys_peak_a) if resp_abs else ys_peak_a,
+            "slope_r": np.abs(ys_slope_r_a) if resp_abs else ys_slope_r_a,
+            "slope_l": np.abs(ys_slope_l_a) if resp_abs else ys_slope_l_a,
+            "sink": np.abs(ys_sink_a) if resp_abs else ys_sink_a,
+            "flat": np.abs(ys_flat_a) if resp_abs else ys_flat_a,
             # full occupancy variants
-            "peak_full": np.abs(ys_peak_full) if resp_abs_mode.get("val", False) else ys_peak_full,
-            "slope_r_full": np.abs(ys_slope_r_full) if resp_abs_mode.get("val", False) else ys_slope_r_full,
-            "slope_l_full": np.abs(ys_slope_l_full) if resp_abs_mode.get("val", False) else ys_slope_l_full,
-            "sink_full": np.abs(ys_sink_full) if resp_abs_mode.get("val", False) else ys_sink_full,
-            "flat_full": np.abs(ys_flat_full) if resp_abs_mode.get("val", False) else ys_flat_full,
+            "peak_full": np.abs(ys_peak_full_a) if resp_abs else ys_peak_full_a,
+            "slope_r_full": np.abs(ys_slope_r_full_a) if resp_abs else ys_slope_r_full_a,
+            "slope_l_full": np.abs(ys_slope_l_full_a) if resp_abs else ys_slope_l_full_a,
+            "sink_full": np.abs(ys_sink_full_a) if resp_abs else ys_sink_full_a,
+            "flat_full": np.abs(ys_flat_full_a) if resp_abs else ys_flat_full_a,
         }
     except Exception:
         # If computing the scenario-specific curves fails, avoid falling back
@@ -928,7 +1056,7 @@ def update(frame_idx):
         try:
             if use_nn is not None and isinstance(use_nn, dict):
                 w = use_nn.get("weights", [])
-                b = use_nn.get("biases", [])
+                _ = use_nn.get("biases", [])
                 # single node and single scalar-weight layout: weights is list of scalars of length 1
                 if len(w) == 1 and not hasattr(w[0], "__iter__"):
                     fallback_allowed = True
@@ -937,18 +1065,20 @@ def update(frame_idx):
 
         if fallback_allowed:
             ys = g_nn.compute_nn_response_for(xs, use_nn)
+            resp_abs_fallback = bool(resp_abs_mode.get("val", False))
+            ys_a = np.asarray(ys, dtype=float)
             ys_display_dict = {
-                "peak": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "slope_r": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "slope_l": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "sink": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "flat": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
+                "peak": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "slope_r": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "slope_l": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "sink": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "flat": np.abs(ys_a) if resp_abs_fallback else ys_a,
                 # full occupancy variants (same single-curve fallback)
-                "peak_full": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "slope_r_full": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "slope_l_full": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "sink_full": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
-                "flat_full": np.abs(ys) if resp_abs_mode.get("val", False) else ys,
+                "peak_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "slope_r_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "slope_l_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "sink_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
+                "flat_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
             }
         else:
             nan_arr = np.full_like(xs, np.nan)
@@ -985,27 +1115,52 @@ def update(frame_idx):
     except Exception:
         # best-effort fallback inline update using the dict of scenario curves
         try:
-            if isinstance(ln_resp, (list, tuple)) and len(ln_resp) == 5:
+            # robustly set y-data on possibly-nested line objects
+            try:
+                # choose a representative array to fall back to
                 rep = ys_display_dict.get("peak", None)
                 if rep is None:
                     rep = next(iter(ys_display_dict.values()))
-                ln_resp[0].set_ydata(ys_display_dict.get("peak", rep))
-                ln_resp[1].set_ydata(ys_display_dict.get("slope_r", rep))
-                ln_resp[2].set_ydata(ys_display_dict.get("slope_l", rep))
-                ln_resp[3].set_ydata(ys_display_dict.get("sink", rep))
-                ln_resp[4].set_ydata(ys_display_dict.get("flat", rep))
-            else:
-                rep = ys_display_dict.get("peak", None)
-                if rep is None:
-                    rep = next(iter(ys_display_dict.values()))
-                ln_resp.set_ydata(rep)
+                try:
+                    rep_arr = np.asarray(rep, dtype=float)
+                except Exception:
+                    rep_arr = np.full_like(xs, np.nan, dtype=float)
+
+                if isinstance(ln_resp, (list, tuple, np.ndarray)):
+                    # iterate over the first five scenario lines and set each one
+                    for idx, key in enumerate(["peak", "slope_r", "slope_l", "sink", "flat"]):
+                        try:
+                            _set_lines_ydata(ln_resp[idx], ys_display_dict.get(key, rep_arr))
+                        except Exception:
+                            # skip individual failures
+                            pass
+                else:
+                    # single-line case
+                    try:
+                        _set_lines_ydata(ln_resp, rep_arr)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception:
             pass
         try:
             curr_x = float(env_res[pos])
             ln_input_vline.set_xdata([curr_x, curr_x])
             rep = ys_display_dict.get("peak", None) if isinstance(ys_display_dict, dict) else ys_display_dict
-            ln_input_dot.set_data([curr_x], [np.interp(curr_x, xs, rep)])
+            # ensure rep is array-like for numpy.interp and has float dtype
+            try:
+                rep_arr = np.asarray(rep, dtype=float) if rep is not None else np.full_like(xs, np.nan, dtype=float)
+            except Exception:
+                rep_arr = np.full_like(xs, np.nan, dtype=float)
+            try:
+                yval = float(np.interp(curr_x, xs, rep_arr))
+            except Exception:
+                yval = float("nan")
+            try:
+                ln_input_dot.set_data([curr_x], [yval])
+            except Exception:
+                pass
         except Exception:
             pass
         n_nodes = 0
@@ -1024,14 +1179,7 @@ def update(frame_idx):
 
 
 update(0)
-# Only save a screenshot (headless mode) when explicitly requested by the user.
-# Support: CLI flags `--headless` or `--screenshot`, or env var `WEBVIEWER_HEADLESS=1`.
-explicit_headless = False
-if "--headless" in sys.argv or "--screenshot" in sys.argv:
-    explicit_headless = True
-if os.environ.get("WEBVIEWER_HEADLESS", "").lower() in ("1", "true", "yes"):
-    explicit_headless = True
-
+# Save screenshot or show depending on early-detected headless flag.
 if explicit_headless:
     out_path = os.path.join(base, "screenshot.png")
     try:
@@ -1040,14 +1188,8 @@ if explicit_headless:
     except Exception as ex:
         print("Failed saving screenshot:", ex)
 else:
-    # Normal interactive behavior: attempt to show the figure.
-    # If the current matplotlib backend is non-interactive this may emit a UserWarning
-    # from matplotlib; in that case the user can re-run with --headless or set
-    # WEBVIEWER_HEADLESS=1 to save a screenshot instead.
     try:
         plt.show()
     except Exception as ex:
         print("plt.show() raised an exception:", ex)
-        print(
-            "If you intended a headless run, re-run with --headless"
-        )
+        print("If you intended a headless run, re-run with --headless")

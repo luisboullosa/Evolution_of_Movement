@@ -24,7 +24,7 @@ fn print_help() {
     println!("  (Perlin temporal evolution always enabled)");
     println!("  --seed=N                      RNG seed (unsigned)");
     println!("  --steps=N                     Number of timesteps to run (int)");
-    println!("  --ratiate=N                   Apply N× mutation_rate to initial population (int, default 0)");
+    println!("  --radiate=N                   Apply N× mutation_rate to initial population (int, default 0)");
     println!("  --report-interval=N           Reporting interval (int)");
     println!("  --initial-population=N        Starting population size (int)");
     println!("  --show-progress / --no-progress  Show textual progress bar and enable 'q' to stop");
@@ -177,13 +177,13 @@ fn main() {
             continue;
         }
 
-        if a.starts_with("--ratiate") {
-            if let Some(v) = parse_arg_value::<i32>(&a, "--ratiate") {
-                cfg.ratiate = v;
+        if a.starts_with("--radiate") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--radiate") {
+                cfg.radiate = v;
                 continue;
             } else if let Some(p) = it.next() {
                 if let Ok(v) = p.parse::<i32>() {
-                    cfg.ratiate = v;
+                    cfg.radiate = v;
                     continue;
                 }
             }

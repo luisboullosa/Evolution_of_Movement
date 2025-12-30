@@ -9,7 +9,8 @@ int main() {
     fs::path project_root = build_dir.parent_path(); // tests run from build/
 
     std::vector<std::string> exts = {".tsv", ".csv", ".png"};
-    std::regex sim_re("^(sim|scan)\\\d{4}$", std::regex::ECMAScript | std::regex::icase);
+    // Use a raw string literal so backslashes aren't treated as C++ escapes
+    std::regex sim_re(R"(^(sim|scan)\d{4}$)", std::regex::ECMAScript | std::regex::icase);
 
     std::vector<fs::path> offenders;
 

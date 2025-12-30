@@ -22,6 +22,7 @@ import random
 import graphs_env as g_env
 import graphs_nn as g_nn
 import graphs_resp_fitness as g_rf
+from typing import Any, Dict
 
 # first arg: base folder (default 'webviewer')
 arg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "webviewer"
@@ -250,10 +251,30 @@ except Exception as e:
 fig = plt.figure(figsize=(12,6))
 
 try:
-    fig.canvas.manager.set_window_title("Environment and individuals (click a dot)")
+    mgr = getattr(getattr(fig, "canvas", None), "manager", None)
+    if mgr is not None and hasattr(mgr, "set_window_title"):
+        try:
+            mgr.set_window_title("Environment and individuals (click a dot)")
+        except Exception:
+            pass
+    else:
+        try:
+            gm = plt.get_current_fig_manager()
+            if gm is not None and hasattr(gm, "set_window_title"):
+                try:
+                    gm.set_window_title("Environment and individuals (click a dot)")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 except Exception:
     try:
-        plt.get_current_fig_manager().set_window_title("Environment and individuals (click a dot)")
+        gm = plt.get_current_fig_manager()
+        if gm is not None and hasattr(gm, "set_window_title"):
+            try:
+                gm.set_window_title("Environment and individuals (click a dot)")
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -280,18 +301,18 @@ if sim_list:
         current_sim_index = max(0, len(sim_list)-1)
 
 # small dropdown-like selector (popup RadioButtons) + prev/next buttons at the top for sim selection
-ax_simbox = fig.add_axes([0.01, 0.92, 0.20, 0.045])
+ax_simbox = fig.add_axes((0.01, 0.92, 0.20, 0.045))
 from matplotlib.widgets import RadioButtons
 sim_button = Button(ax_simbox, sim_list[current_sim_index] if sim_list else os.path.basename(base))
-ax_prev = fig.add_axes([0.22, 0.92, 0.03, 0.045])
-ax_next = fig.add_axes([0.26, 0.92, 0.03, 0.045])
+ax_prev = fig.add_axes((0.22, 0.92, 0.03, 0.045))
+ax_next = fig.add_axes((0.26, 0.92, 0.03, 0.045))
 btn_prev = Button(ax_prev, '<')
 btn_next = Button(ax_next, '>')
-ax_move_toggle = fig.add_axes([0.30, 0.92, 0.09, 0.045])
+ax_move_toggle = fig.add_axes((0.30, 0.92, 0.09, 0.045))
 btn_move = Button(ax_move_toggle, 'Show move: Off')
 
 # params display area
-ax_params = fig.add_axes([0.72, 0.92, 0.27, 0.07])
+ax_params = fig.add_axes((0.72, 0.92, 0.27, 0.07))
 ax_params.axis('off')
 params_text_obj = ax_params.text(0, 1.0, '', va='top', family='monospace', wrap=True)
 # population count display (small label on the map)
@@ -359,9 +380,18 @@ def on_sim_change(sim_name):
     base = new_base
     # reset frame and UI
     cur_frame = 0
-    slider.valmax = max(0, n_frames-1)
-    slider.ax.set_xlim(slider.valmin, slider.valmax)
-    slider.set_val(0)
+    try:
+        setattr(slider, "valmax", max(0, n_frames - 1))
+    except Exception:
+        pass
+    try:
+        slider.ax.set_xlim(getattr(slider, "valmin", 0), getattr(slider, "valmax", max(0, n_frames - 1)))
+    except Exception:
+        pass
+    try:
+        slider.set_val(0)
+    except Exception:
+        pass
     update_scatter_data(0)
     plot_for_selection(None)
     render_sim_params()
@@ -414,7 +444,7 @@ def open_sim_dropdown(event):
     try:
         # small popup figure
         pop = plt.figure(figsize=(3, min(6, 0.2 + 0.3 * len(sim_list))))
-        axr = pop.add_axes([0.05, 0.05, 0.9, 0.9])
+        axr = pop.add_axes((0.05, 0.05, 0.9, 0.9))
         radios = RadioButtons(axr, sim_list, active=current_sim_index)
 
         def _on_pick(label):
@@ -449,8 +479,11 @@ ln_env = g_env.draw_env_line(ax_map, env_idx, environment)
 # ensure environment line has a low zorder so individuals plot on top
 try:
     if hasattr(ln_env, "set_zorder"):
-        ln_env.set_zorder(2)
-    else:
+        try:
+            ln_env.set_zorder(2)
+        except Exception:
+            pass
+    elif isinstance(ln_env, (list, tuple, np.ndarray)):
         for _ln in ln_env:
             try:
                 _ln.set_zorder(2)
@@ -466,7 +499,7 @@ ax_map.set_xlim(env_idx.min(), env_idx.max())
 # Use global env max so the y-axis doesn't jump during animation
 ax_map.set_ylim(0, max(env_global_max * 1.2, 1.0))
 
-selected = {"id": None, "index": None}
+selected: Dict[str, Any] = {"id": None, "index": None}
 
 # helper to build input vector: left, center, right, occupancy, resources
 def build_input_for(idx, ind_rec):
@@ -534,7 +567,11 @@ def plot_for_selection(sel_idx):
         return mk(xval)
 
     ys = g_nn.compute_nn_response_for(xs, use_nn, input_builder=lambda xv: input_builder(xv))
-    ax_resp.plot(xs, ys)
+    try:
+        ys_arr = np.asarray(ys, dtype=float) if ys is not None else np.full_like(xs, np.nan, dtype=float)
+    except Exception:
+        ys_arr = np.full_like(xs, np.nan, dtype=float)
+    ax_resp.plot(xs, ys_arr)
     ax_resp.set_title(f"Reaction norm for id {sel_id}")
     fig.canvas.draw_idle()
 
@@ -583,9 +620,9 @@ from matplotlib.widgets import Slider, Button
 from matplotlib.patches import FancyArrowPatch
 
 # axes for controls
-ax_play = fig.add_axes([0.45, 0.01, 0.1, 0.04])
+ax_play = fig.add_axes((0.45, 0.01, 0.1, 0.04))
 btn_play = Button(ax_play, 'Play')
-ax_slider = fig.add_axes([0.1, 0.01, 0.3, 0.04])
+ax_slider = fig.add_axes((0.1, 0.01, 0.3, 0.04))
 slider = Slider(ax_slider, 'frame', 0, n_frames - 1, valinit=0, valstep=1)
 
 playing = {'val': False}
@@ -621,7 +658,7 @@ def update_scatter_data(frame_idx):
             try:
                 if hasattr(ln_env, 'remove'):
                     ln_env.remove()
-                else:
+                elif isinstance(ln_env, (list, tuple, np.ndarray)):
                     for _ln in ln_env:
                         try:
                             _ln.remove()
@@ -637,8 +674,11 @@ def update_scatter_data(frame_idx):
         ln_env = g_env.draw_env_line(ax_map, env_idx, environment)
         try:
             if hasattr(ln_env, 'set_zorder'):
-                ln_env.set_zorder(2)
-            else:
+                try:
+                    ln_env.set_zorder(2)
+                except Exception:
+                    pass
+            elif isinstance(ln_env, (list, tuple, np.ndarray)):
                 for _ln in ln_env:
                     try:
                         _ln.set_zorder(2)

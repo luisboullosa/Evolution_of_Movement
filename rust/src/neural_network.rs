@@ -6,6 +6,56 @@ pub enum NNType {
     MultiInput,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
+        (a - b).abs() <= eps
+    }
+
+    #[test]
+    fn forward_single_buf_matches() {
+        let mut nn = NeuralNetwork::new(2, 1, 1, 0);
+        nn.weights[0] = 1.0;
+        nn.weights[1] = 0.5;
+        nn.biases[0] = 0.0;
+        nn.biases[1] = 0.0;
+
+        let input = 0.5f64;
+        let (a1, _) = nn.forward_single(input);
+
+        let mut hb = vec![0.0f64; nn.nodes];
+        let mut out2 = vec![0.0f64; nn.nodes2.max(1)];
+        let (a2, _) = nn.forward_single_buf(input, &mut hb, &mut out2);
+
+        assert!(approx_eq(a1, a2, 1e-12));
+    }
+
+    #[test]
+    fn forward_multi_simple() {
+        let mut nn = NeuralNetwork::new(2, 2, 1, 0);
+        // weights_multi layout: i * inputs + j
+        // node 0: weights [1.0, 0.0]
+        // node 1: weights [0.5, 0.0]
+        nn.weights_multi[0] = 1.0; // i0 j0
+        nn.weights_multi[1] = 0.0; // i0 j1
+        nn.weights_multi[2] = 0.5; // i1 j0
+        nn.weights_multi[3] = 0.0; // i1 j1
+        nn.biases[0] = 0.0;
+        nn.biases[1] = 0.0;
+
+        let input = vec![0.5f64, 0.0f64];
+        let (out, _) = nn.forward_multi(&input);
+
+        // compute expected: tanh(1*0.5)=t1, tanh(0.5*0.5)=t2, sum = t1+t2
+        let t1 = (1.0f64 * 0.5f64).tanh();
+        let t2 = (0.5f64 * 0.5f64).tanh();
+        let expected = t1 + t2;
+        assert!(approx_eq(out, expected, 1e-12));
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NeuralNetwork {
     pub weights: Vec<f64>,
