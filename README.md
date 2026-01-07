@@ -39,8 +39,8 @@ component.
 
 Web viewer
 ----------
-The simulator can write frames to `webviewer/frames.tsv`. After running the simulation (the default build target
-writes to that path), open `webviewer/index.html` in your browser and load the `frames.tsv` file using the file picker.
+The `webviewer/index.html` page is a legacy viewer that loads a TSV frames file (typically `frames.tsv`).
+This workflow is deprecated; newer runs use JSONL/CBOR outputs (e.g. `env.jsonl`, `individuals.jsonl`/`individuals.cbor`, `nn_index.json`).
 
 Scan driver (Rust)
 ------------------
@@ -70,11 +70,18 @@ python scripts\scan_rust_population_scan.py --pilot --workers 2 --steps 200 --in
 
 After the scan starts, open the webviewer at `webviewer/scan_live.html` served from a local HTTP server (see below) to watch `progress.json` updates.
 
+Remote scan runner (Orange Pi)
+------------------------------
+For distributing scan jobs to a remote Linux machine over SSH/SCP (e.g. an Orange Pi) and fetching deep-run population snapshots, see `scripts/REMOTE_SCAN.md`.
+
+On Windows, you can use the convenience wrapper `scripts/remote_scan.ps1`.
+
 Cleaning webviewer output
 -------------------------
-The simulator writes a few generated files into `webviewer/` (frames.tsv, timestamped `env.tsv.*.tsv`,
-`individuals.tsv.*.tsv`, and `nn_index.json`). To make it easy to remove these files you can use the
-provided cleaner script or a CMake custom target.
+The `webviewer/`-root output layout and associated cleanup tooling are deprecated.
+Historically, the simulator wrote generated files directly into `webviewer/` (timestamped `env.tsv.*.tsv`,
+`individuals.tsv.*.tsv`, `nn_index.json`, and sometimes `frames.tsv`).
+Newer workflows write into `output/prod_runs/simXXXX[/runYYYY]/`.
 
 From PowerShell (dry-run):
 
