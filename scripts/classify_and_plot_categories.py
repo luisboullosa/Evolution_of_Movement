@@ -1,42 +1,51 @@
 #!/usr/bin/env python3
+import argparse
+import csv
+import glob
+import json
 import os
 import sys
-import csv
-import json
-import glob
-import argparse
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Script to classify reaction norms and plot category-based fitness heatmap
 
-parser = argparse.ArgumentParser(description='Classify reaction norms and plot heatmap of latest fitness by dominant category')
-parser.add_argument('--pairs', default='scan_movement_delta_results.csv', help='CSV containing movement and maintenance columns to locate sim runs')
-parser.add_argument('--webviewer', default='webviewer', help='webviewer base directory where simNNNN folders live')
-parser.add_argument('--samples', type=int, default=11, help='Number of input samples for reaction norm (default 11)')
-parser.add_argument('--mag-threshold', type=float, default=0.05, help='Magnitude threshold to call stationary')
-parser.add_argument('--out-csv', default='scan_categories_results.csv', help='Output CSV path')
-parser.add_argument('--out-plot', default='scan_categories_heatmap.png', help='Output heatmap image')
-parser.add_argument('--annotate', action='store_true', help='Annotate heatmap cells with mean fitness and category')
-parser.add_argument('--steps', type=int, default=100000, help='Number of steps for simulation')
-parser.add_argument('--workers', type=int, default=8, help='Number of workers for simulation')
-parser.add_argument('--plotly', action='store_true', help='Use plotly for plotting')
-parser.add_argument('--plot-metric', default='max', help='Metric to plot (default: max)')
+parser = argparse.ArgumentParser(
+    description="Classify reaction norms and plot heatmap of latest fitness by dominant category"
+)
+parser.add_argument(
+    "--pairs",
+    default="scan_movement_delta_results.csv",
+    help="CSV containing movement and maintenance columns to locate sim runs",
+)
+parser.add_argument("--webviewer", default="webviewer", help="webviewer base directory where simNNNN folders live")
+parser.add_argument("--samples", type=int, default=11, help="Number of input samples for reaction norm (default 11)")
+parser.add_argument("--mag-threshold", type=float, default=0.05, help="Magnitude threshold to call stationary")
+parser.add_argument("--out-csv", default="scan_categories_results.csv", help="Output CSV path")
+parser.add_argument("--out-plot", default="scan_categories_heatmap.png", help="Output heatmap image")
+parser.add_argument("--annotate", action="store_true", help="Annotate heatmap cells with mean fitness and category")
+parser.add_argument("--steps", type=int, default=100000, help="Number of steps for simulation")
+parser.add_argument("--workers", type=int, default=8, help="Number of workers for simulation")
+parser.add_argument("--plotly", action="store_true", help="Use plotly for plotting")
+parser.add_argument("--plot-metric", default="max", help="Metric to plot (default: max)")
 args = parser.parse_args()
 
 csvpath = os.path.abspath(args.pairs)
 if not os.path.exists(csvpath):
-    print('Pairs CSV not found at', csvpath)
+    print("Pairs CSV not found at", csvpath)
     sys.exit(1)
 
 webviewer_base = os.path.abspath(args.webviewer)
 if not os.path.isdir(webviewer_base):
-    print('webviewer base not found at', webviewer_base)
+    print("webviewer base not found at", webviewer_base)
     sys.exit(1)
+
 
 def _safeval(v):
     s = f"{v:.6g}"
-    return s.replace('.', 'p')
+    return s.replace(".", "p")
+
 
 def find_simdir_for_config(cfgname):
     for nm in os.listdir(webviewer_base):
@@ -47,25 +56,28 @@ def find_simdir_for_config(cfgname):
             return p
     return None
 
+
 def latest_individuals_file(simdir):
-    files = sorted(glob.glob(os.path.join(simdir, 'individuals.tsv.*.tsv')))
+    files = sorted(glob.glob(os.path.join(simdir, "individuals.tsv.*.tsv")))
     if files:
         return files[-1]
     # fallback
     for fn in os.listdir(simdir):
-        if 'individuals' in fn:
+        if "individuals" in fn:
             return os.path.join(simdir, fn)
     return None
 
+
 def load_nn_index(simdir):
-    p = os.path.join(simdir, 'nn_index.json')
+    p = os.path.join(simdir, "nn_index.json")
     if os.path.exists(p):
         try:
-            with open(p, 'r') as f:
+            with open(p, "r") as f:
                 return json.load(f)
         except Exception:
             return None
     return None
+
 
 def evaluate_rec(rec, inputs):
     """Evaluate a stored NN record (from nn_index) on a list of scalar inputs.
@@ -73,15 +85,15 @@ def evaluate_rec(rec, inputs):
     Supports single-layer (weights+biases) and two-layer records (layer2_weights/layer2_biases)."""
     results = []
     # detect multi-input vs single-input weight layouts
-    weights = rec.get('weights', [])
-    biases = rec.get('biases', [])
-    layer2 = rec.get('layer2_weights', None)
-    layer2_biases = rec.get('layer2_biases', None)
+    weights = rec.get("weights", [])
+    biases = rec.get("biases", [])
+    layer2 = rec.get("layer2_weights", None)
+    layer2_biases = rec.get("layer2_biases", None)
 
     # helper: single-layer evaluate assuming scalar input
     def eval_single(x):
         s = 0.0
-        for w,b in zip(weights, biases):
+        for w, b in zip(weights, biases):
             s += np.tanh(w * x + b)
         return np.tanh(s), abs(s)
 
@@ -124,37 +136,38 @@ def classify_nn(weights, biases, inputs, mag_threshold, rec=None):
     # wrapper that can accept rec (preferred) or raw weights/biases
     if rec is not None:
         vals = evaluate_rec(rec, inputs)
-        dirs = np.array([d for d,m in vals])
-        mags = np.array([m for d,m in vals])
+        dirs = np.array([d for d, m in vals])
+        mags = np.array([m for d, m in vals])
     else:
         sums = []
         for x in inputs:
             s = 0.0
-            for w,b in zip(weights, biases):
+            for w, b in zip(weights, biases):
                 s += np.tanh(w * x + b)
             sums.append((np.tanh(s), abs(s)))
-        dirs = np.array([d for d,m in sums])
-        mags = np.array([m for d,m in sums])
-    mag_mean = mags.mean() if mags.size>0 else 0.0
+        dirs = np.array([d for d, m in sums])
+        mags = np.array([m for d, m in sums])
+    mag_mean = mags.mean() if mags.size > 0 else 0.0
     signs = np.sign(dirs)
     if mag_mean < mag_threshold:
-        return 'stationary'
+        return "stationary"
     if np.all(signs >= 0):
-        return 'always_right'
+        return "always_right"
     if np.all(signs <= 0):
-        return 'always_left'
-    return 'switching'
+        return "always_left"
+    return "switching"
+
 
 # read pairs and iterate
 movement_vals = []
 maintenance_vals = []
 pairs = []
-with open(csvpath, 'r', newline='') as f:
+with open(csvpath, "r", newline="") as f:
     r = csv.DictReader(f)
     for row in r:
         try:
-            mv = float(row['movement_cost_factor'])
-            mc = float(row['maintenance_cost_per_node'])
+            mv = float(row["movement_cost_factor"])
+            mc = float(row["maintenance_cost_per_node"])
         except Exception:
             continue
         movement_vals.append(mv)
@@ -168,32 +181,41 @@ inputs = np.linspace(-1.0, 1.0, args.samples)
 
 results = {}
 
-with open(args.out_csv, 'w', newline='') as outf:
+with open(args.out_csv, "w", newline="") as outf:
     writer = csv.writer(outf)
-    writer.writerow(['movement_cost_factor','maintenance_cost_per_node','dominant_category','dominant_count','dom_mean_fitness','overall_mean_fitness'])
+    writer.writerow(
+        [
+            "movement_cost_factor",
+            "maintenance_cost_per_node",
+            "dominant_category",
+            "dominant_count",
+            "dom_mean_fitness",
+            "overall_mean_fitness",
+        ]
+    )
     for mv, mc in pairs:
-        cfgname = f'config_mv_{_safeval(mv)}_mc_{_safeval(mc)}.json'
+        cfgname = f"config_mv_{_safeval(mv)}_mc_{_safeval(mc)}.json"
         simdir = find_simdir_for_config(cfgname)
         if simdir is None:
-            writer.writerow([mv, mc, '', 0, '', ''])
-            results[(mv,mc)] = (np.nan, None)
+            writer.writerow([mv, mc, "", 0, "", ""])
+            results[(mv, mc)] = (np.nan, None)
             continue
         indfile = latest_individuals_file(simdir)
         if indfile is None:
-            writer.writerow([mv, mc, '', 0, '', ''])
-            results[(mv,mc)] = (np.nan, None)
+            writer.writerow([mv, mc, "", 0, "", ""])
+            results[(mv, mc)] = (np.nan, None)
             continue
         nn_index = load_nn_index(simdir)
         # parse individuals file: id, pos, resources, last_spend, last_delta
         ids = []
         resources = {}
         try:
-            with open(indfile, 'r') as f:
+            with open(indfile, "r") as f:
                 hdr = f.readline()
                 for line in f:
                     if not line.strip():
                         continue
-                    a = line.strip().split('\t')
+                    a = line.strip().split("\t")
                     key = a[0]
                     try:
                         res = float(a[2])
@@ -202,8 +224,8 @@ with open(args.out_csv, 'w', newline='') as outf:
                     resources[key] = res
                     ids.append(key)
         except Exception:
-            writer.writerow([mv, mc, '', 0, '', ''])
-            results[(mv,mc)] = (np.nan, None)
+            writer.writerow([mv, mc, "", 0, "", ""])
+            results[(mv, mc)] = (np.nan, None)
             continue
 
         # classify each individual's NN if available
@@ -213,8 +235,8 @@ with open(args.out_csv, 'w', newline='') as outf:
             if nn_index is None or idstr not in nn_index:
                 continue
             rec = nn_index[idstr]
-            weights = rec.get('weights', [])
-            biases = rec.get('biases', [])
+            weights = rec.get("weights", [])
+            biases = rec.get("biases", [])
             if not weights or not biases:
                 continue
             # prefer passing the full record so two-layer networks are evaluated correctly
@@ -223,8 +245,8 @@ with open(args.out_csv, 'w', newline='') as outf:
             fitness_by_cat.setdefault(cat, []).append(resources.get(idstr, 0.0))
 
         if not cats:
-            writer.writerow([mv, mc, '', 0, '', ''])
-            results[(mv,mc)] = (np.nan, None)
+            writer.writerow([mv, mc, "", 0, "", ""])
+            results[(mv, mc)] = (np.nan, None)
             continue
 
         # determine dominant category and mean fitness
@@ -236,10 +258,19 @@ with open(args.out_csv, 'w', newline='') as outf:
         if dom_cat in fitness_by_cat and fitness_by_cat[dom_cat]:
             dom_mean = float(np.mean(fitness_by_cat[dom_cat]))
         overall_mean = float(np.mean([v for lst in fitness_by_cat.values() for v in lst])) if fitness_by_cat else np.nan
-        writer.writerow([mv, mc, dom_cat, dom_count, f'{dom_mean:.6g}' if not np.isnan(dom_mean) else '', f'{overall_mean:.6g}' if not np.isnan(overall_mean) else ''])
-        results[(mv,mc)] = (dom_mean, dom_cat)
+        writer.writerow(
+            [
+                mv,
+                mc,
+                dom_cat,
+                dom_count,
+                f"{dom_mean:.6g}" if not np.isnan(dom_mean) else "",
+                f"{overall_mean:.6g}" if not np.isnan(overall_mean) else "",
+            ]
+        )
+        results[(mv, mc)] = (dom_mean, dom_cat)
 
-print('Wrote', args.out_csv)
+print("Wrote", args.out_csv)
 
 # build matrix for dominant mean fitness
 mat = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
@@ -251,34 +282,34 @@ for i, mc in enumerate(maintenance_vals):
             dom_mean, dom_cat = results[key]
             if dom_mean is not None and not np.isnan(dom_mean):
                 mat[i, j] = dom_mean
-                cat_map[(j,i)] = dom_cat
+                cat_map[(j, i)] = dom_cat
 
 # plot
 plt.figure(figsize=(9, 5.5))
-cmap = plt.get_cmap('plasma').copy()
-cmap.set_bad(color='#dddddd')
+cmap = plt.get_cmap("plasma").copy()
+cmap.set_bad(color="#dddddd")
 vmax = np.nanmax(mat) if np.isfinite(np.nanmax(mat)) else 1.0
-im = plt.imshow(mat, origin='lower', cmap=cmap, aspect='auto', interpolation='nearest', vmin=0, vmax=vmax)
+im = plt.imshow(mat, origin="lower", cmap=cmap, aspect="auto", interpolation="nearest", vmin=0, vmax=vmax)
 cb = plt.colorbar(im)
-cb.set_label('mean latest fitness (resources)')
+cb.set_label("mean latest fitness (resources)")
 
-plt.xticks(range(len(movement_vals)), [f'{v:.6g}' for v in movement_vals], rotation=45)
-plt.yticks(range(len(maintenance_vals)), [f'{v:.6g}' for v in maintenance_vals])
-plt.xlabel('movement_cost_factor')
-plt.ylabel('maintenance_cost_per_node')
-plt.title('Dominant-category mean latest fitness')
+plt.xticks(range(len(movement_vals)), [f"{v:.6g}" for v in movement_vals], rotation=45)
+plt.yticks(range(len(maintenance_vals)), [f"{v:.6g}" for v in maintenance_vals])
+plt.xlabel("movement_cost_factor")
+plt.ylabel("maintenance_cost_per_node")
+plt.title("Dominant-category mean latest fitness")
 
 # overlay category marker (text) for each cell
-for (j,i), cat in cat_map.items():
-    plt.text(j, i, cat[0], color='white', ha='center', va='center', fontsize=8, weight='bold')
+for (j, i), cat in cat_map.items():
+    plt.text(j, i, cat[0], color="white", ha="center", va="center", fontsize=8, weight="bold")
 
 if args.annotate:
     for i in range(mat.shape[0]):
         for j in range(mat.shape[1]):
             val = mat[i, j]
             if np.isfinite(val):
-                plt.text(j, i-0.2, f'{val:.2g}', ha='center', va='center', color='black', fontsize=7)
+                plt.text(j, i - 0.2, f"{val:.2g}", ha="center", va="center", color="black", fontsize=7)
 
 plt.tight_layout()
 plt.savefig(args.out_plot, dpi=200)
-print('Wrote', args.out_plot)
+print("Wrote", args.out_plot)

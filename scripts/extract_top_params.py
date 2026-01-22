@@ -5,8 +5,10 @@ Usage: python scripts/extract_top_params.py --scan-dir <path> --metric max --top
 If --scan-dir is not provided, the script finds the latest scanNNNN folder under
 output/Parameter scans/data.
 """
-import os
+
 import argparse
+import os
+
 import pandas as pd
 from webviewer_helpers import iter_individuals_frames
 
@@ -58,6 +60,7 @@ def compute_metrics(scan_dir, results_csv):
             mean_norms.append(0.0)
 
     n = len(df)
+
     def pad(col, default=0.0):
         arr = list(col)
         if len(arr) < n:
@@ -95,7 +98,11 @@ def main():
 
     df = compute_metrics(scan_dir, results_csv)
 
-    metric_col = "max_move" if args.metric == "max" else ("mean_move" if args.metric == "mean" else ("median_move" if args.metric == "median" else "survived"))
+    metric_col = (
+        "max_move"
+        if args.metric == "max"
+        else ("mean_move" if args.metric == "mean" else ("median_move" if args.metric == "median" else "survived"))
+    )
 
     topn = df.sort_values(by=metric_col, ascending=False).head(args.top)
 
@@ -103,7 +110,18 @@ def main():
     topn.to_csv(out_csv, index=False)
 
     print(f"Wrote top {args.top} combos by {metric_col} to {out_csv}")
-    print(topn[["maintenance_cost_per_node","reproduction_threshold","reproduction_cost","resource_scale","env_time_speed",metric_col]].to_string(index=False))
+    print(
+        topn[
+            [
+                "maintenance_cost_per_node",
+                "reproduction_threshold",
+                "reproduction_cost",
+                "resource_scale",
+                "env_time_speed",
+                metric_col,
+            ]
+        ].to_string(index=False)
+    )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-import csv
-import numpy as np
-import matplotlib.pyplot as plt
-import os
 import argparse
+import csv
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 parser = argparse.ArgumentParser(description="Plot median movement delta heatmap")
 parser.add_argument(
@@ -26,9 +27,7 @@ csvpath = os.path.normpath(args.infile) if args.infile else csv_default
 if not os.path.exists(csvpath):
     csvpath = os.path.normpath("scan_movement_delta_results.csv")
     if not os.path.exists(csvpath):
-        print(
-            "scan_movement_delta_results.csv not found at", os.path.relpath(csv_default)
-        )
+        print("scan_movement_delta_results.csv not found at", os.path.relpath(csv_default))
         raise SystemExit(1)
 
 movement_vals = []
@@ -113,11 +112,7 @@ plt.annotate(
     bbox=dict(boxstyle="round", fc="white", alpha=0.8),
 )
 
-out = (
-    args.outfile
-    if args.outfile
-    else os.path.join(output_dir, "scan_movement_delta_heatmap.png")
-)
+out = args.outfile if args.outfile else os.path.join(output_dir, "scan_movement_delta_heatmap.png")
 # overlay numeric annotations if requested
 if args.annotate:
     # choose text color based on luminance of the colormap at the cell value

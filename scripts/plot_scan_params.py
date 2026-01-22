@@ -1,8 +1,9 @@
-import csv
-import numpy as np
-import matplotlib.pyplot as plt
-import os
 import argparse
+import csv
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 parser = argparse.ArgumentParser(description="Plot extinction time heatmap")
 parser.add_argument("--in", dest="infile", default=None, help="Input CSV path")

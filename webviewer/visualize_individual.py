@@ -12,12 +12,13 @@ Optional: webviewer/nn.json — contains {"weights":[...],"biases":[...]}
           for the individual's neural net
 """
 
-import os
 import glob
-import sys
 import json
-import numpy as np
+import os
+import sys
+
 import matplotlib
+import numpy as np
 
 # Decide headless mode early (before importing pyplot) so we can set a
 # non-interactive backend when running in headless/screenshot mode.
@@ -28,16 +29,16 @@ if os.environ.get("WEBVIEWER_HEADLESS", "").lower() in ("1", "true", "yes"):
     explicit_headless = True
 if explicit_headless:
     try:
-        matplotlib.use('Agg')
+        matplotlib.use("Agg")
     except Exception:
         pass
 
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.widgets import Slider, Button, TextBox  # noqa: E402
-from typing import Optional, Any  # noqa: E402
-
 # helper modules import their own patches/networkx when needed
 import random  # noqa: E402
+from typing import Any, Optional  # noqa: E402
+
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.widgets import Button, Slider, TextBox  # noqa: E402
 
 # try to import networkx for richer graph layouts; fall back if not available
 try:
@@ -59,7 +60,6 @@ except Exception:
 import graphs_nn as g_nn  # noqa: E402
 import graphs_resp_fitness as g_rf  # noqa: E402
 from matplotlib.collections import LineCollection  # noqa: E402
-
 
 # --- small inline helpers used only as fallbacks (keeps main code concise) ---
 # --- assume helper modules provide necessary functionality ---
@@ -112,6 +112,7 @@ def _set_lines_ydata(lines_obj: Any, ydata: Any) -> None:
             _set_lines_ydata(elem, ydata)
         return
 
+
 # Layout / UI coordinates (moved here from webviewer/graph_coords.py)
 # Tweak these values to adjust figure layout without editing other code.
 # figure gridspec ratios
@@ -144,13 +145,7 @@ AX_NN_GRIDPOS = (1, 0)  # same as in the main gridspec usage
 # Default to the latest sim
 if os.path.isdir(arg):
     # list sim directories
-    sims = sorted(
-        [
-            d
-            for d in os.listdir(arg)
-            if os.path.isdir(os.path.join(arg, d)) and d.startswith("sim")
-        ]
-    )
+    sims = sorted([d for d in os.listdir(arg) if os.path.isdir(os.path.join(arg, d)) and d.startswith("sim")])
     if len(sims) == 1:
         base = os.path.join(arg, sims[0])
     elif len(sims) > 1:
@@ -160,12 +155,19 @@ if os.path.isdir(arg):
 # Prefer NDJSON (.jsonl) cumulative files; fall back to per-frame TSVs
 env_jsonl = os.path.join(base, "env.jsonl")
 ind_jsonl = os.path.join(base, "individuals.jsonl")
+ind_delta = os.path.join(base, "individuals.delta.jsonl")
+
 env_files = []
 ind_files = []
-if os.path.exists(env_jsonl) and os.path.exists(ind_jsonl):
-    # use jsonl lines as frames
+delta_mode = False
+
+if os.path.exists(env_jsonl):
     env_files = [env_jsonl]
+if os.path.exists(ind_jsonl):
     ind_files = [ind_jsonl]
+elif os.path.exists(ind_delta):
+    ind_files = [ind_delta]
+    delta_mode = True
 else:
     env_pattern = os.path.join(base, "env.tsv.*.tsv")
     ind_pattern = os.path.join(base, "individuals.tsv.*.tsv")
@@ -195,8 +197,35 @@ env_list = []
 ind_list = []
 times = []
 
-if os.path.exists(env_jsonl) and os.path.exists(ind_jsonl):
-    # stream-parse jsonl files line-by-line
+
+def _append_individual_frame(frame_inds):
+    ids = []
+    poss = []
+    ress = []
+    spends = []
+    deltas = []
+    for ind in frame_inds:
+        try:
+            ids.append(int(ind.get("id", 0)))
+            poss.append(int(ind.get("pos", 0)))
+            ress.append(float(ind.get("resources", 0.0)))
+            spends.append(float(ind.get("last_spend", 0.0)))
+            deltas.append(int(ind.get("last_delta", 0)))
+        except Exception:
+            continue
+    ind_list.append(
+        {
+            "ids": ids,
+            "pos": np.array(poss),
+            "resources": np.array(ress),
+            "spend": np.array(spends),
+            "delta": np.array(deltas),
+        }
+    )
+
+
+if os.path.exists(env_jsonl) and not delta_mode:
+    # jsonl individuals
     with open(env_jsonl, "r") as ef, open(ind_jsonl, "r") as inf:
         for eline, iline in zip(ef, inf):
             eline = eline.strip()
@@ -207,46 +236,70 @@ if os.path.exists(env_jsonl) and os.path.exists(ind_jsonl):
                 eobj = json.loads(eline)
                 iobj = json.loads(iline)
             except Exception:
-                # skip malformed lines
                 continue
             t = eobj.get("t", None)
             times.append(t if t is not None else len(times))
-            # env resources
             res = eobj.get("resources", [])
             idx = list(range(len(res)))
             env_list.append((np.array(idx), np.array(res)))
-            # individuals: expect a list under 'individuals'
-            ids = []
-            poss = []
-            ress = []
-            spends = []
-            deltas = []
-            for ind in iobj.get("individuals", []):
-                try:
-                    ids.append(int(ind.get("id", 0)))
-                    poss.append(int(ind.get("pos", 0)))
-                    ress.append(float(ind.get("resources", 0.0)))
-                    spends.append(float(ind.get("last_spend", 0.0)))
-                    deltas.append(int(ind.get("last_delta", 0)))
-                except Exception:
-                    # skip malformed individual entry
-                    continue
-            ind_list.append(
-                {
-                    "ids": ids,
-                    "pos": np.array(poss),
-                    "resources": np.array(ress),
-                    "spend": np.array(spends),
-                    "delta": np.array(deltas),
-                }
-            )
+            _append_individual_frame(iobj.get("individuals", []))
+    n_frames = min(len(env_list), len(ind_list))
+elif delta_mode:
+    # env jsonl + individuals.delta.jsonl
+    with open(env_jsonl, "r") as ef:
+        for eline in ef:
+            eline = eline.strip()
+            if not eline:
+                continue
+            try:
+                eobj = json.loads(eline)
+            except Exception:
+                continue
+            t = eobj.get("t", None)
+            times.append(t if t is not None else len(times))
+            res = eobj.get("resources", [])
+            idx = list(range(len(res)))
+            env_list.append((np.array(idx), np.array(res)))
+
+    state = {}
+    with open(ind_delta, "r") as df:
+        for line in df:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if obj.get("full"):
+                state = {}
+                for ind in obj.get("individuals", []):
+                    try:
+                        iid = int(ind.get("id", 0))
+                        state[iid] = ind
+                    except Exception:
+                        continue
+            else:
+                for ind in obj.get("updates", []):
+                    try:
+                        iid = int(ind.get("id", 0))
+                        state[iid] = ind
+                    except Exception:
+                        continue
+                for rid in obj.get("remove", []):
+                    try:
+                        rid_int = int(rid)
+                        if rid_int in state:
+                            del state[rid_int]
+                    except Exception:
+                        continue
+            _append_individual_frame(list(state.values()))
     n_frames = min(len(env_list), len(ind_list))
 else:
     # legacy TSV per-frame parsing
     for i in range(n_frames):
         ef = env_files[i]
         inf = ind_files[i]
-        # extract timestamp from filename (last numeric group)
         t = os.path.basename(ef).split(".")[2]
         times.append(t)
         # read env
@@ -318,7 +371,7 @@ for _, er in env_list:
 env_idx, env_res = env_list[0]
 
 
-def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, max_width=6.0, color='tab:blue'):
+def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, max_width=6.0, color="tab:blue"):
     """Draw environment as a LineCollection where segment linewidth encodes
     local individual density. `positions` is an array-like of individual
     positions (integers); if None or empty, draw plain line with min_width.
@@ -384,12 +437,8 @@ def setup_visualizer():
 
     # prepare resources histogram using graphs_resp_fitness helpers when available
     if len(abs_fitness_by_frame) > 0:
-        abs0 = (
-            abs_fitness_by_frame[0] if len(abs_fitness_by_frame) > 0 else np.array([])
-        )
-        abs_bar_patches, ln_fitness_marker = g_rf.setup_fitness_axis(
-            ax_fitness, bins, abs0, max_count
-        )
+        abs0 = abs_fitness_by_frame[0] if len(abs_fitness_by_frame) > 0 else np.array([])
+        abs_bar_patches, ln_fitness_marker = g_rf.setup_fitness_axis(ax_fitness, bins, abs0, max_count)
     else:
         ax_fitness.text(0.5, 0.5, "no resources data", ha="center", va="center")
     ax_fitness.set_title("")
@@ -446,11 +495,10 @@ def setup_visualizer():
 
     # NN subplot: reserved for a small network diagram
     ax_nn.axis("off")
-    #if nn_index is not None and selected_id is not None:
+    # if nn_index is not None and selected_id is not None:
     #        key = str(selected_id)
     #        if key in nn_index:
     #            g_nn.draw_nn_graph(ax_nn, nn_index[key], output_val=0)
-    
 
     # response curve (filled in per-frame/update using the selected individual's NN)
     xs = np.linspace(0, max(env_global_max * 1.2, 1.0), 300)
@@ -761,7 +809,7 @@ def update(frame_idx):
             except Exception:
                 pass
         # draw new density-aware environment line using current individuals positions
-        ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=ind.get('pos', []))
+        ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=ind.get("pos", []))
     except Exception:
         # fallback to simple line plot
         try:
@@ -770,8 +818,7 @@ def update(frame_idx):
             pass
     ax_env.set_ylim(0, max(env_global_max * 1.2, 1.0))
     ax_env.set_title(
-        f'Environment (t={times[i]}) - ind {ind["ids"][sel_index]} '
-        f'pos={pos} res={resources:.2f} pop={pop}'
+        f'Environment (t={times[i]}) - ind {ind["ids"][sel_index]} ' f"pos={pos} res={resources:.2f} pop={pop}"
     )
     ax_env.set_xlabel("position")
     ax_env.set_ylabel("resource")
@@ -824,22 +871,14 @@ def update(frame_idx):
             #                  total resources of population in this frame
             try:
                 total_resources = float(np.sum(ind.get("resources", [])))
-                fitness = (
-                    float(resources) / total_resources if total_resources > 0 else 0.0
-                )
+                fitness = float(resources) / total_resources if total_resources > 0 else 0.0
             except Exception:
                 fitness = 0.0
             # update resources histogram for this time-frame
             try:
-                cur_abs = (
-                    abs_fitness_by_frame[i]
-                    if i < len(abs_fitness_by_frame)
-                    else np.array([])
-                )
+                cur_abs = abs_fitness_by_frame[i] if i < len(abs_fitness_by_frame) else np.array([])
                 new_abs_counts = (
-                    np.histogram(cur_abs, bins=bins)[0]
-                    if cur_abs.size > 0
-                    else np.zeros(len(bins) - 1, dtype=int)
+                    np.histogram(cur_abs, bins=bins)[0] if cur_abs.size > 0 else np.zeros(len(bins) - 1, dtype=int)
                 )
                 abs_bar_patches, ln_fitness_marker = g_rf.update_fitness_axis(
                     ax_fitness,
@@ -910,7 +949,6 @@ def update(frame_idx):
                 )
             except Exception:
                 pass
-                pass
 
     # update response curve using the selected individual's NN (or global fallback)
     # compute multiple scenario response curves by varying the center input
@@ -935,6 +973,7 @@ def update(frame_idx):
             occ_const = float(occupancy)
         except NameError:
             occ_const = 0.0
+
         # helper to make an input vector for given center value
         def make_input(cval, left=left_const, right=right_const, occ=occ_const, res_val=float(resources)):
             # build vector with left, center, right, occupancy, internal resources
@@ -959,17 +998,13 @@ def update(frame_idx):
         ys_slope_r = g_nn.compute_nn_response_for(
             xs,
             use_nn,
-            input_builder=lambda xval: make_input(
-                xval, left=(left_const + right_const) / 2.0, right=right_const
-            ),
+            input_builder=lambda xval: make_input(xval, left=(left_const + right_const) / 2.0, right=right_const),
         )
         # slope left: bias towards left
         ys_slope_l = g_nn.compute_nn_response_for(
             xs,
             use_nn,
-            input_builder=lambda xval: make_input(
-                xval, left=left_const, right=(left_const + right_const) / 2.0
-            ),
+            input_builder=lambda xval: make_input(xval, left=left_const, right=(left_const + right_const) / 2.0),
         )
         # sink: invert center magnitude to simulate sink-like response
         ys_sink = g_nn.compute_nn_response_for(
@@ -1004,9 +1039,7 @@ def update(frame_idx):
         ys_sink_full = g_nn.compute_nn_response_for(
             xs,
             use_nn,
-            input_builder=lambda xval: make_input(
-                -xval, left=left_const, right=right_const, occ=FULL_OCC
-            ),
+            input_builder=lambda xval: make_input(-xval, left=left_const, right=right_const, occ=FULL_OCC),
         )
         ys_flat_full = g_nn.compute_nn_response_for(
             xs, use_nn, input_builder=lambda xval: make_input(xval, left=xval, right=xval, occ=FULL_OCC)

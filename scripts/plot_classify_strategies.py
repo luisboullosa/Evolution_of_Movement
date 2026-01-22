@@ -19,38 +19,32 @@ Key outputs:    - CSV and PNG written to output/Classifiers/. Filenames include 
 Notes:
     - Fitness values are normalized to [0,1] across all individuals before stats.
 *************************************************************************************"""
-import os
-import sys
+
+import argparse
+import csv
 import glob
 import json
-import argparse
-import numpy as np
-import csv
-import matplotlib.pyplot as plt
+import os
+import sys
 
-parser = argparse.ArgumentParser(
-    description="Classify reaction-norms across sims and summarize abundance/fitness"
-)
+import matplotlib.pyplot as plt
+import numpy as np
+
+parser = argparse.ArgumentParser(description="Classify reaction-norms across sims and summarize abundance/fitness")
 parser.add_argument(
     "--webviewer",
     default="webviewer",
     help="webviewer base directory containing simNNNN folders",
 )
-parser.add_argument(
-    "--samples", type=int, default=11, help="Number of input samples for reaction norm"
-)
+parser.add_argument("--samples", type=int, default=11, help="Number of input samples for reaction norm")
 parser.add_argument(
     "--mag-threshold",
     type=float,
     default=0.05,
     help="Magnitude threshold to call stationary",
 )
-parser.add_argument(
-    "--out-csv", default="strategy_summary.csv", help="CSV summary output"
-)
-parser.add_argument(
-    "--out-prefix", default="strategy_summary", help="Prefix for output plots"
-)
+parser.add_argument("--out-csv", default="strategy_summary.csv", help="CSV summary output")
+parser.add_argument("--out-prefix", default="strategy_summary", help="Prefix for output plots")
 parser.add_argument(
     "--sim",
     default=None,
@@ -97,10 +91,10 @@ def classify_nn(weights, biases, inputs, mag_threshold):
 def evaluate_rec(rec, inputs):
     # support optional layer2 weights/biases; returns list of (dir, mag)
     results = []
-    weights = rec.get('weights', [])
-    biases = rec.get('biases', [])
-    layer2 = rec.get('layer2_weights', None)
-    layer2_biases = rec.get('layer2_biases', None)
+    weights = rec.get("weights", [])
+    biases = rec.get("biases", [])
+    layer2 = rec.get("layer2_weights", None)
+    layer2_biases = rec.get("layer2_biases", None)
     if layer2 is not None and layer2_biases is not None:
         for x in inputs:
             layer1 = []
@@ -126,7 +120,7 @@ def evaluate_rec(rec, inputs):
     # fallback single-layer
     for x in inputs:
         s = 0.0
-        for w,b in zip(weights, biases):
+        for w, b in zip(weights, biases):
             s += np.tanh(w * x + b)
         results.append((np.tanh(s), abs(s)))
     return results
@@ -145,11 +139,7 @@ STRATEGIES = {
 }
 
 all_sim_dirs = sorted(
-    [
-        os.path.join(base, d)
-        for d in os.listdir(base)
-        if os.path.isdir(os.path.join(base, d)) and d.startswith("sim")
-    ]
+    [os.path.join(base, d) for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)) and d.startswith("sim")]
 )
 if not all_sim_dirs:
     print("No sim directories found under", os.path.relpath(base))
@@ -177,7 +167,8 @@ else:
     print("Using last sim directory:", os.path.relpath(sim_dirs[0]))
 
 for simdir in sim_dirs:
-    from webviewer_helpers import iter_individuals_frames, iter_env_frames
+    from webviewer_helpers import iter_individuals_frames
+
     # find latest individuals frame via helper (supports jsonl or tsv)
     frames = list(iter_individuals_frames(simdir))
     if not frames:
@@ -208,18 +199,18 @@ for simdir in sim_dirs:
         try:
             rec = nn_index[idstr]
             vals = evaluate_rec(rec, inputs)
-            dirs = np.array([d for d,m in vals])
-            mags = np.array([m for d,m in vals])
-            mag_mean = mags.mean() if mags.size>0 else 0.0
+            dirs = np.array([d for d, m in vals])
+            mags = np.array([m for d, m in vals])
+            mag_mean = mags.mean() if mags.size > 0 else 0.0
             signs = np.sign(dirs)
             if mag_mean < args.mag_threshold:
-                cat = 'stationary'
+                cat = "stationary"
             elif np.all(signs >= 0):
-                cat = 'always_right'
+                cat = "always_right"
             elif np.all(signs <= 0):
-                cat = 'always_left'
+                cat = "always_left"
             else:
-                cat = 'switching'
+                cat = "switching"
         except Exception:
             cat = classify_nn(weights, biases, inputs, args.mag_threshold)
         fitness = resources.get(idstr, 0.0)
@@ -228,11 +219,7 @@ for simdir in sim_dirs:
 # write summary CSV
 rows = []
 # Normalize fitness values to [0,1] across all individuals (global min/max)
-all_vals = (
-    np.concatenate([np.array(v) for v in categories.values()])
-    if categories
-    else np.array([])
-)
+all_vals = np.concatenate([np.array(v) for v in categories.values()]) if categories else np.array([])
 if all_vals.size > 0:
     global_min = float(np.nanmin(all_vals))
     global_max = float(np.nanmax(all_vals))
@@ -312,11 +299,7 @@ for c in cats:
 
 all_vals = (
     np.concatenate(
-        [
-            normalized_categories[c]
-            for c in cats
-            if c in normalized_categories and len(normalized_categories[c]) > 0
-        ]
+        [normalized_categories[c] for c in cats if c in normalized_categories and len(normalized_categories[c]) > 0]
     )
     if cats
     else np.array([])
@@ -368,9 +351,7 @@ for i, cat in enumerate(cats):
         # if global data are constant, plot counts instead of density to avoid
         # division-by-zero in histogram density calculation
         density_flag = False if constant_hist else True
-        ax.hist(
-            vals, bins=bins, density=density_flag, alpha=0.9, color=col, edgecolor="k"
-        )
+        ax.hist(vals, bins=bins, density=density_flag, alpha=0.9, color=col, edgecolor="k")
         ax.set_xlim(bins[0], bins[-1])
         ax.set_ylabel("Frequency")
         ax.set_xlabel("Normalized fitness (0-1)", fontsize=12)
@@ -418,9 +399,7 @@ if len(fig.axes) > 1:
 # histogram x-labels and abundance symbols don't overlap. Increase
 # vertical spacing when there are many category rows.
 calc_hspace = 0.4 if n_cats > 8 else 0.2
-fig.subplots_adjust(
-    left=0.10, right=0.96, top=0.94, bottom=0.12, hspace=calc_hspace, wspace=0.15
-)
+fig.subplots_adjust(left=0.10, right=0.96, top=0.94, bottom=0.12, hspace=calc_hspace, wspace=0.15)
 
 # write PNG with sim label included
 png_name = args.out_prefix + f"_{sim_label}.png"

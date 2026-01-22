@@ -42,6 +42,16 @@ Web viewer
 The `webviewer/index.html` page is a legacy viewer that loads a TSV frames file (typically `frames.tsv`).
 This workflow is deprecated; newer runs use JSONL/CBOR outputs (e.g. `env.jsonl`, `individuals.jsonl`/`individuals.cbor`, `nn_index.json`).
 
+Interactive dashboard (Python)
+------------------------------
+For a Shiny-like playground that does not require simulator outputs, use the Dash app:
+
+```powershell
+python webviewer/interactive_dash.py --port 8050
+```
+
+It provides three panels: (1) live 1D Perlin-ish environment preview with tunable seed/scale/time; (2) NN response explorer where you can edit weights/biases and see movement vs gather thresholds; (3) rough carrying-capacity estimator (K) using the simulator's maintenance, death, and resource assumptions.
+
 Scan driver (Rust)
 ------------------
 A convenience driver for batch parameter scans using the Rust binary is provided at `scripts/scan_rust_population_scan.py`.

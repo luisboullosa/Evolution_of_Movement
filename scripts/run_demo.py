@@ -2,12 +2,13 @@
 This runs a few simulations with --workers=2 and prints progress/ETA.
 """
 
-import subprocess
 import csv
 import os
-import time
-import threading
 import queue
+import subprocess
+import threading
+import time
+
 # datetime imports not needed in this demo
 
 EXE = (
@@ -59,9 +60,7 @@ def worker():
         ]
         start = time.time()
         with active_lock:
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             active_procs.add(proc)
         try:
             out, err = proc.communicate(timeout=300)

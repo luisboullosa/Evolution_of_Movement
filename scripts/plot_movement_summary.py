@@ -3,11 +3,13 @@
 Plot movement summary CSV created by `scripts/scan_movement_analyze.py`.
 Saves `movement_summary.png` into the same scan directory.
 """
-import os
-import csv
+
 import argparse
-import numpy as np
+import csv
+import os
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument("scan_dir", help="scanNNNN directory containing movement_summary.csv")
@@ -28,7 +30,9 @@ with open(csvp, "r", newline="") as f:
     for row in r:
         sims.append(row.get("sim"))
         try:
-            mean_frame_avgs.append(float(row.get("mean_frame_avg_move", row.get("mean_frame_avg_move", row.get("avg_abs_move", "0")))))
+            mean_frame_avgs.append(
+                float(row.get("mean_frame_avg_move", row.get("mean_frame_avg_move", row.get("avg_abs_move", "0"))))
+            )
         except Exception:
             mean_frame_avgs.append(0.0)
         try:

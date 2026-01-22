@@ -318,9 +318,7 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
         w = data.get("weight", 0.0)
         color = "blue" if w >= 0 else "red"
         lw = max(0.5, min(4.0, abs(w) * 4.0))
-        nx.draw_networkx_edges(
-            G, pos, edgelist=[(u, v)], ax=ax_nn, edge_color=color, width=lw, alpha=0.8
-        )
+        nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], ax=ax_nn, edge_color=color, width=lw, alpha=0.8)
         mx = (pos[u][0] + pos[v][0]) / 2.0
         my = (pos[u][1] + pos[v][1]) / 2.0
 
@@ -382,8 +380,8 @@ def draw_info(
     local_input=None,
 ):
     """
-        Render the small info box containing local resource, NN output vector,
-        and fitness and timing info.
+    Render the small info box containing local resource, NN output vector,
+    and fitness and timing info.
     """
     if use_nn is None:
         return
@@ -405,9 +403,7 @@ def draw_info(
     if fitness is not None:
         try:
             if fitness_rank_pct is not None:
-                info_lines.append(
-                    f"rel fitness: {float(fitness):.3f} ({fitness_rank_pct:.1f}%)"
-                )
+                info_lines.append(f"rel fitness: {float(fitness):.3f} ({fitness_rank_pct:.1f}%)")
             else:
                 info_lines.append(f"rel fitness: {float(fitness):.3f}")
         except Exception:
@@ -525,10 +521,10 @@ def compute_nn_response_for(x, use_nn, input_builder=None):
                     mat[i, j] = v
             # Now compute outputs via matrix multiplication if weights are nested
             if len(weights) > 0 and hasattr(weights[0], "__iter__"):
-                W = np.array([ [float(wij) for wij in wn] + [0.0]*(mat.shape[1]-len(wn)) for wn in weights ])
+                W = np.array([[float(wij) for wij in wn] + [0.0] * (mat.shape[1] - len(wn)) for wn in weights])
                 # W shape: (n_nodes, inputs); mat shape: (n_x, inputs)
                 dot = mat.dot(W.T)  # shape (n_x, n_nodes)
-                b = np.array([float(bb) for bb in biases] + [0.0]*(dot.shape[1]-len(biases)))[:dot.shape[1]]
+                b = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
                 z = np.tanh(dot + b.reshape((1, -1)))
                 s = np.sum(z, axis=1)
                 return s
@@ -557,7 +553,7 @@ def compute_nn_response_for(x, use_nn, input_builder=None):
             mat[:, 0] = xs
             W = np.array([[float(wij) for wij in wn] for wn in weights])
             dot = mat.dot(W.T)
-            b = np.array([float(bb) for bb in biases] + [0.0]*(dot.shape[1]-len(biases)))[:dot.shape[1]]
+            b = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
             z = np.tanh(dot + b.reshape((1, -1)))
             s = np.sum(z, axis=1)
             return s

@@ -1,15 +1,15 @@
-import os
 import glob
 import json
+import os
 
 
 def iter_individuals_frames(sim_dir):
-    """Yield (t, list_of_individual_dicts) from individuals.jsonl or frames.tsv
+    """Yield (t, list_of_individual_dicts) from individuals.jsonl or legacy TSV.
 
     This function is tolerant of mixed environments. It parses NDJSON lines from
     individuals.jsonl and returns the 'individuals' list for each frame. If the
-    JSONL file is missing, it falls back to frames.tsv and yields empty lists
-    (only frame metadata available).
+    JSONL file is missing, it falls back to legacy per-frame TSV files
+    (individuals.tsv.*.tsv).
     """
     jsonl_path = os.path.join(sim_dir, "individuals.jsonl")
     if os.path.exists(jsonl_path):
@@ -27,8 +27,8 @@ def iter_individuals_frames(sim_dir):
                 # ensure last_delta is an int when possible
                 for ind in inds:
                     try:
-                        if 'last_delta' in ind:
-                            ind['last_delta'] = int(ind['last_delta'])
+                        if "last_delta" in ind:
+                            ind["last_delta"] = int(ind["last_delta"])
                     except Exception:
                         # keep original value if conversion fails
                         pass
@@ -42,7 +42,7 @@ def iter_individuals_frames(sim_dir):
         t = None
         try:
             base = os.path.basename(fn)
-            parts = base.split('.')
+            parts = base.split(".")
             if len(parts) >= 3:
                 t = int(parts[1])
         except Exception:
@@ -53,7 +53,7 @@ def iter_individuals_frames(sim_dir):
                 for line in f.read().splitlines()[1:]:
                     if not line.strip():
                         continue
-                    parts = line.split('\t')
+                    parts = line.split("\t")
                     # id,pos,resources,last_spend,last_delta,age -> index mapping
                     try:
                         iid = int(parts[0])
@@ -64,14 +64,16 @@ def iter_individuals_frames(sim_dir):
                     last_spend = float(parts[3]) if len(parts) > 3 else 0.0
                     last_delta = int(parts[4]) if len(parts) > 4 else 0
                     age = int(parts[5]) if len(parts) > 5 else 0
-                    inds.append({
-                        "id": iid,
-                        "pos": pos,
-                        "resources": resources,
-                        "last_spend": last_spend,
-                        "last_delta": last_delta,
-                        "age": age,
-                    })
+                    inds.append(
+                        {
+                            "id": iid,
+                            "pos": pos,
+                            "resources": resources,
+                            "last_spend": last_spend,
+                            "last_delta": last_delta,
+                            "age": age,
+                        }
+                    )
         except Exception:
             continue
         yield (t, inds)
@@ -103,7 +105,7 @@ def iter_env_frames(sim_dir):
         t = None
         try:
             base = os.path.basename(fn)
-            parts = base.split('.')
+            parts = base.split(".")
             if len(parts) >= 3:
                 t = int(parts[1])
         except Exception:
@@ -114,7 +116,7 @@ def iter_env_frames(sim_dir):
                 for line in f.read().splitlines()[1:]:
                     if not line.strip():
                         continue
-                    parts = line.split('\t')
+                    parts = line.split("\t")
                     try:
                         res.append(float(parts[1]))
                     except Exception:

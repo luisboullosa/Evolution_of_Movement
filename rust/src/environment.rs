@@ -20,7 +20,7 @@ impl Environment {
     pub fn init_perlin(&mut self, seed: u64, resource_scale: f64) {
         self.perlin_base = Perlin::generate(self.width, seed);
         // apply resource scale to the perlin base and initialize resources
-        for (i, v) in self.perlin_base.iter_mut().enumerate().take(self.width) {
+        for (_i, v) in self.perlin_base.iter_mut().enumerate().take(self.width) {
             *v = *v * resource_scale;
         }
         self.resources = self.perlin_base.clone();

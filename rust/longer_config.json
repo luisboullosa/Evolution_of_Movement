@@ -2,5 +2,5 @@
   "steps": 200,
   "initial_population": 1000,
   "show_progress": true,
-  "webviewer_base": "webviewer"
+    "output_dir_base": "webviewer"
 }

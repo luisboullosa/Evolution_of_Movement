@@ -5,15 +5,13 @@ Simple script to list or remove generated webviewer output files.
 This file was moved from webviewer/ to scripts/ to centralize helper scripts.
 """
 
-import os
-import glob
 import argparse
+import glob
+import os
 
 parser = argparse.ArgumentParser(description="Clean webviewer-generated output files")
 parser.add_argument("--yes", action="store_true", help="Actually delete files")
-parser.add_argument(
-    "--base", default="webviewer", help="Webviewer directory (default: webviewer)"
-)
+parser.add_argument("--base", default="webviewer", help="Webviewer directory (default: webviewer)")
 parser.add_argument(
     "--prune-sim-dirs",
     action="store_true",
@@ -26,8 +24,12 @@ if not os.path.isdir(base):
     print(f"No such directory: {base}")
     exit(1)
 
+print(
+    "[deprecated] clean_webviewer.py is legacy. The simulator now writes outputs under output/prod_runs/simXXXX[/runYYYY]. "
+    "This script may be removed in the future."
+)
+
 patterns = [
-    os.path.join(base, "frames.tsv"),
     os.path.join(base, "config.json"),
     os.path.join(base, "config.txt"),
     os.path.join(base, "nn_index.json"),
@@ -95,6 +97,4 @@ if args.prune_sim_dirs:
                         print("Failed to remove", d, ":", e)
                 print("Done.")
             else:
-                print(
-                    "\nDry-run only. To remove these directories re-run with --yes"
-                )
+                print("\nDry-run only. To remove these directories re-run with --yes")

@@ -24,7 +24,7 @@
 //!   "initial_population": 500,
 //!   "steps": 2000,
 //!   "write_frames": false,
-//!   "webviewer_base": "output/my_scan",
+//!   "output_dir_base": "output/my_scan",
 //!   "sim_prefix": "sim",
 //!   "reproduction_threshold": 20.0,
 //!   "reproduction_cost": 5.0,
@@ -96,8 +96,8 @@ pub struct ExampleConfig {
     pub burn_in: i32,
     pub write_frames: bool,
 
-    /// Base directory used by the webviewer output writer.
-    pub webviewer_base: String,
+    /// Base directory under which per-run simulation folders (simXXXX) are created.
+    pub output_dir_base: String,
     pub sim_prefix: String,
     pub sim_digits: i32,
     pub sim_number: i32,
@@ -165,7 +165,7 @@ impl Default for ExampleConfig {
             report_interval: 1,
             burn_in: 0,
             write_frames: false,
-            webviewer_base: "output/example_sim".to_string(),
+            output_dir_base: "output/example_sim".to_string(),
             sim_prefix: "sim".to_string(),
             sim_digits: 4,
             sim_number: -1,

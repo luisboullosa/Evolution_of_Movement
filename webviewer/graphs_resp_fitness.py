@@ -9,17 +9,17 @@ def setup_resp_axis(fig, gs):
 
 def init_response(ax_resp, xs):
     # Create five scenario curves: peak, slope right, slope left, sink, flat
-    ln_peak, = ax_resp.plot(xs, np.zeros_like(xs), label="peak")
-    ln_slope_r, = ax_resp.plot(xs, np.zeros_like(xs), label="slope→")
-    ln_slope_l, = ax_resp.plot(xs, np.zeros_like(xs), label="slope←")
-    ln_sink, = ax_resp.plot(xs, np.zeros_like(xs), label="sink")
-    ln_flat, = ax_resp.plot(xs, np.zeros_like(xs), label="flat")
+    (ln_peak,) = ax_resp.plot(xs, np.zeros_like(xs), label="peak")
+    (ln_slope_r,) = ax_resp.plot(xs, np.zeros_like(xs), label="slope→")
+    (ln_slope_l,) = ax_resp.plot(xs, np.zeros_like(xs), label="slope←")
+    (ln_sink,) = ax_resp.plot(xs, np.zeros_like(xs), label="sink")
+    (ln_flat,) = ax_resp.plot(xs, np.zeros_like(xs), label="flat")
     # Additional set of curves simulating heavy local occupancy (e.g., 1000 others at same position)
-    ln_peak_full, = ax_resp.plot(xs, np.zeros_like(xs), label="peak_full", linestyle='--')
-    ln_slope_r_full, = ax_resp.plot(xs, np.zeros_like(xs), label="slope→_full", linestyle='--')
-    ln_slope_l_full, = ax_resp.plot(xs, np.zeros_like(xs), label="slope←_full", linestyle='--')
-    ln_sink_full, = ax_resp.plot(xs, np.zeros_like(xs), label="sink_full", linestyle='--')
-    ln_flat_full, = ax_resp.plot(xs, np.zeros_like(xs), label="flat_full", linestyle='--')
+    (ln_peak_full,) = ax_resp.plot(xs, np.zeros_like(xs), label="peak_full", linestyle="--")
+    (ln_slope_r_full,) = ax_resp.plot(xs, np.zeros_like(xs), label="slope→_full", linestyle="--")
+    (ln_slope_l_full,) = ax_resp.plot(xs, np.zeros_like(xs), label="slope←_full", linestyle="--")
+    (ln_sink_full,) = ax_resp.plot(xs, np.zeros_like(xs), label="sink_full", linestyle="--")
+    (ln_flat_full,) = ax_resp.plot(xs, np.zeros_like(xs), label="flat_full", linestyle="--")
 
     # vertical marker and dot for current input
     ln_input_vline = ax_resp.axvline(xs[0], color="0.2", linestyle="--")
@@ -32,19 +32,19 @@ def init_response(ax_resp, xs):
         pass
 
     return (
-        (ln_peak, ln_slope_r, ln_slope_l, ln_sink, ln_flat),
-        (ln_peak_full, ln_slope_r_full, ln_slope_l_full, ln_sink_full, ln_flat_full),
-    ), ln_input_vline, ln_input_dot
+        (
+            (ln_peak, ln_slope_r, ln_slope_l, ln_sink, ln_flat),
+            (ln_peak_full, ln_slope_r_full, ln_slope_l_full, ln_sink_full, ln_flat_full),
+        ),
+        ln_input_vline,
+        ln_input_dot,
+    )
 
 
 def setup_fitness_axis(ax_fitness, bins, abs0, max_count):
     """Draw initial absolute-resources histogram and return patches + marker."""
     try:
-        abs_counts, _ = (
-            np.histogram(abs0, bins=bins)
-            if abs0.size > 0
-            else (np.zeros(len(bins) - 1, dtype=int), bins)
-        )
+        abs_counts, _ = np.histogram(abs0, bins=bins) if abs0.size > 0 else (np.zeros(len(bins) - 1, dtype=int), bins)
         bin_lefts = bins[:-1]
         bin_widths = np.diff(bins)
         abs_bar_container = ax_fitness.bar(
@@ -115,9 +115,7 @@ def update_fitness_axis(
         ax_fitness.set_xlim(bins[0], bins[-1])
         ax_fitness.set_ylim(0, max_count * 1.1)
         try:
-            ln_marker = ax_fitness.axvline(
-                resources, color="0.0", linestyle="--", linewidth=2
-            )
+            ln_marker = ax_fitness.axvline(resources, color="0.0", linestyle="--", linewidth=2)
         except Exception:
             ln_marker = None
         ax_fitness.set_title(f"Resources distribution (t={times_i})")
@@ -126,9 +124,7 @@ def update_fitness_axis(
 
     try:
         if ln_marker is None:
-            ln_marker = ax_fitness.axvline(
-                resources, color="0.0", linestyle="--", linewidth=2
-            )
+            ln_marker = ax_fitness.axvline(resources, color="0.0", linestyle="--", linewidth=2)
         else:
             ln_marker.set_xdata([resources, resources])
     except Exception:
@@ -137,9 +133,7 @@ def update_fitness_axis(
         except Exception:
             pass
         try:
-            ln_marker = ax_fitness.axvline(
-                resources, color="0.0", linestyle="--", linewidth=2
-            )
+            ln_marker = ax_fitness.axvline(resources, color="0.0", linestyle="--", linewidth=2)
         except Exception:
             ln_marker = None
 
@@ -262,13 +256,9 @@ def prepare_fitness_data(ind_list, nbins=31):
     for ind in ind_list:
         res_arr = ind.get("resources", np.array([]))
         total = float(np.sum(res_arr)) if res_arr.size > 0 else 0.0
-        abs_fitness_by_frame.append(
-            np.array([float(r) for r in res_arr]) if res_arr.size > 0 else np.array([])
-        )
+        abs_fitness_by_frame.append(np.array([float(r) for r in res_arr]) if res_arr.size > 0 else np.array([]))
         if res_arr.size > 0:
-            rel_fitness_by_frame.append(
-                np.array([float(r) / total if total > 0.0 else 0.0 for r in res_arr])
-            )
+            rel_fitness_by_frame.append(np.array([float(r) / total if total > 0.0 else 0.0 for r in res_arr]))
         else:
             rel_fitness_by_frame.append(np.array([]))
 
@@ -294,14 +284,10 @@ def prepare_fitness_data(ind_list, nbins=31):
     for rel_arr, abs_arr in zip(rel_fitness_by_frame, abs_fitness_by_frame):
         try:
             cnt_rel, _ = (
-                np.histogram(rel_arr, bins=bins)
-                if rel_arr.size > 0
-                else (np.zeros(len(bins) - 1, dtype=int), bins)
+                np.histogram(rel_arr, bins=bins) if rel_arr.size > 0 else (np.zeros(len(bins) - 1, dtype=int), bins)
             )
             cnt_abs, _ = (
-                np.histogram(abs_arr, bins=bins)
-                if abs_arr.size > 0
-                else (np.zeros(len(bins) - 1, dtype=int), bins)
+                np.histogram(abs_arr, bins=bins) if abs_arr.size > 0 else (np.zeros(len(bins) - 1, dtype=int), bins)
             )
             max_bin = max(
                 max_bin,

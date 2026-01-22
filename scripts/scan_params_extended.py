@@ -5,10 +5,12 @@ reproduction_cost, resource_scale, and env_time_speed. Creates a parameters CSV 
 simulations (default 100k steps). Also generates an interactive Plotly HTML to explore
 results and parameters.
 """
-import os
+
+import argparse
 import itertools
 import json
-import argparse
+import os
+
 from worker_pool import run_param_sweep
 
 # Prefer relative exe paths
@@ -27,7 +29,12 @@ parser.add_argument("--pilot", action="store_true", help="Run a short pilot inst
 parser.add_argument("--mid", action="store_true", help="Run a mid-length pilot instead of full runs")
 parser.add_argument("--timeout", type=int, default=3600, help="Per-sim timeout in seconds")
 parser.add_argument("--plotly", action="store_true", help="Generate interactive Plotly HTML in scan folder")
-parser.add_argument("--initial-population", type=int, default=100, help="Initial population size passed to simulator (use larger to increase prop_moved resolution)")
+parser.add_argument(
+    "--initial-population",
+    type=int,
+    default=100,
+    help="Initial population size passed to simulator (use larger to increase prop_moved resolution)",
+)
 # parse args later after all options are defined
 parser.add_argument(
     "--plot-metric",
@@ -38,18 +45,36 @@ parser.add_argument(
 
 # forward-through simulator options for convenience
 parser.add_argument("--sim-death-risk", type=float, default=0.0001, help="Forwarded to simulator as --death-risk")
-parser.add_argument("--write-frames", action="store_true", help="Force simulator to write per-frame outputs (individuals/env TSVs) for inspection")
+parser.add_argument(
+    "--write-frames",
+    action="store_true",
+    help="Force simulator to write per-frame outputs (individuals/env TSVs) for inspection",
+)
 
 # allow plotting only existing scan without re-running via --plot-only
-parser.add_argument("--plot-only", action="store_true", help="Skip running sims and only generate the plot from existing sim folders")
+parser.add_argument(
+    "--plot-only", action="store_true", help="Skip running sims and only generate the plot from existing sim folders"
+)
 
 # Optional CLI overrides for scanned ranges (comma-separated lists)
-parser.add_argument("--maintenance-vals", type=str, help="Comma-separated maintenance_cost_per_node values to sweep (overrides defaults)")
-parser.add_argument("--repro-thresholds", type=str, help="Comma-separated reproduction_threshold values to sweep (overrides defaults)")
-parser.add_argument("--repro-costs", type=str, help="Comma-separated reproduction_cost values to sweep (overrides defaults)")
-parser.add_argument("--env-time-speeds", type=str, help="Comma-separated env_time_speed values to sweep (overrides defaults)")
+parser.add_argument(
+    "--maintenance-vals",
+    type=str,
+    help="Comma-separated maintenance_cost_per_node values to sweep (overrides defaults)",
+)
+parser.add_argument(
+    "--repro-thresholds", type=str, help="Comma-separated reproduction_threshold values to sweep (overrides defaults)"
+)
+parser.add_argument(
+    "--repro-costs", type=str, help="Comma-separated reproduction_cost values to sweep (overrides defaults)"
+)
+parser.add_argument(
+    "--env-time-speeds", type=str, help="Comma-separated env_time_speed values to sweep (overrides defaults)"
+)
 parser.add_argument("--death-risks", type=str, help="Comma-separated death_risk values to sweep (overrides defaults)")
-parser.add_argument("--max-populations", type=str, help="Comma-separated max_population values to sweep (overrides defaults)")
+parser.add_argument(
+    "--max-populations", type=str, help="Comma-separated max_population values to sweep (overrides defaults)"
+)
 
 # reparse args to include the new options
 args = parser.parse_args()
@@ -90,46 +115,50 @@ else:
         # Population cap sweep values (0 would mean no cap; here we choose a few caps)
         max_populations = [10000, 100000, 1000000]
 
+
 # Apply command-line overrides (if provided)
 def _parse_csv_floats(s):
     try:
-        return [float(x) for x in s.split(',') if x.strip()!='']
+        return [float(x) for x in s.split(",") if x.strip() != ""]
     except Exception:
         return None
 
-if getattr(args, 'maintenance_vals', None):
+
+if getattr(args, "maintenance_vals", None):
     vals = _parse_csv_floats(args.maintenance_vals)
     if vals:
         maintenance_vals = vals
 
-if getattr(args, 'repro_thresholds', None):
+if getattr(args, "repro_thresholds", None):
     vals = _parse_csv_floats(args.repro_thresholds)
     if vals:
         repro_thresholds = vals
 
-if getattr(args, 'repro_costs', None):
+if getattr(args, "repro_costs", None):
     vals = _parse_csv_floats(args.repro_costs)
     if vals:
         repro_costs = vals
 
-if getattr(args, 'env_time_speeds', None):
+if getattr(args, "env_time_speeds", None):
     vals = _parse_csv_floats(args.env_time_speeds)
     if vals:
         env_time_speeds = vals
 
-if getattr(args, 'death_risks', None):
+if getattr(args, "death_risks", None):
     vals = _parse_csv_floats(args.death_risks)
     if vals:
         death_risks = vals
 
-if getattr(args, 'max_populations', None):
+if getattr(args, "max_populations", None):
     vals = _parse_csv_floats(args.max_populations)
     if vals:
         max_populations = [int(x) for x in vals]
 
 # create parameter combinations and write a CSV listing
 # Sweep: maintenance, repro threshold, repro cost, env_time_speed, death_risk, max_population
-raw_pairs = list(itertools.product(maintenance_vals, repro_thresholds, repro_costs, env_time_speeds, death_risks, max_populations))
+raw_pairs = list(
+    itertools.product(maintenance_vals, repro_thresholds, repro_costs, env_time_speeds, death_risks, max_populations)
+)
 # enumerate jobs so we can create per-job config files and reliably locate sim directories
 pairs = list(enumerate(raw_pairs))
 
@@ -163,7 +192,9 @@ else:
 
     # write the parameter listing
     with open(params_csv, "w", newline="") as pf:
-        pf.write("maintenance_cost_per_node,reproduction_threshold,reproduction_cost,env_time_speed,death_risk,max_population\n")
+        pf.write(
+            "maintenance_cost_per_node,reproduction_threshold,reproduction_cost,env_time_speed,death_risk,max_population\n"
+        )
         for m, rt, rc, ets, dr, mp in raw_pairs:
             pf.write(f"{m},{rt},{rc},{ets},{dr},{mp}\n")
 
@@ -176,6 +207,7 @@ else:
             json.dump(cfg, cfj)
         run_cfg_paths[idx] = cfgp
 
+
 # builder: job is a tuple (maintenance, repro_thresh, repro_cost, resource_scale, env_time_speed)
 def cmd_builder(job):
     # job: (idx, (maintenance, repro_thresh, repro_cost, env_time_speed, death_risk, max_population))
@@ -185,8 +217,8 @@ def cmd_builder(job):
         EXE,
         f"--steps={steps}",
         f"--burn-in={burn_in}",
-    # pass through initial population from CLI so users can increase sampling resolution
-    f"--initial-population={args.initial_population}",
+        # pass through initial population from CLI so users can increase sampling resolution
+        f"--initial-population={args.initial_population}",
         f"--max-population={mp}",
         f"--death-risk={dr}",
         f"--maintenance-cost-per-node={m}",
@@ -195,15 +227,16 @@ def cmd_builder(job):
         # resource_scale intentionally not varied here
         f"--env-time-speed={ets}",
         "--write-config",
-    f"--config-out=config.json",
+        "--config-out=config.json",
         "--no-progress",
         # optionally request frames
-        *( ["--no-print-frames"] if not args.write_frames and not args.pilot else [] ),
+        *(["--no-print-frames"] if not args.write_frames and not args.pilot else []),
         # when running pilot, force per-frame outputs and no burn-in so we can compute movement metrics
         # write per-frame outputs when running pilots or when explicitly requested; also enable for mid runs
-        *( ["--write-frames"] if args.pilot or args.write_frames or args.mid else [] ),
+        *(["--write-frames"] if args.pilot or args.write_frames or args.mid else []),
         f"--config-file={run_cfg_paths[idx]}",
     ]
+
 
 # custom row builder: write a row including all parameter values and extinction/survived
 def result_row_builder(job, extinct, out_text):
@@ -234,7 +267,7 @@ def result_row_builder(job, extinct, out_text):
 
         sim_found = None
         for p in cand_paths:
-            if os.path.exists(os.path.join(p, 'individuals.jsonl')):
+            if os.path.exists(os.path.join(p, "individuals.jsonl")):
                 sim_found = p
                 break
 
@@ -244,7 +277,7 @@ def result_row_builder(job, extinct, out_text):
             per_frame_means = []
             all_abs = []
             # stream the large JSONL file line-by-line
-            with open(os.path.join(sim_found, 'individuals.jsonl'), 'r', encoding='utf-8') as fh:
+            with open(os.path.join(sim_found, "individuals.jsonl"), "r", encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
                     if not line:
@@ -256,13 +289,13 @@ def result_row_builder(job, extinct, out_text):
                     # count this as one recorded frame
                     recorded_steps += 1
                     frame_vals = []
-                    for ind in obj.get('individuals', []):
+                    for ind in obj.get("individuals", []):
                         try:
-                            iid = ind.get('id')
+                            iid = ind.get("id")
                             if iid is None:
                                 continue
                             seen_ids.add(iid)
-                            ld = int(ind.get('last_delta', 0) or 0)
+                            ld = int(ind.get("last_delta", 0) or 0)
                             if ld != 0:
                                 moved_ids.add(iid)
                             v = abs(ld)
@@ -279,9 +312,9 @@ def result_row_builder(job, extinct, out_text):
                 s = sorted(per_frame_means)
                 L = len(s)
                 if L % 2 == 1:
-                    median_move = float(s[L//2])
+                    median_move = float(s[L // 2])
                 else:
-                    median_move = float((s[L//2 - 1] + s[L//2]) / 2.0)
+                    median_move = float((s[L // 2 - 1] + s[L // 2]) / 2.0)
             if all_abs:
                 max_move = float(max(all_abs))
             if seen_ids:
@@ -291,6 +324,7 @@ def result_row_builder(job, extinct, out_text):
         mean_move = median_move = max_move = prop_moved = 0.0
 
     return [m, rt, rc, ets, dr, mp, ext_val, survived, recorded_steps, mean_move, median_move, max_move, prop_moved]
+
 
 header = [
     "maintenance_cost_per_node",
@@ -345,7 +379,13 @@ if args.plotly or args.plot_only:
                     df["survived"] = 0
 
             # compute movement metrics by scanning sim subfolders (sim directories may start with 'sim' or 'job')
-            sims = sorted([d for d in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d)) and (d.startswith("sim") or d.startswith("job"))])
+            sims = sorted(
+                [
+                    d
+                    for d in os.listdir(scan_dir)
+                    if os.path.isdir(os.path.join(scan_dir, d)) and (d.startswith("sim") or d.startswith("job"))
+                ]
+            )
             mean_moves = []
             median_moves = []
             max_moves = []
@@ -353,6 +393,7 @@ if args.plotly or args.plot_only:
             prop_moved = []
             recorded_steps_list = []
             from webviewer_helpers import iter_individuals_frames
+
             for s in sims:
                 sp = os.path.join(scan_dir, s)
                 per_frame_means = []
@@ -395,6 +436,7 @@ if args.plotly or args.plot_only:
 
             # align lengths: df rows may equal number of pairs; we pad if sims shorter
             n = len(df)
+
             def pad(col, default=0.0):
                 arr = list(col)
                 if len(arr) < n:
@@ -428,9 +470,10 @@ if args.plotly or args.plot_only:
             if not metrics:
                 print("No movement metrics found to plot")
             else:
+
                 def make_pivot(metric):
                     # group and compute metric aggregation
-                    grp = df.groupby([X_PARAM, Y_PARAM]).agg({metric: 'mean'})
+                    grp = df.groupby([X_PARAM, Y_PARAM]).agg({metric: "mean"})
                     # for each additional scanned dim compute mean for hover info
                     extra_dims = [d for d in dims if d not in (X_PARAM, Y_PARAM) and d in df.columns]
                     if extra_dims:
@@ -459,7 +502,11 @@ if args.plotly or args.plot_only:
                                 if e is not None:
                                     parts = []
                                     for d in extra_dims:
-                                        dv = e.get(d, None) if hasattr(e, 'get') else (float(e[d]) if d in e.index else None)
+                                        dv = (
+                                            e.get(d, None)
+                                            if hasattr(e, "get")
+                                            else (float(e[d]) if d in e.index else None)
+                                        )
                                         if dv is None:
                                             parts.append(f"{d}: -")
                                         else:
@@ -498,7 +545,7 @@ if args.plotly or args.plot_only:
                     customdata=custom0,
                     colorscale=sequential.Viridis,
                     colorbar=dict(title=init_metric, ticks="outside", lenmode="fraction", len=0.6),
-                    hovertemplate=f"{X_PARAM}=%{{x}}<br>{Y_PARAM}=%{{y}}<br>{init_metric}=%{{z}}<br>%{{customdata}}<extra></extra>"
+                    hovertemplate=f"{X_PARAM}=%{{x}}<br>{Y_PARAM}=%{{y}}<br>{init_metric}=%{{z}}<br>%{{customdata}}<extra></extra>",
                 )
 
                 fig = go.Figure(data=[heat])
@@ -510,21 +557,36 @@ if args.plotly or args.plot_only:
                 for metric in metrics:
                     xs_m, ys_m, zm, cm = make_pivot(metric)
                     # use same formatted ticks
-                    buttons.append(dict(
-                        label=metric,
-                        method='update',
-                        args=[{'z': [zm], 'customdata': [cm]}, {'title': f"Heatmap: {metric} by {X_PARAM} (x) and {Y_PARAM} (y)"}]
-                    ))
+                    buttons.append(
+                        dict(
+                            label=metric,
+                            method="update",
+                            args=[
+                                {"z": [zm], "customdata": [cm]},
+                                {"title": f"Heatmap: {metric} by {X_PARAM} (x) and {Y_PARAM} (y)"},
+                            ],
+                        )
+                    )
 
                 fig.update_layout(
-                    updatemenus=[dict(buttons=buttons, direction='down', showactive=True, x=0.0, y=1.12, xanchor='left', yanchor='top')],
+                    updatemenus=[
+                        dict(
+                            buttons=buttons,
+                            direction="down",
+                            showactive=True,
+                            x=0.0,
+                            y=1.12,
+                            xanchor="left",
+                            yanchor="top",
+                        )
+                    ],
                     title=f"Heatmap: {init_metric} by {X_PARAM} (x) and {Y_PARAM} (y)",
-                    xaxis=dict(title=X_PARAM, tickmode='array', tickvals=xticks, tickangle=45),
-                    yaxis=dict(title=Y_PARAM, tickmode='array', tickvals=yticks),
-                    template='plotly_white',
+                    xaxis=dict(title=X_PARAM, tickmode="array", tickvals=xticks, tickangle=45),
+                    yaxis=dict(title=Y_PARAM, tickmode="array", tickvals=yticks),
+                    template="plotly_white",
                     height=700,
                     width=900,
-                    margin=dict(t=100, l=120, r=80, b=120)
+                    margin=dict(t=100, l=120, r=80, b=120),
                 )
 
                 # simplify colorbar
@@ -538,11 +600,17 @@ if args.plotly or args.plot_only:
                 # Also produce an interactive scatter-matrix using the scanned dimensions
                 try:
                     import plotly.express as px
+
                     matrix_dims = [d for d in dims if d in df.columns]
                     if matrix_dims:
                         matrix_metric = init_metric if init_metric in df.columns else matrix_dims[0]
-                        matrix_fig = px.scatter_matrix(df, dimensions=matrix_dims, color=matrix_metric, title=f"Parameter matrix colored by {matrix_metric}")
-                        matrix_fig.update_layout(template='plotly_white', height=900, width=1200)
+                        matrix_fig = px.scatter_matrix(
+                            df,
+                            dimensions=matrix_dims,
+                            color=matrix_metric,
+                            title=f"Parameter matrix colored by {matrix_metric}",
+                        )
+                        matrix_fig.update_layout(template="plotly_white", height=900, width=1200)
                         matrix_out = os.path.join(scan_dir, "interactive_matrix.html")
                         matrix_fig.write_html(matrix_out)
                         print("Wrote interactive matrix to", matrix_out)

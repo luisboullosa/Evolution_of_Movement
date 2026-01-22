@@ -51,6 +51,7 @@ def main() -> int:
     ap.add_argument("--release", action="store_true", help="Use cargo --release")
     ap.add_argument("--output-run-dir", default="", help="If set, pass --output-run-dir to simulator")
     ap.add_argument("--no-write-outputs", action="store_true", help="Pass --no-write-outputs to simulator")
+    ap.add_argument("--replay-snapshot", default="", help="If set, pass --replay-snapshot to simulator")
     args = ap.parse_args()
 
     repo_dir = os.path.abspath(args.repo_dir)
@@ -67,22 +68,27 @@ def main() -> int:
     ]
     if args.release:
         cmd.append("--release")
-    cmd.extend([
-        "--manifest-path",
-        os.path.join(repo_dir, manifest),
-        "--bin",
-        args.bin,
-        "--",
-        "--config-file",
-        args.config,
-    ])
+    cmd.extend(
+        [
+            "--manifest-path",
+            os.path.join(repo_dir, manifest),
+            "--bin",
+            args.bin,
+            "--",
+            "--config-file",
+            args.config,
+        ]
+    )
     if args.no_write_outputs:
         cmd.append("--no-write-outputs")
     if args.output_run_dir:
         cmd.extend(["--output-run-dir", args.output_run_dir])
+    if args.replay_snapshot:
+        cmd.extend(["--replay-snapshot", args.replay_snapshot])
 
     # Build shell command string to source cargo env
     import shlex
+
     cmd_str = shell_prefix + " ".join(shlex.quote(str(c)) for c in cmd)
 
     # Run and stream output, but also capture so we can parse summary at end.

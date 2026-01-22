@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import os
-import sys
 import itertools
 import json
+import os
+import sys
+
 from worker_pool import run_param_sweep
 
 # ensure scripts/ is importable

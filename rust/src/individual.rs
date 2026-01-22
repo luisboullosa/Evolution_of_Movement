@@ -1,6 +1,6 @@
 use crate::neural_network::NeuralNetwork;
 use rand::Rng;
-use rand_distr::{Distribution, Normal};
+use rand_distr::{Distribution, Cauchy};
 
 #[derive(Clone, Debug)]
 pub struct Individual {
@@ -105,30 +105,30 @@ impl Individual {
         if self.resources >= reproduction_threshold {
             self.resources -= reproduction_cost;
             let mut child_nn = self.nn.clone();
-            let normal = Normal::new(0.0, mutation_sigma).unwrap();
+            let cauchy = Cauchy::new(0.0, mutation_sigma).unwrap();
             for w in child_nn.weights.iter_mut() {
                 if rng.gen::<f64>() < mutation_rate {
-                    *w += normal.sample(rng);
+                    *w += cauchy.sample(rng);
                 }
             }
             for w in child_nn.weights_multi.iter_mut() {
                 if rng.gen::<f64>() < mutation_rate {
-                    *w += normal.sample(rng);
+                    *w += cauchy.sample(rng);
                 }
             }
             for b in child_nn.biases.iter_mut() {
                 if rng.gen::<f64>() < mutation_rate {
-                    *b += normal.sample(rng);
+                    *b += cauchy.sample(rng);
                 }
             }
             for w in child_nn.weights2.iter_mut() {
                 if rng.gen::<f64>() < mutation_rate {
-                    *w += normal.sample(rng);
+                    *w += cauchy.sample(rng);
                 }
             }
             for b in child_nn.biases2.iter_mut() {
                 if rng.gen::<f64>() < mutation_rate {
-                    *b += normal.sample(rng);
+                    *b += cauchy.sample(rng);
                 }
             }
             let child = Individual::new(child_nn, self.position, *next_id);

@@ -8,10 +8,12 @@ Usage:
 
 This script sweeps `movement_cost_factor` and `maintenance_cost_per_node` by default; edit ranges in the file as needed.
 """
-import os
-import json
+
 import argparse
 import itertools
+import json
+import os
+
 from worker_pool import run_param_sweep
 
 # detect Rust binary
@@ -75,10 +77,12 @@ for idx, (mv, mc) in enumerate(pairs):
 # build cmd for each job
 EXE = RUST_BIN
 
+
 def cmd_builder(job):
     idx = job[0]
     cfgpath = run_cfg_paths[idx]
     return [EXE, "--config", cfgpath]
+
 
 # result row builder: parse extinction time from output using same parser logic as worker_pool
 def result_row_builder(job, extinct, out_text):
@@ -88,11 +92,20 @@ def result_row_builder(job, extinct, out_text):
     # recorded_steps and movement metrics will be computed by downstream scripts; leave zeros now
     return [mv, mc, ext_val, survived]
 
+
 header = ["movement_cost_factor", "maintenance_cost_per_node", "extinction_time", "survived"]
 
 pairs_idxed = list(enumerate(pairs))
 
 print(f"Starting scan: {len(pairs_idxed)} jobs, workers={args.workers}")
-run_param_sweep(pairs_idxed, cmd_builder, os.path.join(outdir, "results.csv"), header, workers=args.workers, timeout=3600, result_row_builder=result_row_builder)
+run_param_sweep(
+    pairs_idxed,
+    cmd_builder,
+    os.path.join(outdir, "results.csv"),
+    header,
+    workers=args.workers,
+    timeout=3600,
+    result_row_builder=result_row_builder,
+)
 
 print("Scan finished. Results in", outdir)

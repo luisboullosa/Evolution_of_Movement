@@ -1,13 +1,11 @@
 use crate::config::Config;
 use crate::environment::Environment;
 use crate::individual::Individual;
+use crate::snapshot::{PopulationSnapshot, SnapshotError};
+use crate::webviewer_writer::{resolve_individuals_encoding, IndividualsEncoding, WebviewerWriter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rand_distr::Normal;
-use rand_distr::Distribution;
-use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::fs::File;
+use rand_distr::{Distribution, Cauchy};
 use std::io::Write;
 use std::time::Instant;
 
@@ -20,69 +18,16 @@ pub struct Simulation {
     pub last_delta: Vec<i32>,
     pub last_movers: usize,
     pub config: Config,
-    pub nn_index_cache: HashMap<String, String>,
-    pub nn_index_dirty: bool,
-    pub nn_index_target_dir: String,
-    // per-sim buffered writers for env and individuals to avoid reopen on each timestep
-    pub env_file: Option<File>,
-    pub ind_file: Option<File>,
-    // reusable NN buffers to avoid per-step allocations
     pub nn_hidden_buf: Vec<f64>,
     pub nn_out2_buf: Vec<f64>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn new_and_init_population() {
-        let mut cfg = Config::default();
-        cfg.grid_width = 10;
-        cfg.nn_nodes = 2;
-        cfg.nn_inputs = 1;
-        cfg.nn_layers = 1;
-        cfg.nn_nodes2 = 0;
-        cfg.randomize_start_positions = true;
-        cfg.radiate = 0;
-        cfg.seed = 42;
-
-        let mut sim = Simulation::new(&cfg);
-        assert_eq!(sim.individuals.len(), 0);
-        sim.init_population(5);
-        assert_eq!(sim.individuals.len(), 5);
-        assert_eq!(sim.next_id, 6);
-        for ind in sim.individuals.iter() {
-            assert!(ind.position < cfg.grid_width as usize);
-            assert!(ind.resources > 0.0);
-        }
-    }
-
-    #[test]
-    fn step_and_visualization_runs() {
-        let mut cfg = Config::default();
-        cfg.grid_width = 8;
-        cfg.nn_nodes = 2;
-        cfg.nn_inputs = 1;
-        cfg.nn_layers = 1;
-        cfg.nn_nodes2 = 0;
-        cfg.randomize_start_positions = true;
-        cfg.radiate = 0;
-        cfg.seed = 7;
-        cfg.vis_height = 6;
-
-        let mut sim = Simulation::new(&cfg);
-        sim.init_population(3);
-        sim.step();
-        let out = sim.get_visualization(4, cfg.vis_height as usize);
-        assert!(!out.is_empty());
-    }
+    ind_encoding: IndividualsEncoding,
 }
 
 impl Simulation {
     pub fn new(cfg: &Config) -> Self {
         let mut env = Environment::new(cfg.grid_width);
         env.init_perlin(cfg.seed as u64, cfg.resource_scale);
+        let ind_encoding = Self::resolve_individuals_encoding(&cfg.individuals_encoding);
         Simulation {
             env,
             individuals: Vec::new(),
@@ -92,13 +37,9 @@ impl Simulation {
             last_delta: Vec::new(),
             last_movers: 0,
             config: cfg.clone(),
-            nn_index_cache: HashMap::new(),
-            nn_index_dirty: false,
-            nn_index_target_dir: String::new(),
-            env_file: None,
-            ind_file: None,
-            nn_hidden_buf: vec![0.0; cfg.nn_nodes as usize],
-            nn_out2_buf: vec![0.0; cfg.nn_nodes2 as usize],
+            nn_hidden_buf: vec![0.0; cfg.nn_nodes.max(0) as usize],
+            nn_out2_buf: vec![0.0; cfg.nn_nodes2.max(0) as usize],
+            ind_encoding,
         }
     }
 
@@ -115,123 +56,130 @@ impl Simulation {
         let wrand = rand::distributions::Uniform::new(-1.0f64, 1.0f64);
         for _ in 0..n {
             let mut nn = crate::neural_network::NeuralNetwork::new(
-                self.config.nn_nodes as usize,
-                self.config.nn_inputs as usize,
+                self.config.nn_nodes.max(0) as usize,
+                self.config.nn_inputs.max(0) as usize,
                 self.config.nn_layers,
-                self.config.nn_nodes2 as usize,
+                self.config.nn_nodes2.max(0) as usize,
             );
-            // initialize weights.
-            // If `radiate` is set (>0) we start from default weights (zeros)
-            // and apply simulated mutations at effective rate = mutation_rate * radiate.
             if self.config.radiate > 0 {
-                let mut eff = (self.config.mutation_rate as f64) * (self.config.radiate as f64);
-                if eff.is_nan() || eff < 0.0 {
-                    eff = 0.0;
-                }
-                let normal = Normal::new(0.0, self.config.mutation_sigma).unwrap();
+                // Treat `radiate` as number of independent sampling events.
+                // For each event, with probability `mutation_rate` apply a Cauchy perturbation.
+                let events = (self.config.radiate as i64).max(0) as usize;
+                let mutation_rate = self.config.mutation_rate as f64;
+                let cauchy = Cauchy::new(0.0, self.config.mutation_sigma).unwrap();
                 for w in nn.weights.iter_mut() {
-                    if self.rng.gen::<f64>() < eff {
-                        *w += normal.sample(&mut self.rng);
+                    for _ in 0..events {
+                        if self.rng.gen::<f64>() < mutation_rate {
+                            *w += cauchy.sample(&mut self.rng);
+                        }
                     }
                 }
                 for w in nn.weights_multi.iter_mut() {
-                    if self.rng.gen::<f64>() < eff {
-                        *w += normal.sample(&mut self.rng);
+                    for _ in 0..events {
+                        if self.rng.gen::<f64>() < mutation_rate {
+                            *w += cauchy.sample(&mut self.rng);
+                        }
                     }
                 }
                 for b in nn.biases.iter_mut() {
-                    if self.rng.gen::<f64>() < eff {
-                        *b += normal.sample(&mut self.rng);
+                    for _ in 0..events {
+                        if self.rng.gen::<f64>() < mutation_rate {
+                            *b += cauchy.sample(&mut self.rng);
+                        }
                     }
                 }
                 for w in nn.weights2.iter_mut() {
-                    if self.rng.gen::<f64>() < eff {
-                        *w += normal.sample(&mut self.rng);
+                    for _ in 0..events {
+                        if self.rng.gen::<f64>() < mutation_rate {
+                            *w += cauchy.sample(&mut self.rng);
+                        }
                     }
                 }
                 for b in nn.biases2.iter_mut() {
-                    if self.rng.gen::<f64>() < eff {
-                        *b += normal.sample(&mut self.rng);
+                    for _ in 0..events {
+                        if self.rng.gen::<f64>() < mutation_rate {
+                            *b += cauchy.sample(&mut self.rng);
+                        }
                     }
                 }
             } else {
-                // initialize weights randomly (uniform -1..1)
                 for w in nn.weights.iter_mut() {
-                    *w = self.rng.sample(wrand);
+                    *w = wrand.sample(&mut self.rng);
                 }
                 for w in nn.weights_multi.iter_mut() {
-                    *w = self.rng.sample(wrand);
+                    *w = wrand.sample(&mut self.rng);
                 }
                 for b in nn.biases.iter_mut() {
-                    *b = self.rng.sample(wrand);
+                    *b = wrand.sample(&mut self.rng);
                 }
                 for w in nn.weights2.iter_mut() {
-                    *w = self.rng.sample(wrand);
+                    *w = wrand.sample(&mut self.rng);
                 }
                 for b in nn.biases2.iter_mut() {
-                    *b = self.rng.sample(wrand);
+                    *b = wrand.sample(&mut self.rng);
                 }
             }
+
             let pos = if self.config.randomize_start_positions {
-                self.rng.sample(pdist)
+                pdist.sample(&mut self.rng)
             } else {
-                self.config.start_pos
-                    % (if self.env.width == 0 {
-                        1
-                    } else {
-                        self.env.width
-                    })
+                self.config.start_pos.min(self.env.width.saturating_sub(1))
             };
-            let ind = Individual::new(nn, pos, self.next_id);
+            let mut ind = Individual::new(nn, pos, self.next_id);
             self.next_id += 1;
+            ind.resources = 10.0;
             self.individuals.push(ind);
         }
     }
 
     pub fn step(&mut self) {
-        // advance environment dynamics
+        let width = self.env.width.max(1);
         self.env.step(
             self.config.seed as u64,
             self.config.env_time_speed,
             self.config.env_time_amplitude,
             self.config.env_perlin_spatial_scale,
             self.config.env_perlin_time_scale,
-            self.config.resource_scale
+            self.config.resource_scale,
         );
 
-        // map positions to counts
-        let clen = self.env.width.max(1);
-        let mut counts = vec![0usize; clen];
+        let mut occupancy = vec![0i32; width];
         for ind in &self.individuals {
-            counts[ind.position % clen] += 1;
+            let pos = ind.position % width;
+            occupancy[pos] = occupancy[pos].saturating_add(1);
         }
 
-        // prepare per-individual tracking
-        let n = self.individuals.len();
-        self.last_spend.clear();
-        self.last_spend.resize(n, 0.0);
-        self.last_delta.clear();
-        self.last_delta.resize(n, 0);
+        self.last_spend.resize(self.individuals.len(), 0.0);
+        self.last_delta.resize(self.individuals.len(), 0);
         self.last_movers = 0;
 
-        // each individual acts and may move
-        for i in 0..n {
-            let ind = &mut self.individuals[i];
-            let pos = ind.position % self.env.width.max(1);
-            let center = self.env.gather_at(pos, counts[pos] as i32);
-            let left = self.env.gather_at(
-                (pos + self.env.width - 1) % self.env.width,
-                counts[pos] as i32,
-            );
+        for (i, ind) in self.individuals.iter_mut().enumerate() {
+            let pos = ind.position % width;
+            let left_idx = if pos == 0 { width - 1 } else { pos - 1 };
+            let right_idx = (pos + 1) % width;
+            let center = self.env.resources.get(pos).copied().unwrap_or(0.0);
+            let left = self
+                .env
+                .resources
+                .get(left_idx)
+                .copied()
+                .unwrap_or(center);
             let right = self
                 .env
-                .gather_at((pos + 1) % self.env.width, counts[pos] as i32);
-            let occupancy = counts[pos] as i32;
+                .resources
+                .get(right_idx)
+                .copied()
+                .unwrap_or(center);
+            let local_population = if self.config.nn_use_occupancy {
+                occupancy[pos]
+            } else {
+                0
+            };
             let out = ind.act(
                 left,
                 center,
                 right,
-                occupancy,
+                local_population,
                 self.config.movement_cost_factor,
                 &mut self.rng,
                 &mut self.nn_hidden_buf,
@@ -242,27 +190,25 @@ impl Simulation {
                 self.last_spend[i] = out.abs();
                 self.last_delta[i] = delta;
                 self.last_movers = self.last_movers.saturating_add(1);
-                let mut new_position = ind.position as i32 + delta;
-                while new_position < 0 {
-                    new_position += self.env.width as i32;
+                let width_i64 = width as i64;
+                let mut new_position = ind.position as i64 + delta as i64;
+                new_position %= width_i64;
+                if new_position < 0 {
+                    new_position += width_i64;
                 }
-                new_position = (new_position as usize % self.env.width) as i32;
                 ind.position = new_position as usize;
             }
         }
 
-        // age increment
         for ind in &mut self.individuals {
             ind.age += 1;
         }
 
-        // reproduction
         let before = self.individuals.len();
         for i in 0..before {
             if i >= self.individuals.len() {
                 break;
             }
-            // read resource value first to avoid borrowing conflicts
             let res = self.individuals[i].resources;
             if res > self.config.reproduction_threshold {
                 if self.config.max_population > 0
@@ -270,7 +216,6 @@ impl Simulation {
                 {
                     break;
                 }
-                // perform reproduction with a mutable borrow only when needed
                 let child_opt = {
                     let ind_mut = &mut self.individuals[i];
                     ind_mut.reproduce(
@@ -288,13 +233,11 @@ impl Simulation {
             }
         }
 
-        // maintenance cost per individual
         for ind in &mut self.individuals {
             let total_nodes = ind.nn.nodes + ind.nn.nodes2;
             ind.resources -= (total_nodes as f64) * self.config.maintenance_cost_per_node;
         }
 
-        // remove dead individuals
         use rand::distributions::{Distribution, Uniform};
         let ud = Uniform::new(0.0f64, 1.0f64);
         self.individuals.retain(|ind| {
@@ -311,432 +254,710 @@ impl Simulation {
         });
     }
 
-    /// Append environment NDJSON line to `env.jsonl` in target dir derived from `target_path` or `config.webviewer_base`.
-    pub fn dump_env(&self, _target_path: &str, t: Option<i32>) {
-        // Skip any env output when global write_outputs is disabled
-        if !self.config.write_outputs {
-            return;
-        }
-        // If a target path was provided, use it directly (it may include filename).
-        // Otherwise create/find a per-sim directory under `webviewer_base` and write there.
-        let path = if !_target_path.is_empty() {
-            std::path::PathBuf::from(_target_path)
-        } else {
-            let base = if !self.nn_index_target_dir.is_empty() {
-                std::path::PathBuf::from(&self.nn_index_target_dir)
-            } else {
-                std::path::PathBuf::from(if !self.config.webviewer_base.is_empty() {
-                    &self.config.webviewer_base
-                } else {
-                    "."
-                })
-            };
-            let _ = std::fs::create_dir_all(&base);
-            let mut simnum = self.config.sim_number;
-            if simnum < 0 {
-                let mut maxn = -1;
-                if let Ok(entries) = std::fs::read_dir(&base) {
-                    for e in entries.flatten() {
-                        if let Ok(fname) = e.file_name().into_string() {
-                            if fname.starts_with(&self.config.sim_prefix) {
-                                let tail = &fname[self.config.sim_prefix.len()..];
-                                if let Ok(n) = tail.parse::<i32>() {
-                                    if n > maxn {
-                                        maxn = n;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                simnum = maxn + 1;
-            }
-            let dn = format!(
-                "{}{:0width$}",
-                self.config.sim_prefix,
-                simnum,
-                width = self.config.sim_digits as usize
-            );
-            let simpath = base.join(&dn);
-            let _ = std::fs::create_dir_all(&simpath);
-            simpath.join("env.jsonl")
-        };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
-            let _ = write!(f, "{{");
-            if let Some(tv) = t {
-                let _ = write!(f, "\"t\":{}, ", tv);
-            }
-            let _ = write!(f, "\"resources\": [");
-            for i in 0..self.env.width {
-                if i > 0 {
-                    let _ = write!(f, ", ");
-                }
-                let _ = write!(f, "{:.6}", self.env.resources[i]);
-            }
-            let _ = writeln!(f, "]}}");
-        }
-    }
+    pub fn run(&mut self) {
+        use std::fs;
+        use std::io::{self, Write};
 
-    /// Append individuals NDJSON line and update in-memory nn index cache.
-    pub fn dump_individuals(&mut self, _target_path: &str, t: Option<i32>) {
-        // Skip any individuals / nn index work when global write_outputs is disabled
-        if !self.config.write_outputs {
+        fn find_repo_root(mut cur: std::path::PathBuf) -> Option<std::path::PathBuf> {
+            // Prefer the top-level project root that contains CMakeLists.txt; if none
+            // is found, fall back to the highest directory with a README.md.
+            let mut readme_candidate: Option<std::path::PathBuf> = None;
+            loop {
+                if cur.join("CMakeLists.txt").exists() {
+                    return Some(cur);
+                }
+                if readme_candidate.is_none() && cur.join("README.md").exists() {
+                    readme_candidate = Some(cur.clone());
+                }
+                if let Some(parent) = cur.parent() {
+                    cur = parent.to_path_buf();
+                } else {
+                    return readme_candidate.or(Some(cur));
+                }
+            }
+        }
+
+        let steps = self.config.steps;
+        let report_interval = if self.config.report_interval > 0 {
+            self.config.report_interval
+        } else {
+            1
+        };
+        let write_frames = self.config.write_frames;
+        let wants_frames = write_frames && self.config.write_outputs;
+        let estimated_bytes = self.estimate_output_bytes(wants_frames);
+        if !self.enforce_output_budget(estimated_bytes) {
+            eprintln!(
+                "[error] aborting run because projected outputs exceed configured budget"
+            );
             return;
         }
-        // Respect provided target path (may include filename). Fall back to a per-sim folder under webviewer_base.
-        let path = if !_target_path.is_empty() {
-            std::path::PathBuf::from(_target_path)
-        } else {
-            let base = if !self.nn_index_target_dir.is_empty() {
-                std::path::PathBuf::from(&self.nn_index_target_dir)
-            } else {
-                std::path::PathBuf::from(if !self.config.webviewer_base.is_empty() {
-                    &self.config.webviewer_base
+        let needs_simdir = wants_frames
+            || self.config.write_outputs
+            || self.config.write_config
+            || self.config.write_snapshot;
+
+        let mut simdir = String::new();
+        let mut writer: Option<WebviewerWriter> = None;
+        if needs_simdir {
+            let repo_root = std::env::current_dir()
+                .ok()
+                .and_then(find_repo_root)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+
+            // If an explicit output directory is provided, write everything there.
+            // Otherwise create/find a per-sim directory under `output_dir_base`.
+            let simpath = if !self.config.output_run_dir.is_empty() {
+                let p = std::path::Path::new(&self.config.output_run_dir);
+                if p.is_absolute() {
+                    p.to_path_buf()
                 } else {
-                    "."
-                })
-            };
-            let _ = std::fs::create_dir_all(&base);
-            let mut simnum = self.config.sim_number;
-            if simnum < 0 {
-                let mut maxn = -1;
-                if let Ok(entries) = std::fs::read_dir(&base) {
-                    for e in entries.flatten() {
-                        if let Ok(fname) = e.file_name().into_string() {
-                            if fname.starts_with(&self.config.sim_prefix) {
-                                let tail = &fname[self.config.sim_prefix.len()..];
-                                if let Ok(n) = tail.parse::<i32>() {
-                                    if n > maxn {
-                                        maxn = n;
+                    repo_root.join(p)
+                }
+            } else {
+                let base = if !self.config.output_dir_base.is_empty() {
+                    let wb = std::path::Path::new(&self.config.output_dir_base);
+                    if wb.is_absolute() {
+                        wb.to_path_buf()
+                    } else {
+                        repo_root.join(wb)
+                    }
+                } else {
+                    repo_root.clone()
+                };
+                let _ = fs::create_dir_all(&base);
+
+                let mut simnum = self.config.sim_number;
+                if simnum < 0 {
+                    let mut maxn = -1;
+                    if let Ok(entries) = fs::read_dir(&base) {
+                        for entry in entries.flatten() {
+                            if let Ok(fname) = entry.file_name().into_string() {
+                                if fname.starts_with(&self.config.sim_prefix) {
+                                    let tail = &fname[self.config.sim_prefix.len()..];
+                                    if let Ok(n) = tail.parse::<i32>() {
+                                        if n > maxn {
+                                            maxn = n;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    simnum = maxn + 1;
                 }
-                simnum = maxn + 1;
+
+                let dn = format!(
+                    "{}{:0width$}",
+                    self.config.sim_prefix,
+                    simnum,
+                    width = self.config.sim_digits as usize
+                );
+                base.join(&dn)
+            };
+
+            let _ = fs::create_dir_all(&simpath);
+            simdir = simpath.to_string_lossy().to_string();
+
+            if self.config.write_outputs || wants_frames {
+                let mut w = WebviewerWriter::new(&self.config, &simdir, self.ind_encoding);
+                w.open_frames_if_needed();
+                writer = Some(w);
             }
-            let dn = format!(
-                "{}{:0width$}",
-                self.config.sim_prefix,
-                simnum,
-                width = self.config.sim_digits as usize
-            );
-            let simpath = base.join(&dn);
-            let _ = std::fs::create_dir_all(&simpath);
-            simpath.join("individuals.jsonl")
-        };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+
+            if self.config.write_config {
+                let cfg_json = serde_json::to_string(&self.config).unwrap_or_else(|_| "{}".to_string());
+                if let Some(w) = writer.as_mut() {
+                    w.write_frames_config_header(&cfg_json);
+                }
+                self.write_config_artifacts(&simdir, &cfg_json);
+            }
+
+            if let Some(w) = writer.as_mut() {
+                w.write_frames_header_row();
+                if self.config.write_outputs {
+                    w.dump_env(&self.env, Some(0));
+                    w.dump_individuals(&self.individuals, &self.last_spend, &self.last_delta, Some(0));
+                }
+            }
+        } else if self.config.write_outputs {
+            // No simdir was created, but outputs were requested; fall back to a temporary
+            // directory derived from output_dir_base.
+            let temp_dir = if !self.config.output_dir_base.is_empty() {
+                self.config.output_dir_base.clone()
+            } else {
+                "output".to_string()
+            };
+            let mut w = WebviewerWriter::new(&self.config, &temp_dir, self.ind_encoding);
+            w.open_frames_if_needed();
+            w.write_frames_header_row();
+            w.dump_env(&self.env, Some(0));
+            w.dump_individuals(&self.individuals, &self.last_spend, &self.last_delta, Some(0));
+            writer = Some(w);
         }
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
-            let _ = write!(f, "{{");
-            if let Some(tv) = t {
-                let _ = write!(f, "\"t\":{}, ", tv);
+
+        let mut final_step_index = 0;
+        let start_time = Instant::now();
+        for t in 0..steps {
+            final_step_index = t;
+            self.step();
+
+            if self.individuals.is_empty() {
+                println!("[info] population extinct at t={}, stopping simulation", t);
+                break;
             }
-            let _ = write!(f, "\"individuals\": [");
-            for (i, ind) in self.individuals.iter().enumerate() {
-                if i > 0 {
-                    let _ = write!(f, ", ");
+
+            if self.config.show_progress {
+                let bar_width = 40usize;
+                let frac = (t + 1) as f64 / steps as f64;
+                let pos = (bar_width as f64 * frac) as usize;
+                let mut ss = String::new();
+                ss.push('[');
+                for i in 0..bar_width {
+                    ss.push(if i < pos {
+                        '='
+                    } else if i == pos {
+                        '>'
+                    } else {
+                        ' '
+                    });
                 }
-                let spend = if i < self.last_spend.len() {
-                    self.last_spend[i]
+                ss.push(']');
+                ss.push(' ');
+                ss.push_str(&format!("{}%", (frac * 100.0) as i32));
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let avg = elapsed / ((t + 1) as f64);
+                let rem = ((steps - (t + 1)) as f64) * avg;
+                let hrs = (rem as i64) / 3600;
+                let mins = ((rem as i64) % 3600) / 60;
+                let secs = (rem as i64) % 60;
+                ss.push_str(&format!("  ETA {}:{:02}:{:02}", hrs, mins, secs));
+
+                let mut prop_now = 0.0f64;
+                if !self.last_delta.is_empty() {
+                    let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
+                    if seen > 0 {
+                        let moved = self
+                            .last_delta
+                            .iter()
+                            .take(seen)
+                            .filter(|&&d| d != 0)
+                            .count();
+                        prop_now = moved as f64 / seen as f64;
+                    }
+                }
+                ss.push_str(&format!(
+                    "  t={} pop={} prop_moved={:.3}",
+                    t,
+                    self.individuals.len(),
+                    prop_now
+                ));
+                ss.push('\r');
+                print!("{}", ss);
+                let _ = io::stdout().flush();
+            }
+
+            if t % report_interval == 0 {
+                if t < self.config.burn_in {
+                    continue;
+                }
+
+                let mut avgres = 0.0f64;
+                for ind in &self.individuals {
+                    avgres += ind.resources;
+                }
+                if !self.individuals.is_empty() {
+                    avgres /= self.individuals.len() as f64;
+                }
+                let prop_moved = if !self.last_delta.is_empty() {
+                    let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
+                    if seen > 0 {
+                        self.last_delta
+                            .iter()
+                            .take(seen)
+                            .filter(|&&d| d != 0)
+                            .count() as f64
+                            / seen as f64
+                    } else {
+                        0.0
+                    }
                 } else {
                     0.0
                 };
-                let delta = if i < self.last_delta.len() {
-                    self.last_delta[i]
-                } else {
-                    0
-                };
-                let _ = write!(f, "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"last_spend\":{:.6},\"last_delta\":{},\"age\":{} }}", ind.id, ind.position, ind.resources, spend, delta, ind.age);
 
-                // nn index cache (build nested arrays for multi-input nets to match C++ format)
-                let idstr = ind.id.to_string();
-                use std::collections::hash_map::Entry;
-                match self.nn_index_cache.entry(idstr) {
-                    Entry::Occupied(_) => {}
-                    Entry::Vacant(e) => {
-                        let mut js = String::new();
-                        js.push('{');
-                        // type
-                        let ntype = match ind.nn.nn_type {
-                            crate::neural_network::NNType::SingleInput => "single",
-                            _ => "multi",
-                        };
-                        js.push_str(&format!("\n      \"type\": \"{}\",\n", ntype));
-                        js.push_str(&format!("      \"inputs\": {},\n      \"nodes\": {},\n      \"layers\": {},\n      \"nodes2\": {}\n", ind.nn.inputs, ind.nn.nodes, ind.nn.layers, ind.nn.nodes2));
+                let frame = self.get_visualization(self.config.vis_cols, self.config.vis_height);
+                if let Some(w) = writer.as_mut() {
+                    w.write_frame_row(t, self.individuals.len(), avgres, &frame, prop_moved);
+                }
 
-                        // weights
-                        js.push_str("      ,\"weights\": ");
-                        if let crate::neural_network::NNType::SingleInput = ind.nn.nn_type {
-                            js.push('[');
-                            for (wi, w) in ind.nn.weights.iter().enumerate() {
-                                if wi > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push_str(&format!("{:.6}", w));
-                            }
-                            js.push_str("]\n");
-                        } else {
-                            js.push('[');
-                            for ni in 0..ind.nn.nodes {
-                                if ni > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push('[');
-                                for j in 0..ind.nn.inputs.min(ind.nn.weights_multi.len() / ind.nn.nodes)
-                                {
-                                    if j > 0 {
-                                        js.push_str(", ");
-                                    }
-                                    let idx = ni.saturating_mul(ind.nn.inputs).saturating_add(j);
-                                    js.push_str(&format!(
-                                        "{:.6}",
-                                        ind.nn.weights_multi.get(idx).copied().unwrap_or(0.0)
-                                    ));
-                                }
-                                js.push(']');
-                            }
-                            js.push_str("]\n");
+                if let Some(w) = writer.as_mut() {
+                    if self.config.write_outputs {
+                        w.dump_env(&self.env, Some(t));
+                        w.dump_individuals(
+                            &self.individuals,
+                            &self.last_spend,
+                            &self.last_delta,
+                            Some(t),
+                        );
+                    }
+                    w.maybe_flush_nn_index(t);
+                }
+            }
+
+            if self.config.step_mode {
+                self.print_debug_snapshot(3);
+                if std::env::var("DISABLE_STEP_PAUSE").is_err() {
+                    println!(
+                        "Completed step {}/{} — press Enter to continue...",
+                        t + 1,
+                        steps
+                    );
+                    let _ = io::stdout().flush();
+                    let mut buf = String::new();
+                    let _ = io::stdin().read_line(&mut buf);
+                }
+            }
+        }
+
+        if let Some(w) = writer.as_mut() {
+            w.flush_all();
+        }
+        if self.config.show_progress {
+            println!();
+        }
+        if let Some(w) = writer.as_mut() {
+            if self.config.write_outputs {
+                w.dump_env(&self.env, Some(final_step_index));
+                w.dump_individuals(
+                    &self.individuals,
+                    &self.last_spend,
+                    &self.last_delta,
+                    Some(final_step_index),
+                );
+            }
+            w.flush_all();
+        }
+
+        if self.config.write_snapshot {
+            self.persist_population_snapshot(&simdir, final_step_index);
+
+            // After successfully writing the snapshot, copy the helper PowerShell
+            // script into the simulation directory so that downstream processing
+            // (e.g. generating webviewer outputs) is available next to the
+            // produced artifacts by default.
+            if !simdir.is_empty() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    if let Some(root) = find_repo_root(cwd) {
+                        let helper = root
+                            .join("scripts")
+                            .join("generate_webviewer_outputs.ps1");
+                        if helper.exists() {
+                            let dst = std::path::Path::new(&simdir)
+                                .join("generate_webviewer_outputs.ps1");
+                            let _ = std::fs::copy(&helper, &dst);
                         }
-
-                        // biases
-                        js.push_str(",      \"biases\": [");
-                        for (bi, b) in ind.nn.biases.iter().enumerate() {
-                            if bi > 0 {
-                                js.push_str(", ");
-                            }
-                            js.push_str(&format!("{:.6}", b));
-                        }
-                        js.push_str("]\n");
-
-                        // optional second layer
-                        if ind.nn.layers == 2 {
-                            js.push_str(",      \"layer2_weights\": [");
-                            for ni in 0..ind.nn.nodes2 {
-                                if ni > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push('[');
-                                for j in 0..ind.nn.nodes {
-                                    if j > 0 {
-                                        js.push_str(", ");
-                                    }
-                                    let idx = ni.saturating_mul(ind.nn.nodes).saturating_add(j);
-                                    js.push_str(&format!(
-                                        "{:.6}",
-                                        ind.nn.weights2.get(idx).copied().unwrap_or(0.0)
-                                    ));
-                                }
-                                js.push(']');
-                            }
-                            js.push_str("]\n");
-                            js.push_str(",      \"layer2_biases\": [");
-                            for (bi, b) in ind.nn.biases2.iter().enumerate() {
-                                if bi > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push_str(&format!("{:.6}", b));
-                            }
-                            js.push_str("]\n");
-                        }
-
-                        js.push_str("    }");
-                        e.insert(js);
-                        self.nn_index_dirty = true;
                     }
                 }
             }
-            let _ = writeln!(f, "]}}");
+        }
+
+        // Write build id into the simulation directory for run compatibility tracking
+        let build_id = option_env!("BUILD_ID").unwrap_or("unknown_build");
+        if !simdir.is_empty() {
+            let mut bid_path = std::path::Path::new(&simdir).to_path_buf();
+            bid_path.push("build_id.txt");
+            let _ = std::fs::write(&bid_path, build_id);
+        }
+
+        let final_pop = self.individuals.len();
+        let prop_moved = if !self.last_delta.is_empty() {
+            let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
+            if seen > 0 {
+                self.last_delta
+                    .iter()
+                    .take(seen)
+                    .filter(|&&d| d != 0)
+                    .count() as f64
+                    / seen as f64
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let mut summary_map = serde_json::Map::new();
+        summary_map.insert("final_population".to_string(), serde_json::Value::from(final_pop));
+        summary_map.insert("prop_moved".to_string(), serde_json::Value::from(prop_moved));
+        if let Ok(s) = serde_json::to_string(&summary_map) {
+            // include build id in the JSON summary so external drivers can record it
+            if let Some(bid) = option_env!("BUILD_ID") {
+                let mut v: serde_json::Value = serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
+                if let serde_json::Value::Object(ref mut map) = v {
+                    map.insert("build_id".to_string(), serde_json::Value::from(bid));
+                }
+                if let Ok(s2) = serde_json::to_string(&v) {
+                    println!("{}", s2);
+                } else {
+                    println!("{}", s);
+                }
+            } else {
+                println!("{}", s);
+            }
         }
     }
 
-    /// Append environment NDJSON line into `simdir` using filename from config (or default).
-    pub fn dump_env_to_dir(&mut self, simdir: &str, t: Option<i32>) {
-        // Skip writing env to per-sim dir when outputs disabled
-        if !self.config.write_outputs {
+    fn write_config_artifacts(&self, simdir: &str, config_json: &str) {
+        if simdir.is_empty() {
             return;
         }
         let simpath = std::path::Path::new(simdir);
-        let env_fname = std::path::Path::new(&self.config.env_out_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("env.jsonl");
-        let path = simpath.join(env_fname);
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        let mut cfg_tmp = simpath.to_path_buf();
+        cfg_tmp.push("config.json.tmp");
+        if let Ok(mut cout) = std::fs::File::create(&cfg_tmp) {
+            let _ = write!(cout, "{}", config_json);
+            let _ = cout.flush();
+            let mut finalp = simpath.to_path_buf();
+            finalp.push("config.json");
+            let _ = std::fs::rename(&cfg_tmp, &finalp);
         }
-        // Open once per simulation and reuse the file handle
-        if self.env_file.is_none() {
-            match OpenOptions::new().create(true).append(true).open(&path) {
-                Ok(f) => {
-                    self.env_file = Some(f);
-                }
-                Err(_e) => {
-                    // ignore failures to open env file
-                }
+
+        // Convenience config for postprocessing / webviewer generation.
+        // This is a copy of config.json with a shorter run and outputs enabled.
+        // It is intended for generating visualization/experiment artifacts without
+        // re-writing snapshots or configs into run directories.
+        let run_config_json = (|| {
+            let mut v: serde_json::Value = serde_json::from_str(config_json).ok()?;
+            if let serde_json::Value::Object(map) = &mut v {
+                map.insert("burn_in".to_string(), serde_json::Value::from(0));
+                map.insert("steps".to_string(), serde_json::Value::from(100));
+                map.insert("write_outputs".to_string(), serde_json::Value::from(true));
+                map.insert("write_snapshot".to_string(), serde_json::Value::from(false));
+                map.insert("write_config".to_string(), serde_json::Value::from(false));
+                map.insert("write_frames".to_string(), serde_json::Value::from(false));
             }
+            serde_json::to_string_pretty(&v).ok()
+        })()
+        .unwrap_or_else(|| config_json.to_string());
+
+        let mut run_cfg_tmp = simpath.to_path_buf();
+        run_cfg_tmp.push("run_config.json.tmp");
+        if let Ok(mut cout) = std::fs::File::create(&run_cfg_tmp) {
+            let _ = write!(cout, "{}", run_config_json);
+            let _ = cout.flush();
+            let mut finalp = simpath.to_path_buf();
+            finalp.push("run_config.json");
+            let _ = std::fs::rename(&run_cfg_tmp, &finalp);
         }
-        if let Some(f) = self.env_file.as_mut() {
-            let _ = write!(f, "{{");
-            if let Some(tv) = t {
-                let _ = write!(f, "\"t\":{}, ", tv);
+
+        if !self.config.config_out_path.is_empty() {
+            let custom = simpath.join(&self.config.config_out_path);
+            if let Some(parent) = custom.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-            let _ = write!(f, "\"resources\": [");
-            for i in 0..self.env.width {
-                if i > 0 {
-                    let _ = write!(f, ", ");
-                }
-                let _ = write!(f, "{:.6}", self.env.resources[i]);
+            let mut custom_tmp = custom.clone();
+            if let Some(fname) = custom.file_name() {
+                let tmpname = format!("{}.tmp", fname.to_string_lossy());
+                custom_tmp.set_file_name(tmpname);
+            } else {
+                custom_tmp.push(".tmp");
             }
-            let _ = writeln!(f, "]}}");
-            let _ = f.flush();
+            if let Ok(mut coutf) = std::fs::File::create(&custom_tmp) {
+                let _ = write!(coutf, "{}", config_json);
+                let _ = coutf.flush();
+                let _ = std::fs::rename(&custom_tmp, &custom);
+            }
         }
     }
 
-    /// Append individuals NDJSON line into `simdir` and update nn index cache.
-    pub fn dump_individuals_to_dir(&mut self, simdir: &str, t: Option<i32>) {
-        // Skip writing individuals/nn index to per-sim dir when outputs disabled
-        if !self.config.write_outputs {
+    fn persist_population_snapshot(&self, simdir: &str, timestep: i32) {
+        if !self.config.write_snapshot {
             return;
         }
-        let simpath = std::path::Path::new(simdir);
-        let ind_fname = std::path::Path::new(&self.config.individuals_out_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("individuals.jsonl");
-        let path = simpath.join(ind_fname);
+        if simdir.is_empty() {
+            eprintln!("[warn] snapshot requested but no simulation directory was created; skipping");
+            return;
+        }
+        let snapshot = PopulationSnapshot::capture(
+            &self.env,
+            &self.individuals,
+            self.next_id,
+            self.config.seed as u64,
+            timestep,
+        );
+        let mut path = std::path::PathBuf::from(simdir);
+        let fname = if self.config.snapshot_filename.is_empty() {
+            "population_snapshot.cbor"
+        } else {
+            &self.config.snapshot_filename
+        };
+        path.push(fname);
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        // Open once per simulation and reuse the file handle
-        if self.ind_file.is_none() {
-            match OpenOptions::new().create(true).append(true).open(&path) {
-                Ok(f) => {
-                    self.ind_file = Some(f);
+        if let Err(err) = snapshot.write_to_path(&path) {
+            match err {
+                SnapshotError::UnsupportedVersion { expected, found } => {
+                    eprintln!(
+                        "[warn] failed to write snapshot (version {} vs expected {}): {}",
+                        found, expected, err
+                    );
                 }
-                Err(_e) => {
-                    // ignore failures to open individuals file
+                _ => {
+                    eprintln!(
+                        "[warn] failed to write snapshot to {}: {}",
+                        path.display(),
+                        err
+                    );
                 }
             }
         }
-        if let Some(f) = self.ind_file.as_mut() {
-            let _ = write!(f, "{{");
-            if let Some(tv) = t {
-                let _ = write!(f, "\"t\":{}, ", tv);
-            }
-            let _ = write!(f, "\"individuals\": [");
-            for (i, ind) in self.individuals.iter().enumerate() {
-                if i > 0 {
-                    let _ = write!(f, ", ");
-                }
-                let spend = if i < self.last_spend.len() {
-                    self.last_spend[i]
-                } else {
-                    0.0
-                };
-                let delta = if i < self.last_delta.len() {
-                    self.last_delta[i]
-                } else {
-                    0
-                };
-                let _ = write!(f, "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"last_spend\":{:.6},\"last_delta\":{},\"age\":{} }}", ind.id, ind.position, ind.resources, spend, delta, ind.age);
+    }
 
-                // nn index cache (build nested arrays for multi-input nets to match C++ format)
-                let idstr = ind.id.to_string();
-                use std::collections::hash_map::Entry;
-                match self.nn_index_cache.entry(idstr) {
-                    Entry::Occupied(_) => {}
-                    Entry::Vacant(e) => {
-                        let mut js = String::new();
-                        js.push('{');
-                        // type
-                        let ntype = match ind.nn.nn_type {
-                            crate::neural_network::NNType::SingleInput => "single",
-                            _ => "multi",
-                        };
-                        js.push_str(&format!("\n      \"type\": \"{}\",\n", ntype));
-                        js.push_str(&format!("      \"inputs\": {},\n      \"nodes\": {},\n      \"layers\": {},\n      \"nodes2\": {}\n", ind.nn.inputs, ind.nn.nodes, ind.nn.layers, ind.nn.nodes2));
+    /// Load a previously captured population snapshot from disk and replace the
+    /// current environment/individuals state. Used for replay runs.
+    pub fn load_snapshot_from_path<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), SnapshotError> {
+        let snapshot = PopulationSnapshot::read_from_path(&path)?;
 
-                        // weights
-                        js.push_str("      ,\"weights\": ");
-                        if let crate::neural_network::NNType::SingleInput = ind.nn.nn_type {
-                            js.push('[');
-                            for (wi, w) in ind.nn.weights.iter().enumerate() {
-                                if wi > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push_str(&format!("{:.6}", w));
-                            }
-                            js.push_str("]\n");
-                        } else {
-                            js.push('[');
-                            for ni in 0..ind.nn.nodes {
-                                if ni > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push('[');
-                                for j in 0..ind.nn.inputs.min(ind.nn.weights_multi.len() / ind.nn.nodes) {
-                                    if j > 0 {
-                                        js.push_str(", ");
-                                    }
-                                    let idx = ni.saturating_mul(ind.nn.inputs).saturating_add(j);
-                                    js.push_str(&format!("{:.6}", ind.nn.weights_multi.get(idx).copied().unwrap_or(0.0)));
-                                }
-                                js.push(']');
-                            }
-                            js.push_str("]\n");
-                        }
-                        js.push_str(",      \"biases\": [");
-                        for (bi, b) in ind.nn.biases.iter().enumerate() {
-                            if bi > 0 {
-                                js.push_str(", ");
-                            }
-                            js.push_str(&format!("{:.6}", b));
-                        }
-                        js.push_str("]\n");
+        // Restore environment dimensions and time.
+        let width = snapshot.env_width as usize;
+        self.env.width = width;
+        self.env.perlin_time = snapshot.env_perlin_time;
 
-                        // optional second layer
-                        if ind.nn.layers == 2 {
-                            js.push_str(",      \"layer2_weights\": [");
-                            for ni in 0..ind.nn.nodes2 {
-                                if ni > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push('[');
-                                for j in 0..ind.nn.nodes {
-                                    if j > 0 {
-                                        js.push_str(", ");
-                                    }
-                                    let idx = ni.saturating_mul(ind.nn.nodes).saturating_add(j);
-                                    js.push_str(&format!("{:.6}", ind.nn.weights2.get(idx).copied().unwrap_or(0.0)));
-                                }
-                                js.push(']');
-                            }
-                            js.push_str("]\n");
-                            js.push_str(",      \"layer2_biases\": [");
-                            for (bi, b) in ind.nn.biases2.iter().enumerate() {
-                                if bi > 0 {
-                                    js.push_str(", ");
-                                }
-                                js.push_str(&format!("{:.6}", b));
-                            }
-                            js.push_str("]\n");
-                        }
-
-                        js.push_str("    }");
-                        e.insert(js);
-                        self.nn_index_dirty = true;
-                    }
-                }
-            }
-            let _ = writeln!(f, "]}}");
-            let _ = f.flush();
+        if self.config.replay_env_seed >= 0 {
+            // When an override seed is provided, rebuild the Perlin base using that seed
+            // so we can test the same population under a different landscape.
+            let seed = self.config.replay_env_seed as u64;
+            self.env = Environment::new(width);
+            self.env.init_perlin(seed, self.config.resource_scale);
+            self.env.perlin_time = snapshot.env_perlin_time;
+        } else {
+            // Otherwise, restore the exact environment from the snapshot.
+            self.env.resources = snapshot
+                .env_resources
+                .iter()
+                .map(|v| *v as f64)
+                .collect();
+            self.env.perlin_base = snapshot
+                .env_perlin_base
+                .iter()
+                .map(|v| *v as f64)
+                .collect();
         }
+
+        // Rebuild individuals from snapshot records.
+        self.individuals = snapshot
+            .individuals
+            .into_iter()
+            .map(|rec| rec.into_individual())
+            .collect();
+
+        // Optionally randomize positions on replay to test robustness under reshuffling.
+        if self.config.replay_randomize_start_positions {
+            let dist = rand::distributions::Uniform::new(0usize, width.max(1));
+            for ind in &mut self.individuals {
+                ind.position = dist.sample(&mut self.rng);
+            }
+        }
+
+        // Restore next_id so new individuals get unique IDs.
+        self.next_id = snapshot.next_id;
+
+        // Reset book-keeping buffers to match the restored population.
+        self.last_spend.clear();
+        self.last_delta.clear();
+        self.last_movers = 0;
+
+        Ok(())
+    }
+
+    fn estimate_output_bytes(&self, frames_enabled: bool) -> u64 {
+        let mut total: u64 = 0;
+        let history_steps = self.estimate_history_steps() as u64;
+        if self.config.write_outputs {
+            let env_record = (self.env.width.max(1) * 16 + 128) as u64;
+            total = total.saturating_add(env_record.saturating_mul(history_steps));
+
+            let pop_ceiling = self.estimated_population_ceiling() as u64;
+            if self.config.write_individual_deltas {
+                let per_entry = self.estimate_individual_delta_entry_bytes();
+                let (full_frames, delta_frames) = self.estimate_delta_frame_counts(history_steps);
+                let updates_per_frame = self.estimate_delta_updates_per_frame(pop_ceiling as usize) as u64;
+                let removals_per_frame = self.estimate_delta_removals_per_frame(pop_ceiling as usize) as u64;
+
+                let full_record = 96u64.saturating_add(pop_ceiling.saturating_mul(per_entry));
+                total = total.saturating_add(full_record.saturating_mul(full_frames));
+
+                let delta_record = 96u64
+                    .saturating_add(updates_per_frame.saturating_mul(per_entry))
+                    .saturating_add(removals_per_frame.saturating_mul(8));
+                total = total.saturating_add(delta_record.saturating_mul(delta_frames));
+            } else {
+                let per_individual = self.estimate_individual_entry_bytes();
+                let ind_record = 96u64.saturating_add(pop_ceiling.saturating_mul(per_individual));
+                total = total.saturating_add(ind_record.saturating_mul(history_steps));
+            }
+        }
+
+        if frames_enabled {
+            let frame_chars = (self.config.vis_cols.max(1)
+                * (self.config.vis_height + self.config.vis_pop_height + 6)) as u64;
+            total = total.saturating_add((frame_chars + 64).saturating_mul(history_steps));
+        }
+
+        if self.config.write_snapshot {
+            let env_blob = (self.env.width.max(1) * 16 * 2) as u64;
+            let pop_ceiling = self.estimated_population_ceiling() as u64;
+            let per_snap = self.estimate_snapshot_entry_bytes();
+            total = total.saturating_add(env_blob);
+            total = total.saturating_add(pop_ceiling.saturating_mul(per_snap));
+        }
+
+        total
+    }
+
+    fn estimate_individual_entry_bytes(&self) -> u64 {
+        match self.ind_encoding {
+            IndividualsEncoding::JsonPretty => 96,
+            IndividualsEncoding::JsonCompact => 72,
+            IndividualsEncoding::Cbor => 48,
+        }
+    }
+
+    fn estimate_individual_delta_entry_bytes(&self) -> u64 {
+        // Delta frames carry the same fields as compact individual records (id, pos,
+        // resources, last_spend, last_delta, age) without any NN weights.
+        match self.ind_encoding {
+            IndividualsEncoding::JsonPretty => 80,
+            IndividualsEncoding::JsonCompact => 64,
+            IndividualsEncoding::Cbor => 40,
+        }
+    }
+
+    fn estimate_snapshot_entry_bytes(&self) -> u64 {
+        let nodes = self.config.nn_nodes.max(0) as usize;
+        let nodes2 = self.config.nn_nodes2.max(0) as usize;
+        let inputs = self.config.nn_inputs.max(0) as usize;
+        let mut bytes = 32usize;
+        bytes += nodes * 4;
+        bytes += nodes2 * 4;
+        bytes += nodes * inputs * 4;
+        bytes += nodes * nodes2 * 4;
+        bytes as u64
+    }
+
+    fn estimate_history_steps(&self) -> usize {
+        let steps = self.config.steps.max(1) as i64;
+        let burn = self.config.burn_in.max(0) as i64;
+        let interval = self.config.report_interval.max(1) as i64;
+        let active = (steps - burn).max(0);
+        let mut frames = active / interval;
+        if active % interval != 0 {
+            frames += 1;
+        }
+        frames as usize + 2
+    }
+
+    fn estimated_population_ceiling(&self) -> usize {
+        let current = self.individuals.len().max(1);
+        let initial = self.config.initial_population.max(0) as usize;
+        let base = current.max(initial);
+        let headroom = ((base as f64) * 1.5).ceil() as usize + 128;
+        let with_headroom = if self.config.max_population > 0 {
+            headroom.min(self.config.max_population as usize)
+        } else {
+            headroom
+        };
+        with_headroom.max(base)
+    }
+
+    fn estimate_delta_frame_counts(&self, history_steps: u64) -> (u64, u64) {
+        if history_steps == 0 {
+            return (0, 0);
+        }
+        let full_every = self.config.delta_full_interval.max(1) as u64;
+        let full_frames = 1u64 + history_steps.saturating_sub(1) / full_every;
+        let delta_frames = history_steps.saturating_sub(full_frames);
+        (full_frames, delta_frames)
+    }
+
+    fn estimate_delta_updates_per_frame(&self, pop_ceiling: usize) -> usize {
+        if pop_ceiling == 0 {
+            return 0;
+        }
+        if !self.last_delta.is_empty() && !self.individuals.is_empty() {
+            let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
+            if seen > 0 {
+                let moved = self
+                    .last_delta
+                    .iter()
+                    .take(seen)
+                    .filter(|&&d| d != 0)
+                    .count();
+                let frac = (moved as f64 / seen as f64).clamp(0.0, 1.0);
+                let est = (frac * pop_ceiling as f64).ceil() as usize;
+                return est.max(seen);
+            }
+        }
+        // Fallback heuristic: assume around half the population produces updates per frame.
+        ((pop_ceiling as f64) * 0.5).ceil() as usize
+    }
+
+    fn estimate_delta_removals_per_frame(&self, pop_ceiling: usize) -> usize {
+        if pop_ceiling == 0 {
+            return 0;
+        }
+        ((pop_ceiling as f64) * 0.02).ceil() as usize
+    }
+
+    fn enforce_output_budget(&self, estimated_bytes: u64) -> bool {
+        let est_mb = estimated_bytes as f64 / (1024.0 * 1024.0);
+        if self.config.output_budget_mb <= 0.0 {
+            if estimated_bytes > 0 {
+                println!("[info] projected outputs ≈{:.2} MiB (no budget configured)", est_mb);
+            }
+            return true;
+        }
+
+        let budget_bytes = (self.config.output_budget_mb.max(0.0) * 1024.0 * 1024.0) as u64;
+        if budget_bytes == 0 {
+            return true;
+        }
+        let warn_fraction = self
+            .config
+            .output_budget_warn_fraction
+            .clamp(0.0, 1.0);
+        let warn_bytes = (budget_bytes as f64 * warn_fraction) as u64;
+        let budget_mb = budget_bytes as f64 / (1024.0 * 1024.0);
+
+        if estimated_bytes >= budget_bytes {
+            eprintln!(
+                "[warn] projected outputs {:.2} MiB exceed configured budget {:.2} MiB",
+                est_mb, budget_mb
+            );
+            if self.config.output_budget_hard_stop {
+                return false;
+            }
+        } else if warn_bytes > 0 && estimated_bytes >= warn_bytes {
+            let pct = (estimated_bytes as f64 / budget_bytes as f64) * 100.0;
+            eprintln!(
+                "[warn] projected outputs {:.2} MiB reach {:.1}% of budget {:.2} MiB",
+                est_mb, pct, budget_mb
+            );
+        } else {
+            println!(
+                "[info] projected outputs {:.2} MiB within budget {:.2} MiB",
+                est_mb, budget_mb
+            );
+        }
+
+        true
+    }
+
+    fn resolve_individuals_encoding(mode: &str) -> IndividualsEncoding {
+        resolve_individuals_encoding(mode)
     }
 
     pub fn get_visualization(&self, cols: usize, height: usize) -> String {
@@ -791,429 +1012,6 @@ impl Simulation {
 
     pub fn visualize(&self, cols: usize) {
         println!("{}", self.get_visualization(cols, self.config.vis_height));
-    }
-
-    pub fn run(&mut self) {
-        use std::fs;
-        use std::io::{self, Write};
-        let steps = self.config.steps;
-        let report_interval = if self.config.report_interval > 0 {
-            self.config.report_interval
-        } else {
-            1
-        };
-        let write_frames = self.config.write_frames;
-        // no interactive stdin stop handler — progress is non-interactive
-
-        // Compute and create per-sim directory up front only when outputs are requested.
-        let mut fout: Option<std::fs::File> = None;
-        let simdir: String;
-        if self.config.write_outputs {
-            // Resolve `webviewer_base` against the repository root when it's a relative path.
-            // Repository root is assumed to contain `CMakeLists.txt` or `README.md`.
-            fn find_repo_root(mut cur: std::path::PathBuf) -> Option<std::path::PathBuf> {
-                loop {
-                    if cur.join("CMakeLists.txt").exists() || cur.join("README.md").exists() {
-                        return Some(cur);
-                    }
-                    if let Some(p) = cur.parent() {
-                        cur = p.to_path_buf();
-                    } else {
-                        return None;
-                    }
-                }
-            }
-
-            let base = if !self.config.webviewer_base.is_empty() {
-                let wb = std::path::Path::new(&self.config.webviewer_base);
-                if wb.is_absolute() {
-                    wb.to_path_buf()
-                } else {
-                    // prefer repo root if available, otherwise cwd
-                    if let Ok(cwd) = std::env::current_dir() {
-                        if let Some(root) = find_repo_root(cwd.clone()) {
-                            root.join(wb)
-                        } else {
-                            cwd.join(wb)
-                        }
-                    } else {
-                        wb.to_path_buf()
-                    }
-                }
-            } else {
-                // default to repo root if available, else current dir
-                if let Ok(cwd) = std::env::current_dir() {
-                    if let Some(root) = find_repo_root(cwd.clone()) {
-                        root
-                    } else {
-                        cwd
-                    }
-                } else {
-                    std::path::PathBuf::from(".")
-                }
-            };
-            let _ = fs::create_dir_all(&base);
-            // determine sim number (respect negative -> auto-increment)
-            let mut simnum = self.config.sim_number;
-            if simnum < 0 {
-                let mut maxn = -1;
-                if let Ok(entries) = fs::read_dir(&base) {
-                    for e in entries.flatten() {
-                        if let Ok(fname) = e.file_name().into_string() {
-                            if fname.starts_with(&self.config.sim_prefix) {
-                                let tail = &fname[self.config.sim_prefix.len()..];
-                                if let Ok(n) = tail.parse::<i32>() {
-                                    if n > maxn {
-                                        maxn = n;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                simnum = maxn + 1;
-            }
-            let dn = format!(
-                "{}{:0width$}",
-                self.config.sim_prefix,
-                simnum,
-                width = self.config.sim_digits as usize
-            );
-            let simpath = base.join(&dn);
-            let _ = fs::create_dir_all(&simpath);
-            simdir = simpath.to_string_lossy().to_string();
-
-            // Ensure nn_index_target_dir prefers the sim directory so index flushes
-            if self.nn_index_target_dir.is_empty() {
-                self.nn_index_target_dir = simdir.clone();
-            }
-
-            // If frames are enabled, create the frames file inside simdir
-            // Respect `write_outputs` to allow skipping all per-step outputs.
-            if write_frames && self.config.write_outputs {
-                let fpath = simpath.join(&self.config.frames_filename);
-                if let Ok(f) = fs::File::create(&fpath) {
-                    fout = Some(f);
-                }
-                // write header and optional config
-                if let Some(f) = fout.as_mut() {
-                    if self.config.write_config {
-                        let js =
-                            serde_json::to_string(&self.config).unwrap_or_else(|_| "{}".to_string());
-                        let _ = writeln!(f, "#CONFIG {}", js);
-
-                        // also write a machine-readable config.json inside the sim directory
-                        // using an atomic write (tmp file + rename) so readers never see
-                        // a partial file.
-                        let mut cfg_tmp = simpath.clone();
-                        cfg_tmp.push("config.json.tmp");
-                        if let Ok(mut cout) = fs::File::create(&cfg_tmp) {
-                            let _ = write!(cout, "{}", js);
-                            let _ = cout.flush();
-                            let mut finalp = std::path::PathBuf::from(&simpath);
-                            finalp.push("config.json");
-                            let _ = std::fs::rename(&cfg_tmp, &finalp);
-                        }
-
-                        // if a custom config_out_path was requested, write that atomically too
-                        if !self.config.config_out_path.is_empty() {
-                            let custom = simpath.join(&self.config.config_out_path);
-                            if let Some(parent) = custom.parent() {
-                                let _ = fs::create_dir_all(parent);
-                            }
-                            let mut custom_tmp = custom.clone();
-                            if let Some(fname) = custom.file_name() {
-                                let tmpname = format!("{}.tmp", fname.to_string_lossy());
-                                custom_tmp.set_file_name(tmpname);
-                            } else {
-                                custom_tmp.push(".tmp");
-                            }
-                            if let Ok(mut coutf) = fs::File::create(&custom_tmp) {
-                                let _ = write!(coutf, "{}", js);
-                                let _ = coutf.flush();
-                                let _ = std::fs::rename(&custom_tmp, &custom);
-                            }
-                        }
-                    }
-                    let _ = writeln!(f, "t\tpop\tavg_res\tframe\tprop_moved");
-
-                    // write initial env/individuals snapshot so downstream tools/tests
-                    // can find a starting state even if burn_in prevents periodic dumps.
-                    if self.config.write_outputs {
-                        if !simdir.is_empty() {
-                            self.dump_env_to_dir(&simdir, Some(0));
-                            self.dump_individuals_to_dir(&simdir, Some(0));
-                        } else {
-                            let env_out = self.config.env_out_path.clone();
-                            let ind_out = self.config.individuals_out_path.clone();
-                            self.dump_env(&env_out, Some(0));
-                            self.dump_individuals(&ind_out, Some(0));
-                        }
-                    }
-                }
-            }
-        } else {
-            // outputs disabled -> no per-sim directory
-            simdir = String::new();
-        }
-
-        let start_time = Instant::now();
-        for t in 0..steps {
-            self.step();
-
-            if self.individuals.is_empty() {
-                println!("[info] population extinct at t={}, stopping simulation", t);
-                break;
-            }
-
-            if self.config.show_progress {
-                // progress bar + ETA
-                let bar_width = 40usize;
-                let frac = (t + 1) as f64 / steps as f64;
-                let pos = (bar_width as f64 * frac) as usize;
-                let mut ss = String::new();
-                ss.push('[');
-                for i in 0..bar_width {
-                    ss.push(if i < pos {
-                        '='
-                    } else if i == pos {
-                        '>'
-                    } else {
-                        ' '
-                    });
-                }
-                ss.push(']');
-                ss.push(' ');
-                ss.push_str(&format!("{}%", (frac * 100.0) as i32));
-                // ETA
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let avg = elapsed / ((t + 1) as f64);
-                let rem = ((steps - (t + 1)) as f64) * avg;
-                let hrs = (rem as i64) / 3600;
-                let mins = ((rem as i64) % 3600) / 60;
-                let secs = (rem as i64) % 60;
-                ss.push_str(&format!("  ETA {}:{:02}:{:02}", hrs, mins, secs));
-
-                // prop moved
-                let mut prop_now = 0.0f64;
-                if !self.last_delta.is_empty() {
-                    let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
-                    if seen > 0 {
-                        let moved = self
-                            .last_delta
-                            .iter()
-                            .take(seen)
-                            .filter(|&&d| d != 0)
-                            .count();
-                        prop_now = moved as f64 / seen as f64;
-                    }
-                }
-                ss.push_str(&format!(
-                    "  t={} pop={} prop_moved={:.3}",
-                    t,
-                    self.individuals.len(),
-                    prop_now
-                ));
-                ss.push('\r');
-                print!("{}", ss);
-                let _ = io::stdout().flush();
-            }
-
-            if t % report_interval == 0 {
-                if t < self.config.burn_in {
-                    continue;
-                }
-
-                let mut avgres = 0.0f64;
-                for ind in &self.individuals {
-                    avgres += ind.resources;
-                }
-                if !self.individuals.is_empty() {
-                    avgres /= self.individuals.len() as f64;
-                }
-                let prop_moved = if !self.last_delta.is_empty() {
-                    let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
-                    if seen > 0 {
-                        self.last_delta
-                            .iter()
-                            .take(seen)
-                            .filter(|&&d| d != 0)
-                            .count() as f64
-                            / seen as f64
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-
-                // visualization
-                let frame = self.get_visualization(self.config.vis_cols, self.config.vis_height);
-                // Do not print frames to console by default (writes to frames.tsv instead).
-                if let Some(f) = fout.as_mut() {
-                    let mut esc = String::new();
-                    for ch in frame.chars() {
-                        if ch == '\n' {
-                            esc.push_str("\\n");
-                        } else {
-                            esc.push(ch);
-                        }
-                    }
-                    let _ = writeln!(
-                        f,
-                        "{}\t{}\t{}\t{}\t{}",
-                        t,
-                        self.individuals.len(),
-                        avgres,
-                        esc,
-                        prop_moved
-                    );
-                }
-
-                // dump env/individuals into a single JSONL file per sim (no per-timepoint suffix)
-                if self.config.write_outputs {
-                    if !simdir.is_empty() {
-                        self.dump_env_to_dir(&simdir, Some(t));
-                        self.dump_individuals_to_dir(&simdir, Some(t));
-                    } else {
-                        let env_out = self.config.env_out_path.clone();
-                        let ind_out = self.config.individuals_out_path.clone();
-                        self.dump_env(&env_out, Some(t));
-                        self.dump_individuals(&ind_out, Some(t));
-                    }
-                }
-
-                // periodic nn_index flush (skip when outputs disabled)
-                if self.config.write_outputs && self.nn_index_dirty {
-                    let do_flush = (self.config.nn_index_flush_interval > 0
-                        && t % self.config.nn_index_flush_interval == 0)
-                        || (self.config.nn_index_flush_size > 0
-                            && self.nn_index_cache.len() >= self.config.nn_index_flush_size);
-                        if do_flush {
-                            let target_dir = if !self.nn_index_target_dir.is_empty() {
-                                &self.nn_index_target_dir
-                            } else if !simdir.is_empty() {
-                                &simdir
-                            } else {
-                                &self.config.webviewer_base
-                            };
-                            let mut p = std::path::PathBuf::from(target_dir);
-                            let _ = fs::create_dir_all(&p);
-                            // write to temporary file then rename for atomicity
-                            p.push("nn_index.json.tmp");
-                            if let Ok(mut jf) = fs::File::create(&p) {
-                                let _ = writeln!(jf, "{{");
-                                let mut first = true;
-                                for (k, v) in &self.nn_index_cache {
-                                    if !first {
-                                        let _ = writeln!(jf, ",");
-                                    }
-                                    first = false;
-                                    let _ = write!(jf, "\"{}\": {}", k, v);
-                                }
-                                let _ = writeln!(jf, "}}");
-                                let _ = jf.flush();
-                                // rename tmp -> nn_index.json
-                                let mut finalp = std::path::PathBuf::from(target_dir);
-                                finalp.push("nn_index.json");
-                                let _ = std::fs::rename(&p, &finalp);
-                                self.nn_index_dirty = false;
-                            }
-                        }
-                }
-            }
-
-            // step_mode debug pause
-            if self.config.step_mode {
-                self.print_debug_snapshot(3);
-                if std::env::var("DISABLE_STEP_PAUSE").is_err() {
-                    println!(
-                        "Completed step {}/{} — press Enter to continue...",
-                        t + 1,
-                        steps
-                    );
-                    let _ = io::stdout().flush();
-                    let mut buf = String::new();
-                    let _ = io::stdin().read_line(&mut buf);
-                }
-            }
-        }
-
-        if let Some(mut f) = fout {
-            let _ = f.flush();
-        }
-        if self.config.show_progress {
-            println!();
-        }
-
-        // final nn_index flush on exit (only when outputs enabled)
-        if self.config.write_outputs && self.nn_index_dirty && !self.nn_index_cache.is_empty() {
-            let target_dir = if !self.nn_index_target_dir.is_empty() {
-                &self.nn_index_target_dir
-            } else if !simdir.is_empty() {
-                &simdir
-            } else {
-                &self.config.webviewer_base
-            };
-            let mut p = std::path::PathBuf::from(target_dir);
-            let _ = fs::create_dir_all(&p);
-            // atomic write via temp file
-            p.push("nn_index.json.tmp");
-            if let Ok(mut jf) = fs::File::create(&p) {
-                let _ = writeln!(jf, "{{");
-                let mut first = true;
-                for (k, v) in &self.nn_index_cache {
-                    if !first {
-                        let _ = writeln!(jf, ",");
-                    }
-                    first = false;
-                    let _ = write!(jf, "\"{}\": {}", k, v);
-                }
-                let _ = writeln!(jf, "}}");
-                let _ = jf.flush();
-                let mut finalp = std::path::PathBuf::from(target_dir);
-                finalp.push("nn_index.json");
-                let _ = std::fs::rename(&p, &finalp);
-                self.nn_index_dirty = false;
-            }
-        }
-
-        // Ensure final env/individuals snapshot exists for consumers/tests
-        if !simdir.is_empty() {
-            self.dump_env_to_dir(&simdir, Some(steps));
-            self.dump_individuals_to_dir(&simdir, Some(steps));
-        } else {
-            let env_out = self.config.env_out_path.clone();
-            let ind_out = self.config.individuals_out_path.clone();
-            self.dump_env(&env_out, Some(steps));
-            self.dump_individuals(&ind_out, Some(steps));
-        }
-
-        // Emit a compact final summary to stdout so external runners (Python driver)
-        // can capture final metrics even when per-step outputs are disabled.
-        // This prints a single JSON object with `final_population` and `prop_moved`.
-        let final_pop = self.individuals.len();
-        let prop_moved = if !self.last_delta.is_empty() {
-            let seen = std::cmp::min(self.last_delta.len(), self.individuals.len());
-            if seen > 0 {
-                self.last_delta
-                    .iter()
-                    .take(seen)
-                    .filter(|&&d| d != 0)
-                    .count() as f64
-                    / seen as f64
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
-        let mut summary_map = serde_json::Map::new();
-        summary_map.insert("final_population".to_string(), serde_json::Value::from(final_pop));
-        summary_map.insert("prop_moved".to_string(), serde_json::Value::from(prop_moved));
-        if let Ok(s) = serde_json::to_string(&summary_map) {
-            println!("{}", s);
-        }
     }
 
     /// Produce a compact summary string for quick inspection in debugger or logs.

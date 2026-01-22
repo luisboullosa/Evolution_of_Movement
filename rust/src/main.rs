@@ -29,6 +29,16 @@ fn print_help() {
     println!("  --initial-population=N        Starting population size (int)");
     println!("  --show-progress / --no-progress  Show textual progress bar and enable 'q' to stop");
     println!("  --print-frames / --no-print-frames  Print ASCII frames to stdout");
+    println!("  --replay-snapshot=PATH        Initialize from snapshot CBOR at PATH (instead of new population)");
+    println!("  --replay-env-seed=N           Override environment seed while replaying (int, default -1)");
+        println!("  --replay-randomize-start-positions / --replay-no-randomize-start-positions");
+        println!("                                 Shuffle or preserve positions when replaying a snapshot");
+        println!("  --write-individual-deltas / --no-write-individual-deltas  Write individuals.delta.jsonl");
+        println!("  --delta-full-interval=N       Full resync frame every N steps (for delta mode)");
+    println!("  --output-budget-mb=N          Max allowed output size in MiB (<=0 disables budget)");
+    println!("  --output-budget-warn-fraction=F  Warn fraction of budget (0..1, default 0.8)");
+    println!("  --output-budget-hard-stop     Abort if projected outputs exceed budget");
+    println!("  --output-run-dir=PATH         Write outputs into this exact directory (no simXXXX auto-dir)");
     println!("  --config-out=PATH             Write resolved config to PATH inside sim dir");
     println!("  --help, -h                    Show this help message");
 }
@@ -273,6 +283,97 @@ fn main() {
             continue;
         }
 
+        if a.starts_with("--replay-snapshot") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--replay-snapshot") {
+                cfg.replay_snapshot_path = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.replay_snapshot_path = p;
+                continue;
+            }
+        }
+
+        if a.starts_with("--replay-env-seed") {
+            if let Some(v) = parse_arg_value::<i64>(&a, "--replay-env-seed") {
+                cfg.replay_env_seed = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i64>() {
+                    cfg.replay_env_seed = v;
+                    continue;
+                }
+            }
+        }
+
+            if a == "--replay-randomize-start-positions" {
+                cfg.replay_randomize_start_positions = true;
+                continue;
+            }
+            if a == "--replay-no-randomize-start-positions" {
+                cfg.replay_randomize_start_positions = false;
+                continue;
+            }
+
+        if a == "--write-individual-deltas" {
+            cfg.write_individual_deltas = true;
+            continue;
+        }
+        if a == "--no-write-individual-deltas" {
+            cfg.write_individual_deltas = false;
+            continue;
+        }
+
+        if a.starts_with("--delta-full-interval") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--delta-full-interval") {
+                cfg.delta_full_interval = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.delta_full_interval = v;
+                    continue;
+                }
+            }
+        }
+
+            if a.starts_with("--output-budget-mb") {
+                if let Some(v) = parse_arg_value::<f64>(&a, "--output-budget-mb") {
+                    cfg.output_budget_mb = v;
+                    continue;
+                } else if let Some(p) = it.next() {
+                    if let Ok(v) = p.parse::<f64>() {
+                        cfg.output_budget_mb = v;
+                        continue;
+                    }
+                }
+            }
+
+            if a.starts_with("--output-budget-warn-fraction") {
+                if let Some(v) = parse_arg_value::<f64>(&a, "--output-budget-warn-fraction") {
+                    cfg.output_budget_warn_fraction = v;
+                    continue;
+                } else if let Some(p) = it.next() {
+                    if let Ok(v) = p.parse::<f64>() {
+                        cfg.output_budget_warn_fraction = v;
+                        continue;
+                    }
+                }
+            }
+
+            if a == "--output-budget-hard-stop" {
+                cfg.output_budget_hard_stop = true;
+                continue;
+            }
+
+        if a.starts_with("--output-run-dir") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--output-run-dir") {
+                cfg.output_run_dir = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.output_run_dir = p;
+                continue;
+            }
+        }
+
         if a.starts_with("--burn-in") {
             if let Some(v) = parse_arg_value::<i32>(&a, "--burn-in") {
                 cfg.burn_in = v;
@@ -307,6 +408,17 @@ fn main() {
 
     // create and run simulation
     let mut sim = Simulation::new(&cfg);
-    sim.init_population(cfg.initial_population as usize);
+
+    if !cfg.replay_snapshot_path.is_empty() {
+        if let Err(e) = sim.load_snapshot_from_path(&cfg.replay_snapshot_path) {
+            eprintln!(
+                "Failed to load snapshot from {}: {}",
+                cfg.replay_snapshot_path, e
+            );
+            return;
+        }
+    } else {
+        sim.init_population(cfg.initial_population as usize);
+    }
     sim.run();
 }

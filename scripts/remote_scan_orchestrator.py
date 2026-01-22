@@ -29,13 +29,12 @@ import os
 import random
 import sqlite3
 import subprocess
-import sys
-import threading
-import time
 import tarfile
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 
 def _posix_join(*parts: str) -> str:
@@ -102,6 +101,17 @@ def _ssh(args, remote_cmd: str, *, check: bool = True) -> str:
     return cp.stdout or ""
 
 
+def _ssh_with_status(args, remote_cmd: str) -> tuple[str, int]:
+    """Run SSH command and return (stdout, returncode)."""
+    target = f"{args.ssh_user}@{args.remote_host}" if args.ssh_user else args.remote_host
+    cmd = _ssh_base_args(args) + [target, remote_cmd]
+    try:
+        cp = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        return (cp.stdout or "", int(cp.returncode))
+    except Exception as e:
+        return (f"[orchestrator] ssh invocation exception: {e}\n", 255)
+
+
 def _scp_to_remote(args, local_path: str, remote_path: str) -> None:
     target = f"{args.ssh_user}@{args.remote_host}" if args.ssh_user else args.remote_host
     spec = f"{target}:{remote_path}"
@@ -129,7 +139,11 @@ def _remote_path_exists(args, path: str) -> bool:
 def _remote_has_command(args, cmd_name: str) -> bool:
     # For cargo, also check if .cargo/env exists and can be sourced
     if cmd_name == "cargo":
-        out = _ssh(args, f"test -f $HOME/.cargo/env && . $HOME/.cargo/env && command -v cargo >/dev/null 2>&1 && echo OK || echo MISSING", check=True)
+        out = _ssh(
+            args,
+            "test -f $HOME/.cargo/env && . $HOME/.cargo/env && command -v cargo >/dev/null 2>&1 && echo OK || echo MISSING",
+            check=True,
+        )
     else:
         out = _ssh(args, f"command -v {json.dumps(cmd_name)} >/dev/null 2>&1 && echo OK || echo MISSING", check=True)
     return "OK" in out
@@ -294,7 +308,9 @@ class Params:
         }
 
 
-def _pilot_param_grid(pilot: bool) -> tuple[list[float], list[float], list[float], list[float], list[float], list[float], list[float], list[int]]:
+def _pilot_param_grid(
+    pilot: bool,
+) -> tuple[list[float], list[float], list[float], list[float], list[float], list[float], list[float], list[int]]:
     # Keep in sync with scripts/scan_rust_population_scan.py pilot ranges.
     movement_vals = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
     maintenance_vals = [0.0, 1e-05, 5e-05, 1e-04, 5e-04, 0.001, 0.005, 0.01]
@@ -304,7 +320,16 @@ def _pilot_param_grid(pilot: bool) -> tuple[list[float], list[float], list[float
     death_risks = [0.0, 1e-08, 1e-06, 1e-04, 1e-03]
     grid_vals = [25, 50, 100, 200]
     resource_scales = [10.0, 100.0]
-    return movement_vals, maintenance_vals, repro_thresholds, repro_costs, env_time_speeds, death_risks, resource_scales, grid_vals
+    return (
+        movement_vals,
+        maintenance_vals,
+        repro_thresholds,
+        repro_costs,
+        env_time_speeds,
+        death_risks,
+        resource_scales,
+        grid_vals,
+    )
 
 
 def _sample_params(sample_n: int, seed: int | None) -> list[Params]:
@@ -331,8 +356,7 @@ def _sample_params(sample_n: int, seed: int | None) -> list[Params]:
 def _init_db(db_path: str) -> None:
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
               job_id TEXT PRIMARY KEY,
               phase TEXT NOT NULL,
@@ -346,8 +370,7 @@ def _init_db(db_path: str) -> None:
               local_snapshot_path TEXT,
               stdout_path TEXT
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -440,6 +463,7 @@ def _run_one_remote(
         "steps": int(steps),
         "initial_population": int(initial_population),
         "max_population": int(max_population),
+        "radiate": int(getattr(args, "radiate", 0)),
         "show_progress": False,
         "write_frames": False,
         "write_outputs": False,
@@ -575,6 +599,158 @@ def _run_one_remote(
     return final_pop, prop_moved
 
 
+def _run_burnin_eval(
+    args,
+    *,
+    run_id: str,
+    pilot_idx: int,
+    pilot_snapshot_path: str,
+    params: Params,
+    burnin_steps: int,
+    local_run_dir: str,
+    db_path: str,
+    progress_path: str,
+    progress_lock: threading.Lock,
+    progress_entries: list[dict[str, Any]],
+) -> float | None:
+    """Run burnin evaluation: load pilot snapshot, randomize env/individuals, check prop_moved."""
+
+    job_id = f"burnin_{pilot_idx:06d}"
+    _db_upsert_job(db_path, job_id=job_id, phase="burnin", status="pending", params=params)
+
+    # Create burnin config with randomized env seed and randomized positions
+    local_cfg_dir = os.path.join(local_run_dir, "configs", "burnin")
+    os.makedirs(local_cfg_dir, exist_ok=True)
+    local_cfg_path = os.path.join(local_cfg_dir, f"{job_id}.json")
+
+    # Use random env seed for burnin evaluation
+    import random as rand
+
+    burnin_env_seed = rand.randint(1, 999999)
+
+    cfg: dict[str, Any] = {
+        **params.as_dict(),
+        "steps": int(burnin_steps),
+        "initial_population": 0,  # Load from snapshot
+        "show_progress": False,
+        "write_frames": False,
+        "write_outputs": False,
+        "write_config": False,
+        "write_snapshot": False,
+        "report_interval": int(burnin_steps) + 1,
+        "randomize_start_positions": True,  # Randomize individuals
+        "replay_env_seed": burnin_env_seed,  # Randomize environment
+        "sim_prefix": f"{job_id}_",
+        "output_dir_base": "",
+    }
+    with open(local_cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f)
+
+    # Upload config and snapshot to remote
+    remote_run_root = _posix_join(args.remote_run_base, run_id)
+    remote_cfg_dir = _posix_join(remote_run_root, "configs", "burnin")
+    remote_cfg_path = _posix_join(remote_cfg_dir, os.path.basename(local_cfg_path))
+
+    _ensure_remote_dir(args, remote_cfg_dir)
+    _scp_to_remote(args, local_cfg_path, remote_cfg_path)
+
+    # Upload snapshot
+    remote_snapshot_dir = _posix_join(remote_run_root, "pilot_snapshots")
+    remote_snapshot_path = _posix_join(remote_snapshot_dir, os.path.basename(pilot_snapshot_path))
+    _ensure_remote_dir(args, remote_snapshot_dir)
+    _scp_to_remote(args, pilot_snapshot_path, remote_snapshot_path)
+
+    # Deploy remote helper
+    remote_helper = _posix_join(remote_run_root, "remote_helpers", "remote_run_job.py")
+    _deploy_remote_helper(args, remote_helper)
+
+    stdout_path = os.path.join(local_run_dir, "logs", "burnin", f"{job_id}.stdout.txt")
+    os.makedirs(os.path.dirname(stdout_path) or ".", exist_ok=True)
+
+    _db_mark_started(db_path, job_id=job_id, stdout_path=stdout_path)
+
+    # Build remote command with --replay-snapshot
+    remote_cmd_parts = [
+        args.remote_python,
+        json.dumps(remote_helper),
+        "--repo-dir",
+        json.dumps(args.remote_repo_dir),
+        "--manifest-path",
+        json.dumps(args.remote_manifest_path),
+        "--bin",
+        json.dumps(args.bin_name),
+        "--config",
+        json.dumps(remote_cfg_path),
+    ]
+    if args.release:
+        remote_cmd_parts.append("--release")
+    remote_cmd_parts.append("--no-write-outputs")
+    remote_cmd_parts.extend(["--replay-snapshot", json.dumps(remote_snapshot_path)])
+
+    remote_cmd = " ".join(remote_cmd_parts)
+
+    out_text = ""
+    ok = False
+    prop_moved: float | None = None
+
+    try:
+        out_text, rc = _ssh_with_status(args, remote_cmd)
+        # If no output, retry once to reduce transient SSH flakiness
+        if not out_text:
+            out_text_retry, rc_retry = _ssh_with_status(args, remote_cmd)
+            if out_text_retry:
+                out_text, rc = out_text_retry, rc_retry
+
+        parsed = _parse_remote_job_result(out_text)
+        if parsed and isinstance(parsed.get("summary"), dict):
+            s = parsed["summary"]
+            try:
+                prop_moved = float(s.get("prop_moved") or 0.0)
+            except Exception:
+                prop_moved = None
+            ok = bool(parsed.get("ok"))
+        else:
+            # diagnostic: remote returned no structured result
+            diag = f"[orchestrator] Remote burnin run produced no REMOTE_JOB_RESULT (rc={rc}). Command: {remote_cmd}\n"
+            out_text = diag + (out_text or "")
+            ok = False
+            prop_moved = None
+
+        with open(stdout_path, "w", encoding="utf-8") as f:
+            f.write(out_text)
+    except Exception as e:
+        out_text = f"[orchestrator] Burnin SSH failure: {e}\n" + (out_text or "")
+        with open(stdout_path, "w", encoding="utf-8") as f:
+            f.write(out_text)
+        ok = False
+        prop_moved = None
+
+    _db_mark_done(
+        db_path,
+        job_id=job_id,
+        status="done" if ok else "failed",
+        final_population=None,
+        prop_moved=prop_moved,
+        remote_output_dir=None,
+        local_snapshot_path=None,
+    )
+
+    with progress_lock:
+        progress_entries.append(
+            {
+                "job_id": job_id,
+                "phase": "burnin",
+                "pilot_idx": pilot_idx,
+                "prop_moved": prop_moved,
+                "ok": ok,
+                "t": time.time(),
+            }
+        )
+        _atomic_write_json(progress_path, progress_entries)
+
+    return prop_moved
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--remote-host", required=True, help="Remote host/IP (Orange Pi)")
@@ -584,23 +760,37 @@ def main() -> int:
     ap.add_argument("--ssh-extra", nargs="*", default=[], help="Extra args passed to ssh/scp (advanced)")
 
     ap.add_argument("--remote-repo-dir", default="/root/projects/Movement", help="Repo root on remote machine")
-    ap.add_argument("--remote-run-base", default="/root/projects/scan_runs", help="Remote directory to store configs/outputs for this run")
+    ap.add_argument(
+        "--remote-run-base",
+        default="/root/projects/scan_runs",
+        help="Remote directory to store configs/outputs for this run",
+    )
     ap.add_argument("--remote-python", default="python3", help="Remote python executable")
     ap.add_argument("--remote-manifest-path", default="rust/Cargo.toml", help="Manifest path relative to repo root")
 
-    ap.add_argument("--bootstrap", action="store_true", help="If remote repo is missing, upload this local repo to remote-repo-dir")
+    ap.add_argument(
+        "--bootstrap", action="store_true", help="If remote repo is missing, upload this local repo to remote-repo-dir"
+    )
     ap.add_argument(
         "--bootstrap-build",
         action="store_true",
         help="After ensuring the repo exists remotely, run `cargo build` for the requested bin on the remote host",
     )
-    ap.add_argument("--local-repo-dir", default=os.path.normpath("."), help="Local repo root to upload when using --bootstrap")
+    ap.add_argument(
+        "--local-repo-dir", default=os.path.normpath("."), help="Local repo root to upload when using --bootstrap"
+    )
 
     ap.add_argument("--bin", dest="bin_name", default="evo_movement_rust", help="Cargo bin name")
     ap.add_argument("--release", action="store_true", help="Use --release (recommended)")
     ap.add_argument("--force-deploy-helper", action="store_true", help="Always re-copy the remote helper")
 
     ap.add_argument("--local-outdir", default="output/remote_scan", help="Local output base")
+    ap.add_argument(
+        "--resume-run",
+        dest="resume_run",
+        default="",
+        help="If set, reuse an existing run_id in local_outdir and resume (runs burnin/deep as requested)",
+    )
     ap.add_argument("--sample", type=int, default=200, help="Pilot sample count")
     ap.add_argument("--seed", type=int, default=None, help="Sampling seed")
     ap.add_argument("--workers", type=int, default=1, help="Concurrent remote jobs")
@@ -608,6 +798,9 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=200, help="Pilot steps")
     ap.add_argument("--initial-population", type=int, default=200, help="Pilot initial population")
     ap.add_argument("--max-population", type=int, default=1000, help="Pilot max population")
+    ap.add_argument(
+        "--radiate", type=int, default=0, help="Radiate value to apply to runs (simulated mutation intensity)"
+    )
     ap.add_argument("--threshold", type=int, default=200, help="Pilot final-pop threshold")
 
     ap.add_argument("--deep", action="store_true", help="Run deep scans after pilot")
@@ -615,14 +808,30 @@ def main() -> int:
     ap.add_argument("--deep-max-population", type=int, default=20000)
     ap.add_argument("--max-deep", type=int, default=25, help="Cap number of deep runs")
 
+    ap.add_argument(
+        "--burnin-eval", action="store_true", help="Test snapshots with randomized env/individuals before deep"
+    )
+    ap.add_argument("--burnin-steps", type=int, default=100, help="Steps for burnin evaluation")
+    ap.add_argument(
+        "--burnin-threshold", type=float, default=0.0, help="Min prop_moved to pass burnin (default 0.0 = any movement)"
+    )
+
     args = ap.parse_args()
     if not args.release:
         # default to release for remote execution
         args.release = True
 
-    run_id = _dt.datetime.now().strftime("run%Y%m%d_%H%M%S")
-    local_run_dir = os.path.normpath(os.path.join(args.local_outdir, run_id))
-    os.makedirs(local_run_dir, exist_ok=True)
+    # support resuming an existing run directory: reuse run_id and local files
+    if args.resume_run:
+        run_id = args.resume_run
+        local_run_dir = os.path.normpath(os.path.join(args.local_outdir, run_id))
+        if not os.path.exists(local_run_dir):
+            raise RuntimeError(f"Requested resume run_id {run_id} not found at {local_run_dir}")
+        print(f"Resuming existing run: {run_id} -> {local_run_dir}")
+    else:
+        run_id = _dt.datetime.now().strftime("run%Y%m%d_%H%M%S")
+        local_run_dir = os.path.normpath(os.path.join(args.local_outdir, run_id))
+        os.makedirs(local_run_dir, exist_ok=True)
 
     # Ensure repo exists on the remote host (upload if requested).
     _bootstrap_repo_if_missing(args, run_id=run_id)
@@ -642,7 +851,7 @@ def main() -> int:
     db_path = os.path.join(local_run_dir, "jobs.sqlite")
     _init_db(db_path)
 
-    params_list = _sample_params(args.sample, args.seed)
+    params_list = _sample_params(args.sample, args.seed) if not args.resume_run else []
 
     manifest = {
         "run_id": run_id,
@@ -654,6 +863,7 @@ def main() -> int:
         "steps": args.steps,
         "initial_population": args.initial_population,
         "max_population": args.max_population,
+        "radiate": args.radiate,
         "threshold": args.threshold,
         "deep": bool(args.deep),
         "deep_steps": args.deep_steps,
@@ -693,6 +903,12 @@ def main() -> int:
     _ensure_remote_dir(args, remote_root)
 
     def submit_pilot(idx: int, p: Params):
+        # If burnin evaluation is enabled, pilot jobs need to write snapshots
+        write_pilot_snapshot = bool(args.burnin_eval)
+        pilot_out_remote = None
+        if write_pilot_snapshot:
+            pilot_out_remote = _posix_join(remote_root, "pilot", f"job{idx:06d}")
+
         return _run_one_remote(
             args,
             run_id=run_id,
@@ -702,8 +918,8 @@ def main() -> int:
             steps=args.steps,
             initial_population=args.initial_population,
             max_population=args.max_population,
-            write_snapshot=False,
-            deep_output_dir_remote=None,
+            write_snapshot=write_pilot_snapshot,
+            deep_output_dir_remote=pilot_out_remote,
             local_run_dir=local_run_dir,
             db_path=db_path,
             results_csv=pilot_csv,
@@ -713,32 +929,114 @@ def main() -> int:
             progress_entries=progress_entries,
         )
 
-    print(f"Remote pilot scan: {len(params_list)} jobs -> {pilot_csv}")
-    with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as ex:
-        futs = {ex.submit(submit_pilot, i, p): (i, p) for i, p in enumerate(params_list)}
-        completed = 0
-        for fut in as_completed(futs):
-            i, p = futs[fut]
+    # Run pilot jobs unless resuming an existing run (resume will pick promising from existing files)
+    if not args.resume_run:
+        print(f"Remote pilot scan: {len(params_list)} jobs -> {pilot_csv}")
+        with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as ex:
+            futs = {ex.submit(submit_pilot, i, p): (i, p) for i, p in enumerate(params_list)}
+            completed = 0
+            for fut in as_completed(futs):
+                i, p = futs[fut]
+                try:
+                    fp, _pm = fut.result()
+                except Exception:
+                    fp = None
+                completed += 1
+                if fp is not None and fp >= args.threshold:
+                    promising.append((i, p, int(fp)))
+                if completed % 10 == 0 or completed == len(params_list):
+                    print(f"Pilot progress: {completed}/{len(params_list)}")
+    else:
+        # Load existing promising.json if present
+        prom_path = os.path.join(local_run_dir, "promising.json")
+        if os.path.exists(prom_path):
             try:
-                fp, _pm = fut.result()
+                loaded = json.load(open(prom_path, "r", encoding="utf-8"))
+                # loaded is list of {pilot_idx, final_population, params}
+                for ent in loaded:
+                    try:
+                        idx = int(ent.get("pilot_idx"))
+                        fp = int(ent.get("final_population") or 0)
+                        p = Params(**ent.get("params"))
+                        promising.append((idx, p, fp))
+                    except Exception:
+                        continue
+                print(f"Loaded {len(promising)} promising entries from {prom_path}")
             except Exception:
-                fp = None
-            completed += 1
-            if fp is not None and fp >= args.threshold:
-                promising.append((i, p, int(fp)))
-            if completed % 10 == 0 or completed == len(params_list):
-                print(f"Pilot progress: {completed}/{len(params_list)}")
+                print(f"Warning: failed to load promising.json from {prom_path}; continuing with empty promising list")
 
     promising.sort(key=lambda x: x[2], reverse=True)
     prom_path = os.path.join(local_run_dir, "promising.json")
     _atomic_write_json(
         prom_path,
-        [
-            {"pilot_idx": i, "final_population": fp, "params": p.as_dict()}
-            for (i, p, fp) in promising
-        ],
+        [{"pilot_idx": i, "final_population": fp, "params": p.as_dict()} for (i, p, fp) in promising],
     )
     print(f"Promising: {len(promising)} (threshold >= {args.threshold}) -> {prom_path}")
+
+    # Burnin evaluation phase: test promising runs with randomized env/individuals
+    if args.burnin_eval and promising:
+        print(
+            f"\nBurnin evaluation: testing {len(promising)} promising parameter sets with randomized env/individuals..."
+        )
+        burnin_results: dict[int, float] = {}  # pilot_idx -> prop_moved
+
+        def submit_burnin(pilot_idx: int, p: Params):
+            # Find the snapshot path
+            snapshot_name = f"pilot_{pilot_idx:06d}_population_snapshot.cbor"
+            snapshot_path = os.path.join(local_run_dir, "deep_snapshots", snapshot_name)
+
+            if not os.path.exists(snapshot_path):
+                print(f"  Warning: snapshot missing for pilot {pilot_idx}, skipping burnin")
+                return pilot_idx, None
+
+            pm = _run_burnin_eval(
+                args,
+                run_id=run_id,
+                pilot_idx=pilot_idx,
+                pilot_snapshot_path=snapshot_path,
+                params=p,
+                burnin_steps=args.burnin_steps,
+                local_run_dir=local_run_dir,
+                db_path=db_path,
+                progress_path=progress_path,
+                progress_lock=progress_lock,
+                progress_entries=progress_entries,
+            )
+            return pilot_idx, pm
+
+        with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as ex:
+            futs = {ex.submit(submit_burnin, i, p): (i, p) for i, p, _ in promising}
+            completed = 0
+            for fut in as_completed(futs):
+                pilot_idx, prop_moved = fut.result()
+                if prop_moved is not None:
+                    burnin_results[pilot_idx] = prop_moved
+                completed += 1
+                if completed % 10 == 0 or completed == len(promising):
+                    print(f"Burnin progress: {completed}/{len(promising)}")
+
+        # Filter promising based on burnin threshold
+        original_count = len(promising)
+        promising = [
+            (i, p, fp) for (i, p, fp) in promising if i in burnin_results and burnin_results[i] > args.burnin_threshold
+        ]
+        print(f"Burnin filter: {original_count} -> {len(promising)} passed (prop_moved > {args.burnin_threshold})")
+
+        # Update promising.json with burnin results
+        burnin_prom_path = os.path.join(local_run_dir, "promising_after_burnin.json")
+        _atomic_write_json(
+            burnin_prom_path,
+            [
+                {
+                    "pilot_idx": i,
+                    "final_population": fp,
+                    "burnin_prop_moved": burnin_results.get(i, None),
+                    "params": p.as_dict(),
+                }
+                for (i, p, fp) in promising
+            ],
+        )
+        print(f"Promising after burnin: {burnin_prom_path}")
 
     if not args.deep:
         print("Done (pilot only).")

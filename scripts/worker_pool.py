@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-import subprocess
 import csv
-import threading
-import queue
-import time
 import os
+import queue
+import subprocess
+import threading
+import time
 from collections.abc import Iterable
 
 
@@ -60,7 +60,7 @@ def run_param_sweep(
     stats = {"completed": 0, "start_time": time.time(), "last_params": None, "last_elapsed": 0.0}
 
     # open CSV file once
-    os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
+    os.makedirs(os.path.dirname(outpath) or ".", exist_ok=True)
     csvf = open(outpath, writer_mode, newline="", encoding="utf-8")
     writer = csv.writer(csvf)
     if writer_mode == "w":
@@ -68,7 +68,6 @@ def run_param_sweep(
         csvf.flush()
 
     def worker(thread_id):
-        nonlocal stats
         while True:
             try:
                 idx = job_q.get_nowait()
@@ -95,14 +94,14 @@ def run_param_sweep(
                             last_line = None
                             interval = 30.0  # seconds between printed live updates per job
                             for raw in rfile:
-                                line = raw.rstrip('\n')
+                                line = raw.rstrip("\n")
                                 if not line:
                                     continue
                                 now = time.time()
                                 last_line = line
                                 buf.append(line)
                                 # always print important messages immediately
-                                if 'population extinct at t=' in line or 'Done.' in line:
+                                if "population extinct at t=" in line or "Done." in line:
                                     print(f"[job {i}] {line}")
                                     last_print = now
                                     last_line = None
@@ -136,8 +135,8 @@ def run_param_sweep(
                     try:
                         out = "\n".join(collected)
                     except Exception:
-                        out = ''
-                    err = ''
+                        out = ""
+                    err = ""
                 else:
                     out, err = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -157,28 +156,21 @@ def run_param_sweep(
             csv_row = None
             if callable(result_row_builder):
                 exc_val = _parse_extinction(out_text)
-                tried = False
                 # try common signatures, swallow and log exceptions so threads don't die
                 try:
                     csv_row = result_row_builder(job, out_text)
-                    tried = True
-                except Exception as e:
-                    # try next signature
+                except Exception:
                     try:
                         csv_row = result_row_builder(job, exc_val, out_text)
-                        tried = True
                     except Exception:
                         try:
                             csv_row = result_row_builder(row, out_text)
-                            tried = True
                         except Exception:
                             try:
                                 csv_row = result_row_builder(row, out_text, exc_val)
-                                tried = True
                             except Exception:
                                 try:
                                     csv_row = result_row_builder(job)
-                                    tried = True
                                 except Exception:
                                     csv_row = None
 
@@ -241,7 +233,11 @@ def run_param_sweep(
                 bar_len = 40
                 filled = int(bar_len * (completed / total)) if total > 0 else 0
                 bar = "#" * filled + "-" * (bar_len - filled)
-                print(f"[{bar}] {completed}/{total} ({pct:.1f}%) last={last} t={last_elapsed:.1f}s ETA={rem_str}", end="\r", flush=True)
+                print(
+                    f"[{bar}] {completed}/{total} ({pct:.1f}%) last={last} t={last_elapsed:.1f}s ETA={rem_str}",
+                    end="\r",
+                    flush=True,
+                )
                 last_print_time = now
                 last_completed = completed
             try:

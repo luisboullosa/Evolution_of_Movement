@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
+import json
 import os
 import subprocess
-import json
 
 EXE = (
     "./build/Release/evo-movement-sim.exe"
@@ -36,9 +36,7 @@ cmd = [
 ]
 print("Running:", cmd)
 try:
-    p = subprocess.run(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30
-    )
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
     print("Return code:", p.returncode)
     print("STDOUT:\n", p.stdout)
     print("STDERR:\n", p.stderr)
@@ -55,9 +53,5 @@ for root, dirs, files in os.walk(scan_dir):
         print(f"{subindent}{f}")
 
 # print any simNNNN directories if present
-sims = [
-    d
-    for d in os.listdir(scan_dir)
-    if d.startswith("sim") and os.path.isdir(os.path.join(scan_dir, d))
-]
+sims = [d for d in os.listdir(scan_dir) if d.startswith("sim") and os.path.isdir(os.path.join(scan_dir, d))]
 print("Sim dirs found under scan dir:", sims)

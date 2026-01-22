@@ -1,7 +1,8 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>evo-movement-sim viewer</title>
   <style>
     body { font-family: monospace; background:#111; color:#eee; }
@@ -10,9 +11,14 @@
   </style>
 </head>
 <body>
-  <h2>evo-movement-sim Viewer</h2>
+  <h2>evo-movement-sim Viewer (legacy frames.tsv)</h2>
+  <div style="max-width: 900px; margin: 8px 0; color: #ccc;">
+    Note: this page is deprecated and expects a TSV frames file (typically frames.tsv). Newer workflows
+    use JSONL/CBOR outputs (env.jsonl, individuals.jsonl/individuals.cbor, nn_index.json).
+  </div>
   <div id="controls">
-    <input id="file" type="file" accept=".tsv" />
+    <label for="file">Open TSV file:</label>
+    <input id="file" type="file" accept=".tsv" title="Open frames TSV file" />
     <button id="play">Play</button>
     <button id="pause">Pause</button>
     <label>FPS: <input id="fps" type="number" value="2" min="1" max="30" /></label>

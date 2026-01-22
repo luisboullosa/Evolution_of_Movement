@@ -17,26 +17,29 @@ directory and will NOT remove files that live inside simulation subdirectories
 If you prefer to remove empty simulation folders after cleaning top-level files, pass
 `--prune-sim-dirs` (use `--yes` to actually remove folders).
 
-The script removes generated files created by the simulator at the webviewer root:
-    - frames.tsv
+The script removes generated files created by the simulator at the webviewer root.
+Note: this script is deprecated, and it no longer treats `frames.tsv` as a primary artifact.
     - config.json or config.txt
     - nn_index.json
     - nn_*.json (legacy per-id files)
-    - env.tsv.*.tsv
-    - individuals.tsv.*.tsv
+    - env.tsv.*.tsv (legacy)
+    - individuals.tsv.*.tsv (legacy)
 
 This is safe to run; it won't touch files that don't match these patterns.
 """
 
-import os
-import glob
 import argparse
+import glob
+import os
+
+print(
+    "[deprecated] webviewer/clean_webviewer.py is legacy. Prefer the newer output layout under output/prod_runs/simXXXX[/runYYYY]. "
+    "This script may be removed in the future."
+)
 
 parser = argparse.ArgumentParser(description="Clean webviewer-generated output files")
 parser.add_argument("--yes", action="store_true", help="Actually delete files")
-parser.add_argument(
-    "--base", default="webviewer", help="Webviewer directory (default: webviewer)"
-)
+parser.add_argument("--base", default="webviewer", help="Webviewer directory (default: webviewer)")
 parser.add_argument(
     "--prune-sim-dirs",
     action="store_true",
@@ -50,7 +53,6 @@ if not os.path.isdir(base):
     exit(1)
 
 patterns = [
-    os.path.join(base, "frames.tsv"),
     os.path.join(base, "config.json"),
     os.path.join(base, "config.txt"),
     os.path.join(base, "nn_index.json"),
@@ -123,6 +125,4 @@ if args.prune_sim_dirs:
                         print("Failed to remove", d, ":", e)
                 print("Done.")
             else:
-                print(
-                    "\nDry-run only. To actually remove, re-run with --yes"
-                )
+                print("\nDry-run only. To actually remove, re-run with --yes")

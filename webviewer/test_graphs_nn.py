@@ -1,4 +1,5 @@
 import numpy as np
+
 from webviewer import graphs_nn as g
 
 
@@ -17,9 +18,11 @@ def test_single_input_vectorized():
 def test_multi_input_vectorized():
     # network with 2 nodes, each expecting 2 inputs
     use_nn = {"weights": [[1.0, 0.5], [-0.5, 0.2]], "biases": [0.0, 0.1]}
+
     # build an input_builder that maps center x to [left, center]
     def builder(x):
         return [x - 0.1, x]
+
     xs = np.linspace(-1, 1, 5)
     out = g.compute_nn_response_for(xs, use_nn, input_builder=builder)
     # compute expected per-x

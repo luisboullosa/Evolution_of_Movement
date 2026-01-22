@@ -1,10 +1,8 @@
-import os
-import subprocess
 import json
-import time
 import shutil
+import subprocess
+import time
 from pathlib import Path
-
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 
@@ -31,12 +29,14 @@ def run_sim_and_collect(config: dict, cli_overrides=None, timeout=60):
         shutil.rmtree(out_base)
     out_base.mkdir(parents=True, exist_ok=True)
 
-    # ensure sim writes to this webviewer_base so we can inspect simdir
+    # ensure sim writes to this output base so we can inspect simdir
     webviewer = out_base
     config["webviewer_base"] = str(webviewer)
-    # enable frames+config writes so we get explicit config in simdir
-    config.setdefault("write_frames", True)
+    # Enable config + JSONL outputs for validation. Note: frames.tsv is legacy and
+    # not required for the Python tooling.
     config.setdefault("write_config", True)
+    config.setdefault("write_outputs", True)
+    config.setdefault("write_frames", False)
     # keep runs short and deterministic
     config.setdefault("steps", 60)
     config.setdefault("report_interval", 5)
@@ -99,7 +99,7 @@ def test_max_and_initial_override():
     assert len(last["individuals"]) <= 10
 
 
-def test_frames_header_and_env_override():
+def test_env_override_and_outputs_present():
     cfg = {
         "sim_prefix": "testsim",
         "sim_digits": 4,
@@ -110,12 +110,12 @@ def test_frames_header_and_env_override():
     r = run_sim_and_collect(cfg, cli_overrides=["--env-time-speed", "3.14"], timeout=120)
     simdir = r["simdir"]
 
-    # frames file should exist and start with a #CONFIG header
-    frames = simdir / "frames.tsv"
-    assert frames.exists(), "frames.tsv not found"
-    with open(frames, "r", encoding="utf-8") as f:
-        first = f.readline().strip()
-    assert first.startswith("#CONFIG"), "frames.tsv missing #CONFIG header"
+    # env.jsonl should exist and have at least one record
+    envf = simdir / "env.jsonl"
+    assert envf.exists(), "env.jsonl missing"
+    with open(envf, "r", encoding="utf-8") as f:
+        lines = [l.strip() for l in f.readlines() if l.strip()]
+    assert lines, "env.jsonl is empty"
 
     # config.json should reflect env_time_speed
     cfgfile = simdir / "config.json"

@@ -9,6 +9,7 @@ param(
     [int]$Steps = 200,
     [int]$InitialPopulation = 200,
     [int]$MaxPopulation = 1000,
+    [int]$Radiate = 0,
     [int]$Threshold = 200,
     [int]$Seed = 0,
 
@@ -16,6 +17,10 @@ param(
     [int]$DeepSteps = 10000,
     [int]$DeepMaxPopulation = 20000,
     [int]$MaxDeep = 25,
+
+    [switch]$BurninEval,
+    [int]$BurninSteps = 100,
+    [double]$BurninThreshold = 0.0,
 
     [switch]$ForceDeployHelper,
     [switch]$DebugBuild,
@@ -46,6 +51,7 @@ $argsList = @(
     "--steps", $Steps,
     "--initial-population", $InitialPopulation,
     "--max-population", $MaxPopulation,
+    "--radiate", $Radiate,
     "--threshold", $Threshold
 )
 
@@ -72,6 +78,14 @@ if ($Deep) {
     $argsList += $DeepMaxPopulation
     $argsList += "--max-deep"
     $argsList += $MaxDeep
+}
+
+if ($BurninEval) {
+    $argsList += "--burnin-eval"
+    $argsList += "--burnin-steps"
+    $argsList += $BurninSteps
+    $argsList += "--burnin-threshold"
+    $argsList += $BurninThreshold
 }
 
 if ($ForceDeployHelper) {
