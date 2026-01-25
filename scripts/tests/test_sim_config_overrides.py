@@ -1,8 +1,3 @@
-from io import TextIOWrapper
-from io import TextIOWrapper
-from io import TextIOWrapper
-from io import TextIOWrapper
-from io import TextIOWrapper
 import json
 import shutil
 import subprocess
@@ -17,7 +12,7 @@ def find_rust_bin() -> str:
         WORKSPACE / "rust" / "target" / "release" / "evo_movement_rust.exe",
         WORKSPACE / "rust" / "target" / "debug" / "evo_movement_rust.exe",
     ]
-    for p: Path in rels:
+    for p in rels:
         if p.exists():
             return str(p)
     raise FileNotFoundError("Rust simulator binary not found; build it first")
@@ -48,7 +43,7 @@ def run_sim_and_collect(config: dict, cli_overrides=None, timeout=60):
     config.setdefault("reproduction_threshold", 1e9)
 
     cfg_path: Path = out_base / "job_config.json"
-    with open(cfg_path, "w", encoding="utf-8") as f: TextIOWrapper[_WrappedBuffer]:
+    with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(config, f)
 
     cmd = [binp, "--config-file", str(cfg_path), "--config-out=sim_config.json"] + cli_overrides
@@ -56,7 +51,7 @@ def run_sim_and_collect(config: dict, cli_overrides=None, timeout=60):
     proc: subprocess.CompletedProcess[str] = subprocess.run(cmd, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=timeout)
 
     # find simdir created under webviewer_base
-    sims: list[Path] = [p for p: Path in webviewer.iterdir() if p.is_dir() and p.name.startswith(config.get("sim_prefix", "sim"))]
+    sims: list[Path] = [p for p in webviewer.iterdir() if p.is_dir() and p.name.startswith(config.get("sim_prefix", "sim"))]
     if not sims:
         raise AssertionError(f"No sim directory created under {webviewer}")
     # pick the newest
@@ -87,7 +82,7 @@ def test_max_and_initial_override() -> None:
     # verify config.json exists and contains our overrides
     cfgfile = simdir / "config.json"
     assert cfgfile.exists(), f"config.json not found in {simdir}"
-    with open(cfgfile, "r", encoding="utf-8") as f: TextIOWrapper[_WrappedBuffer]:
+    with open(cfgfile, "r", encoding="utf-8") as f:
         got = json.load(f)
     assert int(got.get("initial_population", 0)) == 5
     assert int(got.get("max_population", 0)) == 10
@@ -95,8 +90,8 @@ def test_max_and_initial_override() -> None:
     # verify individuals.jsonl has at least one record and individuals list is present
     indf = simdir / "individuals.jsonl"
     assert indf.exists(), "individuals.jsonl missing"
-    with open(indf, "r", encoding="utf-8") as f: TextIOWrapper[_WrappedBuffer]:
-        lines: list[str] = [l.strip() for l: str in f.readlines() if l.strip()]
+    with open(indf, "r", encoding="utf-8") as f:
+        lines: list[str] = [l.strip() for l in f.readlines() if l.strip()]
     assert lines, "individuals.jsonl is empty"
     last = json.loads(lines[-1])
     assert "individuals" in last
@@ -118,14 +113,14 @@ def test_env_override_and_outputs_present() -> None:
     # env.jsonl should exist and have at least one record
     envf = simdir / "env.jsonl"
     assert envf.exists(), "env.jsonl missing"
-    with open(envf, "r", encoding="utf-8") as f: TextIOWrapper[_WrappedBuffer]:
-        lines: list[str] = [l.strip() for l: str in f.readlines() if l.strip()]
+    with open(envf, "r", encoding="utf-8") as f:
+        lines: list[str] = [l.strip() for l in f.readlines() if l.strip()]
     assert lines, "env.jsonl is empty"
 
     # config.json should reflect env_time_speed
     cfgfile = simdir / "config.json"
     assert cfgfile.exists()
-    with open(cfgfile, "r", encoding="utf-8") as f: TextIOWrapper[_WrappedBuffer]:
+    with open(cfgfile, "r", encoding="utf-8") as f:
         got = json.load(f)
     # allow float tolerance
     assert abs(float(got.get("env_time_speed", 0.0)) - 3.14) < 1e-6

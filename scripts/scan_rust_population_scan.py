@@ -40,6 +40,28 @@ def _parse_float_list(arg_name, raw) -> list[float]:
     return vals
 
 
+def _make_param_tuple(
+    movement_cost_factor: float,
+    maintenance_cost_per_node: float,
+    reproduction_threshold: float,
+    reproduction_cost: float,
+    env_time_speed: float,
+    death_risk: float,
+    resource_scale: float,
+    grid_width: int,
+) -> ParamTuple:
+    return (
+        float(movement_cost_factor),
+        float(maintenance_cost_per_node),
+        float(reproduction_threshold),
+        float(reproduction_cost),
+        float(env_time_speed),
+        float(death_risk),
+        float(resource_scale),
+        int(grid_width),
+    )
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--workers", type=int, default=6)
 parser.add_argument("--steps", type=int, default=1000)
@@ -153,11 +175,18 @@ if args.sample and args.sample > 0:
         # sample grid width and resource scale discretely
         gw: int = random.choice(grid_vals)
         rscales: float = random.choice(resource_scales)
-        sampled.append((mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw))
+        sampled.append(
+            _make_param_tuple(
+                mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw
+            )
+        )
     pairs = sampled
 else:
-    pairs = list(
-        itertools.product(
+    pairs = [
+        _make_param_tuple(
+            mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw
+        )
+        for mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw in itertools.product(
             movement_vals,
             maintenance_vals,
             repro_thresholds,
@@ -167,7 +196,7 @@ else:
             resource_scales,
             grid_vals,
         )
-    )
+    ]
 
 outdir = os.path.normpath(args.outdir)
 os.makedirs(os.path.dirname(outdir) or ".", exist_ok=True)
@@ -594,8 +623,8 @@ def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radia
 
     # parse last JSON summary line
     prop = None
-    for line: str in (out or "").splitlines()[::-1]:
-        line: str = line.strip()
+    for line in (out or "").splitlines()[::-1]:
+        line = line.strip()
         if not line.startswith("{"):
             continue
         try:
@@ -748,14 +777,14 @@ def make_progress_writer(outdir):
                 # if metrics present, write immediately
                 if entry.get("final_population") and (entry.get("final_population") != 0 or entry.get("prop_moved")):
                     do_write = True
-                    last_write: float = now
+                    last_write = now
                 else:
                     # delay first write until either interval passes or more entries accumulate
                     do_write = False
             # otherwise write if enough time passed or we're finished
             elif (now - last_write) >= write_interval or completed >= total:
                 do_write = True
-                last_write: float = now
+                last_write = now
         if do_write:
             try:
                 atomic_write(prog_path, entries)
@@ -788,13 +817,13 @@ def read_final_population(sim_path) -> tuple[int, float]:
     jf: str = os.path.join(sim_path, "individuals.jsonl")
     if not os.path.exists(jf):
         return 0, 0.0
-    last = None
+    last: str | None = None
     with open(jf, "r", encoding="utf-8") as f:
-        for line: str in f:
-            line: str = line.strip()
+        for line in f:
+            line = line.strip()
             if not line:
                 continue
-            last: str = line
+            last = line
     if last is None:
         return 0, 0.0
     try:
@@ -836,7 +865,7 @@ def result_row_builder(job, extinct, out_text):
             "resource_scale",
             "grid_width",
         ]
-        missing: list[str] = [k for k: str in required if k not in tpl]
+        missing: list[str] = [k for k in required if k not in tpl]
         if missing:
             raise KeyError(f"job {idx}: missing required parameter keys: {missing}")
         mv = tpl["movement_cost_factor"]
@@ -987,7 +1016,7 @@ with open(results_csv, "r", encoding="utf-8") as rf:
     import csv
 
     r: DictReader[str] = csv.DictReader(rf)
-    for row: dict[str | Any, str | Any] in r:
+    for row in r:
         try:
             mv = float(row["movement_cost_factor"])
             mc = float(row["maintenance_cost_per_node"])
@@ -1123,7 +1152,7 @@ def plot_matrix_of_matrices(results_csv, out_dir) -> None:
     rows = []
     with open(results_csv, "r", encoding="utf-8") as rf:
         r: DictReader[str] = csv.DictReader(rf)
-        for row: dict[str | Any, str | Any] in r:
+        for row in r:
             rows.append(row)
 
     if not rows:

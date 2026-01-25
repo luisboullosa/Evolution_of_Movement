@@ -40,5 +40,10 @@ correct helpers for optional buffers. The CUDA kernel signature lives at
 
 Null handling for optional buffers is already centralized in
 `device_ptr_or_null`, so the kernel never dereferences invalid pointers.
+Running `scripts/compare_cuda_simulations.py` exercises the CPU and GPU paths with
+the same configuration and buffer layout, making it easy to spot any sanitised
+differences that stem from argument misalignment.
+Keep this table in sync with any future kernel or host-launch tweaks so the helper
+continues to verify identical buffers on both paths.
 With this alignment confirmed, the next investigation step is to inspect why
 the `UnknownError` occurs despite the launch arguments matching the signature.

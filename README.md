@@ -150,4 +150,7 @@ final outputs under `rust/temp_outputs/cpu-fallback` and
 any differing files. Adjust `--config-file`, `--output-base`, or `--cuda-arch`
 to match your local setup. If CUDA isn’t already installed, set up the toolkit
 and MSVC/SDK so `nvcc` can emit the PTX kernel before rerunning the script.
+See `docs/cuda_kernel_arguments.md` for an argument-by-argument alignment table
+that explains how the CUDA kernel signature maps to the host launch helpers,
+ensuring the comparison script exercises identical buffers on both paths.
 
