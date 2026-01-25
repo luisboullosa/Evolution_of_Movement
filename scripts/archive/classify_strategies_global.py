@@ -28,36 +28,28 @@ import os
 import sys
 
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
+from matplotlib.transforms import Bbox
 import numpy as np
+from webviewer_helpers import iter_individuals_frames
 
-parser = argparse.ArgumentParser(description="Classify reaction-norms across sims and summarize abundance/fitness")
-parser.add_argument(
-    "--webviewer",
-    default="webviewer",
-    help="webviewer base directory containing simNNNN folders",
+parser = argparse.ArgumentParser(
+    description="Classify reaction-norm strategies across all sims and summarize abundance/fitness"
 )
+parser.add_argument("--webviewer", default="webviewer", help="webviewer base directory containing simNNNN folders")
 parser.add_argument("--samples", type=int, default=11, help="Number of input samples for reaction norm")
-parser.add_argument(
-    "--mag-threshold",
-    type=float,
-    default=0.05,
-    help="Magnitude threshold to call stationary",
-)
+parser.add_argument("--mag-threshold", type=float, default=0.05, help="Magnitude threshold to call stationary")
 parser.add_argument("--out-csv", default="strategy_summary.csv", help="CSV summary output")
 parser.add_argument("--out-prefix", default="strategy_summary", help="Prefix for output plots")
+parser.add_argument("--sim", default=None, help="Specific sim directory name or glob pattern (e.g. sim0123 or sim*)")
+parser.add_argument("--bins", type=int, default=50, help="Number of histogram bins for fitness distribution")
 parser.add_argument(
-    "--sim",
-    default=None,
-    help="Specific sim directory name or glob pattern (e.g. sim0123 or sim*)",
+    "--open-webviewer",
+    action="store_true",
+    dest="open_webviewer",
+    help="Copy output PNG into the webviewer dir, create a simple HTML page and open it in the default browser",
 )
-parser.add_argument(
-    "--bins",
-    type=int,
-    default=50,
-    help="Number of histogram bins for fitness distribution",
-)
-
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 base = os.path.normpath(args.webviewer)
 if not os.path.isdir(base):
@@ -65,19 +57,19 @@ if not os.path.isdir(base):
     sys.exit(1)
 
 
-def classify_nn(weights, biases, inputs, mag_threshold):
+def classify_nn(weights, biases, inputs, mag_threshold) -> str:
     sums = []
     for x in inputs:
         s = 0.0
         for w, b in zip(weights, biases):
             s += np.tanh(w * x + b)
         dir_ = np.tanh(s)
-        mag = abs(s)
+        mag: float = abs(s)
         sums.append((dir_, mag))
     dirs = np.array([d for d, m in sums])
     mags = np.array([m for d, m in sums])
-    mag_mean = mags.mean() if mags.size > 0 else 0.0
-    signs = np.sign(dirs)
+    mag_mean: argparse.Any | float = mags.mean() if mags.size > 0 else 0.0
+    signs: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] = np.sign(dirs)
     if mag_mean < mag_threshold:
         return "stationary"
     elif np.all(signs >= 0):
@@ -89,7 +81,7 @@ def classify_nn(weights, biases, inputs, mag_threshold):
 
 
 def evaluate_rec(rec, inputs):
-    # support optional layer2 weights/biases; returns list of (dir, mag)
+    # similar helper as in other scripts: supports optional layer2_weights/layer2_biases
     results = []
     weights = rec.get("weights", [])
     biases = rec.get("biases", [])
@@ -97,8 +89,10 @@ def evaluate_rec(rec, inputs):
     layer2_biases = rec.get("layer2_biases", None)
     if layer2 is not None and layer2_biases is not None:
         for x in inputs:
+            # compute layer1
             layer1 = []
             for i, b in enumerate(biases):
+                # weights may be flat or nested; prefer flat
                 try:
                     w = weights[i]
                 except Exception:
@@ -107,6 +101,7 @@ def evaluate_rec(rec, inputs):
                     except Exception:
                         w = 0.0
                 layer1.append(np.tanh(w * x + b))
+            # layer2
             layer2_vals = []
             for i, brow in enumerate(layer2):
                 dot = 0.0
@@ -114,24 +109,25 @@ def evaluate_rec(rec, inputs):
                     dot += wj * layer1[j]
                 dot += layer2_biases[i]
                 layer2_vals.append(np.tanh(dot))
-            s = sum(layer2_vals)
+            s: int = sum(layer2_vals)
             results.append((np.tanh(s), abs(s)))
         return results
     # fallback single-layer
+    res = []
     for x in inputs:
         s = 0.0
         for w, b in zip(weights, biases):
             s += np.tanh(w * x + b)
-        results.append((np.tanh(s), abs(s)))
-    return results
+        res.append((np.tanh(s), abs(s)))
+    return res
 
 
-inputs = np.linspace(-1.0, 1.0, args.samples)
+inputs: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(-1.0, 1.0, args.samples)
 
 categories = {}
 
 # canonical strategy definitions: key -> (symbol, description)
-STRATEGIES = {
+STRATEGIES: dict[str, tuple[str, str]] = {
     "stationary": ("\u25cb", "stationary / small magnitude"),
     "always_left": ("\u2190", "always move left"),
     "always_right": ("\u2192", "always move right"),
@@ -167,25 +163,37 @@ else:
     print("Using last sim directory:", os.path.relpath(sim_dirs[0]))
 
 for simdir in sim_dirs:
-    from webviewer_helpers import iter_individuals_frames
-
-    # find latest individuals frame via helper (supports jsonl or tsv)
-    frames = list(iter_individuals_frames(simdir))
-    if not frames:
+    # obtain the last frame of individuals (supports individuals.jsonl or legacy TSV files)
+    last_inds = None
+    try:
+        for t, inds in iter_individuals_frames(simdir):
+            # keep overwriting so at the end we have the last available frame
+            last_inds = inds
+    except Exception:
+        last_inds = None
+    if not last_inds:
         continue
-    # pick last frame
-    t_last, inds_last = frames[-1]
-    nn_index_path = os.path.join(simdir, "nn_index.json")
+    nn_index_path: str = os.path.join(simdir, "nn_index.json")
     if not os.path.exists(nn_index_path):
         continue
     try:
-        with open(nn_index_path, "r") as f:
+        with open(nn_index_path, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
             nn_index = json.load(f)
     except Exception:
         continue
-    # resources for last frame are in inds_last
-    ids = [str(ind.get("id")) for ind in inds_last]
-    resources = {str(ind.get("id")): float(ind.get("resources", 0.0)) for ind in inds_last}
+    # build id list and resource map from last_inds
+    ids = []
+    resources = {}
+    for ind in last_inds:
+        try:
+            iid = ind.get("id", None)
+            if iid is None:
+                continue
+            key = str(iid)
+            ids.append(key)
+            resources[key] = float(ind.get("resources", 0.0))
+        except Exception:
+            continue
 
     for idstr in ids:
         if idstr not in nn_index:
@@ -195,14 +203,13 @@ for simdir in sim_dirs:
         biases = rec.get("biases", [])
         if not weights or not biases:
             continue
-        # prefer evaluating full record (handles layer2 entries)
+        # prefer evaluating the full record (handles two-layer networks)
         try:
-            rec = nn_index[idstr]
             vals = evaluate_rec(rec, inputs)
             dirs = np.array([d for d, m in vals])
             mags = np.array([m for d, m in vals])
-            mag_mean = mags.mean() if mags.size > 0 else 0.0
-            signs = np.sign(dirs)
+            mag_mean: argparse.Any | float = mags.mean() if mags.size > 0 else 0.0
+            signs: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] = np.sign(dirs)
             if mag_mean < args.mag_threshold:
                 cat = "stationary"
             elif np.all(signs >= 0):
@@ -212,7 +219,7 @@ for simdir in sim_dirs:
             else:
                 cat = "switching"
         except Exception:
-            cat = classify_nn(weights, biases, inputs, args.mag_threshold)
+            cat: str = classify_nn(weights, biases, inputs, args.mag_threshold)
         fitness = resources.get(idstr, 0.0)
         categories.setdefault(cat, []).append(fitness)
 
@@ -238,14 +245,14 @@ def normalize_array(arr, lo, hi):
 
 
 # Ensure standard strategy categories always appear (even with no data)
-standard_cats = list(STRATEGIES.keys())
+standard_cats: list[str] = list(STRATEGIES.keys())
 extra_cats = [c for c in categories.keys() if c not in standard_cats]
-ordered_cats = standard_cats + sorted(extra_cats)
+ordered_cats: list[str] = standard_cats + sorted(extra_cats)
 
-for cat in ordered_cats:
+for cat: str in ordered_cats:
     vals = categories.get(cat, [])
-    arr = np.array(vals, dtype=float)
-    arrn = normalize_array(arr, global_min, global_max)
+    arr: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] = np.array(vals, dtype=float)
+    arrn: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] | np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = normalize_array(arr, global_min, global_max)
     rows.append(
         (
             cat,
@@ -257,7 +264,7 @@ for cat in ordered_cats:
     )
 
 # write CSV and PNG to output/Classifiers/, overwrite existing files
-classifier_dir = os.path.join(os.path.normpath("."), "output", "Classifiers")
+classifier_dir: str = os.path.join(os.path.normpath("."), "output", "Classifiers")
 os.makedirs(classifier_dir, exist_ok=True)
 # include sim identifier in filenames
 if len(sim_dirs) == 1:
@@ -265,26 +272,25 @@ if len(sim_dirs) == 1:
 else:
     sim_label = "multiple_sims"
 # sanitize sim_label to be filesystem-friendly
-sim_label = "".join([c if c.isalnum() or c in ("-", "_") else "_" for c in sim_label])
+sim_label: str = "".join([c if c.isalnum() or c in ("-", "_") else "_" for c in sim_label])
 csv_name = os.path.splitext(args.out_csv)[0] + f"_{sim_label}.csv"
-csv_outp = os.path.join(classifier_dir, csv_name)
-with open(csv_outp, "w", newline="") as f:
-    w = csv.writer(f)
+csv_outp: str = os.path.join(classifier_dir, csv_name)
+with open(csv_outp, "w", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    w: csv.Writer = csv.writer(f)
     w.writerow(["category", "count", "mean_fitness", "median_fitness", "std_fitness"])
     for r in rows:
         # write raw formatted numbers or NaN where appropriate
-        mean_s = f"{r[2]:.6g}" if not np.isnan(r[2]) else ""
-        med_s = f"{r[3]:.6g}" if not np.isnan(r[3]) else ""
-        std_s = f"{r[4]:.6g}" if not np.isnan(r[4]) else ""
+        mean_s: str = f"{r[2]:.6g}" if not np.isnan(r[2]) else ""
+        med_s: str = f"{r[3]:.6g}" if not np.isnan(r[3]) else ""
+        std_s: str = f"{r[4]:.6g}" if not np.isnan(r[4]) else ""
         w.writerow([r[0], r[1], mean_s, med_s, std_s])
 
 print("Wrote", os.path.relpath(csv_outp), "(overwritten)")
 
-# plot: left column  = abundance (single tall axis)
-#       right column = stacked histograms (one per category)
+# plot: left column = abundance (single tall axis), right column = stacked histograms (one per category)
 cats = [r[0] for r in rows]
 counts = [r[1] for r in rows]
-n_cats = len(cats)
+n_cats: int = len(cats)
 
 if n_cats == 0:
     print("No categories to plot")
@@ -294,7 +300,7 @@ if n_cats == 0:
 # use normalized values for plotting
 normalized_categories = {}
 for c in cats:
-    vals = np.array(categories.get(c, []), dtype=float)
+    vals: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] = np.array(categories.get(c, []), dtype=float)
     normalized_categories[c] = normalize_array(vals, global_min, global_max)
 
 all_vals = (
@@ -312,28 +318,28 @@ if all_vals.size > 0:
     if np.allclose(vmin, vmax):
         constant_hist = True
         center = float(vmin)
-        eps = max(1e-3, 0.01 * (abs(center) + 1e-6))
-        lo = max(0.0, center - eps)
-        hi = min(1.0, center + eps)
-        bins = np.linspace(lo, hi, args.bins)
+        eps: float = max(1e-3, 0.01 * (abs(center) + 1e-6))
+        lo: float = max(0.0, center - eps)
+        hi: float = min(1.0, center + eps)
+        bins: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(lo, hi, args.bins)
     else:
         # use the normalized pooled min/max for the bins
-        bins = np.linspace(vmin, vmax, args.bins)
+        bins: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(vmin, vmax, args.bins)
 else:
-    bins = np.linspace(0.0, 1.0, args.bins)
+    bins: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(0.0, 1.0, args.bins)
 
-# figure height proportional to number of hist panels
-fig_height = max(3, 0.8 * n_cats + 2)
-fig = plt.figure(figsize=(13, fig_height))
+# figure size: width 12 (left narrow, right wide), height proportional to number of hist panels
+fig_height: float = max(3, 0.8 * n_cats + 2)
+fig: plt.Figure = plt.figure(figsize=(13, fig_height))
 gs = plt.GridSpec(nrows=n_cats, ncols=2, width_ratios=[1, 3], wspace=0.3, hspace=0.4)
 
 # colormap: 'YlGn' ecology palette
-cmap = plt.get_cmap("YlGn")
-colors = [cmap(i / max(1, n_cats - 1)) for i in range(n_cats)]
+cmap: plt.Colormap = plt.get_cmap("YlGn")
+colors: list[tuple[float, float, float, float]] = [cmap(i / max(1, n_cats - 1)) for i: int in range(n_cats)]
 
 # left: abundance spanning all rows
-ax_abund = fig.add_subplot(gs[:, 0])
-bar_colors = colors
+ax_abund: plt.Axes = fig.add_subplot(gs[:, 0])
+bar_colors: list[tuple[float, float, float, float]] = colors
 ax_abund.bar(range(n_cats), counts, color=bar_colors, edgecolor="k")
 ax_abund.set_xticks(range(n_cats))
 # map category names to symbols using STRATEGIES (fall back to name)
@@ -344,19 +350,19 @@ ax_abund.set_ylabel("Count", fontsize=14)
 
 # right: stacked histogram panels, one per category
 for i, cat in enumerate(cats):
-    ax = fig.add_subplot(gs[i, 1])
+    ax: plt.Axes = fig.add_subplot(gs[i, 1])
     vals = np.array(normalized_categories.get(cat, []))
-    col = colors[i]
+    col: tuple[float, float, float, float] = colors[i]
     if vals.size > 0:
         # if global data are constant, plot counts instead of density to avoid
         # division-by-zero in histogram density calculation
-        density_flag = False if constant_hist else True
+        density_flag: bool = False if constant_hist else True
         ax.hist(vals, bins=bins, density=density_flag, alpha=0.9, color=col, edgecolor="k")
         ax.set_xlim(bins[0], bins[-1])
         ax.set_ylabel("Frequency")
         ax.set_xlabel("Normalized fitness (0-1)", fontsize=12)
         # place the category title inside the plot at top-right for readability
-        title_text = f"{cat} (n={len(vals)})  mean={np.mean(vals):.3g}"
+        title_text: str = f"{cat} (n={len(vals)})  mean={np.mean(vals):.3g}"
         ax.text(
             0.98,
             0.92,
@@ -380,15 +386,16 @@ for i, cat in enumerate(cats):
             bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
         )
 
-for ax in fig.axes:
+for ax: plt.Axes in fig.axes:
     ax.label_outer()
 
 # add a single shared Y-axis label for the right column (centered between columns)
 if len(fig.axes) > 1:
     try:
-        left_bbox = fig.axes[0].get_position()
-        right_bbox = fig.axes[1].get_position()
-        x = (left_bbox.x1 + right_bbox.x0) / 2.0
+        left_bbox: Bbox = fig.axes[0].get_position()
+        right_bbox: Bbox = fig.axes[1].get_position()
+        # x position halfway between the abundance column right edge and histogram left edge
+        x: float = (left_bbox.x1 + right_bbox.x0) / 2.0
         fig.text(x, 0.5, "Frequency", va="center", rotation="vertical", fontsize=14)
     except Exception:
         # fallback: place label at a reasonable fixed x
@@ -398,11 +405,11 @@ if len(fig.axes) > 1:
 # Use slightly larger left/bottom margins and a wider right column so
 # histogram x-labels and abundance symbols don't overlap. Increase
 # vertical spacing when there are many category rows.
-calc_hspace = 0.4 if n_cats > 8 else 0.2
+calc_hspace: float = 0.4 if n_cats > 8 else 0.2
 fig.subplots_adjust(left=0.10, right=0.96, top=0.94, bottom=0.12, hspace=calc_hspace, wspace=0.15)
 
 # write PNG with sim label included
 png_name = args.out_prefix + f"_{sim_label}.png"
-png_outp = os.path.join(classifier_dir, png_name)
+png_outp: str = os.path.join(classifier_dir, png_name)
 fig.savefig(png_outp, dpi=200)
 print("Wrote", os.path.relpath(png_outp), "(overwritten)")

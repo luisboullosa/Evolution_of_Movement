@@ -8,31 +8,31 @@ import numpy as np
 parser = argparse.ArgumentParser(description="Plot extinction time heatmap")
 parser.add_argument("--in", dest="infile", default=None, help="Input CSV path")
 parser.add_argument("--out", dest="outfile", default=None, help="Output image path")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
-output_dir = os.path.join(os.path.normpath("."), "output", "Parameter scans")
+output_dir: str = os.path.join(os.path.normpath("."), "output", "Parameter scans")
 os.makedirs(output_dir, exist_ok=True)
 
-csv_default = os.path.join(output_dir, "scan_params_results.csv")
+csv_default: str = os.path.join(output_dir, "scan_params_results.csv")
 if args.infile:
     csvpath = os.path.normpath(args.infile)
 else:
-    csvpath = csv_default
+    csvpath: str = csv_default
     if not os.path.exists(csvpath):
-        csvpath = os.path.normpath("scan_params_results.csv")
+        csvpath: str = os.path.normpath("scan_params_results.csv")
         if not os.path.exists(csvpath):
             print("scan_params_results.csv not found at", os.path.relpath(csv_default))
             raise SystemExit(1)
 
-out_default = os.path.join(output_dir, "scan_params_heatmap.png")
-out = os.path.normpath(args.outfile) if args.outfile else out_default
+out_default: str = os.path.join(output_dir, "scan_params_heatmap.png")
+out: argparse.Any | str = os.path.normpath(args.outfile) if args.outfile else out_default
 
 data = {}
 movement_vals = []
 maintenance_vals = []
-with open(csvpath, "r", newline="") as f:
-    r = csv.DictReader(f)
-    fieldnames = r.fieldnames or []
+with open(csvpath, "r", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    r: csv.DictReader[str] = csv.DictReader(f)
+    fieldnames: argparse.Sequence[str] | list[str] = r.fieldnames or []
     # detect which columns are present and map to x/y keys
     if "movement_cost_factor" in fieldnames and "maintenance_cost_per_node" in fieldnames:
         x_key = "movement_cost_factor"
@@ -48,7 +48,7 @@ with open(csvpath, "r", newline="") as f:
         plot_title = "Extinction time (quick scan)"
     else:
         # fallback: choose first two non-meta columns
-        candidates = [fn for fn in fieldnames if fn not in ("extinction_time", "survived")]
+        candidates: list[str] = [fn for fn: str in fieldnames if fn not in ("extinction_time", "survived")]
         if len(candidates) >= 2:
             x_key, y_key = candidates[0], candidates[1]
             x_label, y_label = x_key, y_key
@@ -56,7 +56,7 @@ with open(csvpath, "r", newline="") as f:
         else:
             raise SystemExit("CSV missing expected parameter columns")
 
-    for row in r:
+    for row: dict[str | Any, str | Any] in r:
         try:
             xv = float(row.get(x_key, "nan"))
         except Exception:
@@ -78,7 +78,7 @@ with open(csvpath, "r", newline="") as f:
                 et = int(float(row.get("extinction_time", "nan")))
             except Exception:
                 et = 0
-        surv = int(row.get("survived", "0")) if row.get("survived") is not None else 0
+        surv: int = int(row.get("survived", "0")) if row.get("survived") is not None else 0
         movement_vals.append(xv)
         maintenance_vals.append(yv)
         data[(xv, yv)] = (et, surv)
@@ -87,7 +87,7 @@ movement_vals = sorted(set(movement_vals))
 maintenance_vals = sorted(set(maintenance_vals))
 
 # build matrix with NaN for missing cells
-mat = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
+mat: np.ndarray[tuple[int, int], np.dtype[argparse.Any]] = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
 survivors = []
 max_time = 0
 count = 0
@@ -106,9 +106,9 @@ for i, mc in enumerate(maintenance_vals):
 vmax = max_time if max_time > 0 else 1
 
 plt.figure(figsize=(9, 5.5))
-cmap = plt.get_cmap("magma_r")
+cmap: plt.Colormap = plt.get_cmap("magma_r")
 try:
-    cmap = cmap.copy()
+    cmap: plt.Colormap = cmap.copy()
 except Exception:
     # older matplotlib versions may not support copy(); proceed with the original
     pass
@@ -116,7 +116,7 @@ try:
     cmap.set_bad(color="#dddddd")
 except Exception:
     pass
-im = plt.imshow(
+im: plt.AxesImage = plt.imshow(
     mat,
     origin="lower",
     cmap=cmap,
@@ -125,7 +125,7 @@ im = plt.imshow(
     vmax=vmax,
     interpolation="nearest",
 )
-cb = plt.colorbar(im)
+cb: plt.Colorbar = plt.colorbar(im)
 cb.set_label("extinction time (timesteps)")
 
 # ticks with formatted floats

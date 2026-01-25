@@ -21,8 +21,8 @@ def find_latest_scan(data_base):
     return os.path.join(data_base, scans_sorted[-1])
 
 
-def compute_metrics(scan_dir, results_csv):
-    df = pd.read_csv(results_csv)
+def compute_metrics(scan_dir, results_csv) -> pd.DataFrame:
+    df: pd.DataFrame = pd.read_csv(results_csv)
     sims = sorted([d for d in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d)) and d.startswith("sim")])
 
     mean_moves = []
@@ -59,7 +59,7 @@ def compute_metrics(scan_dir, results_csv):
             max_moves.append(0.0)
             mean_norms.append(0.0)
 
-    n = len(df)
+    n: int = len(df)
 
     def pad(col, default=0.0):
         arr = list(col)
@@ -75,14 +75,14 @@ def compute_metrics(scan_dir, results_csv):
     return df
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan-dir", help="Path to scan directory (e.g. output/Parameter scans/data/scan0015)")
     parser.add_argument("--metric", choices=["mean", "median", "max", "survived"], default="max")
     parser.add_argument("--top", type=int, default=10)
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
-    data_base = os.path.join(os.path.normpath("."), "output", "Parameter scans", "data")
+    data_base: str = os.path.join(os.path.normpath("."), "output", "Parameter scans", "data")
 
     scan_dir = args.scan_dir
     if not scan_dir:
@@ -91,22 +91,22 @@ def main():
         print("No scan directory found. Looked under", data_base)
         return
 
-    results_csv = os.path.join(scan_dir, "scan_extended_results.csv")
+    results_csv: str = os.path.join(scan_dir, "scan_extended_results.csv")
     if not os.path.exists(results_csv):
         print("Results CSV not found in", scan_dir)
         return
 
-    df = compute_metrics(scan_dir, results_csv)
+    df: pd.DataFrame = compute_metrics(scan_dir, results_csv)
 
-    metric_col = (
+    metric_col: str = (
         "max_move"
         if args.metric == "max"
         else ("mean_move" if args.metric == "mean" else ("median_move" if args.metric == "median" else "survived"))
     )
 
-    topn = df.sort_values(by=metric_col, ascending=False).head(args.top)
+    topn: pd.DataFrame = df.sort_values(by=metric_col, ascending=False).head(args.top)
 
-    out_csv = os.path.join(scan_dir, f"top_{args.top}_{metric_col}.csv")
+    out_csv: str = os.path.join(scan_dir, f"top_{args.top}_{metric_col}.csv")
     topn.to_csv(out_csv, index=False)
 
     print(f"Wrote top {args.top} combos by {metric_col} to {out_csv}")

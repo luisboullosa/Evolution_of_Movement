@@ -11,15 +11,33 @@ import itertools
 import json
 import os
 
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import DataFrame
+
+from pandas import Series
+
+from plotly.graph_objs._figure import Figure
+
 from worker_pool import run_param_sweep
 
 # Prefer relative exe paths
-EXE = (
+EXE: str = (
     "./build/Release/evo-movement-sim.exe"
     if os.path.exists("./build/Release/evo-movement-sim.exe")
     else "./build/evo-movement-sim.exe"
 )
-EXE = os.path.normpath(EXE)
+EXE: str = os.path.normpath(EXE)
 print("Using exe:", EXE)
 
 parser = argparse.ArgumentParser()
@@ -77,47 +95,47 @@ parser.add_argument(
 )
 
 # reparse args to include the new options
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 # if pilot requested, reduce steps and possibly sample sparser ranges
 if args.pilot:
     steps = 2000
     burn_in = 0
-    maintenance_vals = [0.0015, 0.01]
-    repro_thresholds = [20.0]
-    repro_costs = [1.0, 10.0]
+    maintenance_vals: list[float] = [0.0015, 0.01]
+    repro_thresholds: list[float] = [20.0]
+    repro_costs: list[float] = [1.0, 10.0]
     # keep resource scale and initial population fixed for the pilot
-    env_time_speeds = [0.0, 0.15]
-    death_risks = [0.00001]
-    max_populations = [20000]
+    env_time_speeds: list[float] = [0.0, 0.15]
+    death_risks: list[float] = [0.00001]
+    max_populations: list[int] = [20000]
 else:
     if args.mid:
         steps = 11000
-        burn_in = steps - 1000
-        maintenance_vals = [0.0015, 0.01]
-        repro_thresholds = [20.0, 50.0]
-        repro_costs = [5.0, 10.0]
-        env_time_speeds = [0.0, 0.1]
+        burn_in: int = steps - 1000
+        maintenance_vals: list[float] = [0.0015, 0.01]
+        repro_thresholds: list[float] = [20.0, 50.0]
+        repro_costs: list[float] = [5.0, 10.0]
+        env_time_speeds: list[float] = [0.0, 0.1]
         # Death risk/demographic sweep values
-        death_risks = [0.0000001, 0.001]
+        death_risks: list[float] = [0.0000001, 0.001]
         # Population cap sweep values (0 would mean no cap; here we choose a few caps)
-        max_populations = [100000]
+        max_populations: list[int] = [100000]
     else:
         # parameter ranges (choose a reasonable default grid - users can edit this file)
         steps = 101000
-        burn_in = steps - 1000
-        maintenance_vals = [0.0015, 0.005, 0.01]
-        repro_thresholds = [20.0, 50.0, 100.0]
-        repro_costs = [1.0, 5.0, 10.0]
-        env_time_speeds = [0.0, 0.001, 0.01, 0.1]
+        burn_in: int = steps - 1000
+        maintenance_vals: list[float] = [0.0015, 0.005, 0.01]
+        repro_thresholds: list[float] = [20.0, 50.0, 100.0]
+        repro_costs: list[float] = [1.0, 5.0, 10.0]
+        env_time_speeds: list[float] = [0.0, 0.001, 0.01, 0.1]
         # Death risk/demographic sweep values
-        death_risks = [0.0000001, 0.0001, 0.001]
+        death_risks: list[float] = [0.0000001, 0.0001, 0.001]
         # Population cap sweep values (0 would mean no cap; here we choose a few caps)
-        max_populations = [10000, 100000, 1000000]
+        max_populations: list[int] = [10000, 100000, 1000000]
 
 
 # Apply command-line overrides (if provided)
-def _parse_csv_floats(s):
+def _parse_csv_floats(s) -> list[float] | None:
     try:
         return [float(x) for x in s.split(",") if x.strip() != ""]
     except Exception:
@@ -125,73 +143,73 @@ def _parse_csv_floats(s):
 
 
 if getattr(args, "maintenance_vals", None):
-    vals = _parse_csv_floats(args.maintenance_vals)
+    vals: list[float] | None = _parse_csv_floats(args.maintenance_vals)
     if vals:
-        maintenance_vals = vals
+        maintenance_vals: list[float] = vals
 
 if getattr(args, "repro_thresholds", None):
-    vals = _parse_csv_floats(args.repro_thresholds)
+    vals: list[float] | None = _parse_csv_floats(args.repro_thresholds)
     if vals:
-        repro_thresholds = vals
+        repro_thresholds: list[float] = vals
 
 if getattr(args, "repro_costs", None):
-    vals = _parse_csv_floats(args.repro_costs)
+    vals: list[float] | None = _parse_csv_floats(args.repro_costs)
     if vals:
-        repro_costs = vals
+        repro_costs: list[float] = vals
 
 if getattr(args, "env_time_speeds", None):
-    vals = _parse_csv_floats(args.env_time_speeds)
+    vals: list[float] | None = _parse_csv_floats(args.env_time_speeds)
     if vals:
-        env_time_speeds = vals
+        env_time_speeds: list[float] = vals
 
 if getattr(args, "death_risks", None):
-    vals = _parse_csv_floats(args.death_risks)
+    vals: list[float] | None = _parse_csv_floats(args.death_risks)
     if vals:
-        death_risks = vals
+        death_risks: list[float] = vals
 
 if getattr(args, "max_populations", None):
-    vals = _parse_csv_floats(args.max_populations)
+    vals: list[float] | None = _parse_csv_floats(args.max_populations)
     if vals:
-        max_populations = [int(x) for x in vals]
+        max_populations: list[int] = [int(x) for x: float in vals]
 
 # create parameter combinations and write a CSV listing
 # Sweep: maintenance, repro threshold, repro cost, env_time_speed, death_risk, max_population
-raw_pairs = list(
+raw_pairs: list[tuple[float, float, float, float, float, int]] = list(
     itertools.product(maintenance_vals, repro_thresholds, repro_costs, env_time_speeds, death_risks, max_populations)
 )
 # enumerate jobs so we can create per-job config files and reliably locate sim directories
-pairs = list(enumerate(raw_pairs))
+pairs: list[tuple[int, tuple[float, float, float, float, float, int]]] = list(enumerate(raw_pairs))
 
-output_dir = os.path.join(os.path.normpath("."), "output", "Parameter scans")
+output_dir: str = os.path.join(os.path.normpath("."), "output", "Parameter scans")
 os.makedirs(output_dir, exist_ok=True)
-data_base = os.path.join(output_dir, "data")
+data_base: str = os.path.join(output_dir, "data")
 os.makedirs(data_base, exist_ok=True)
-existing = sorted([d for d in os.listdir(data_base) if d.startswith("scan")])
+existing: list[str] = sorted([d for d: str in os.listdir(data_base) if d.startswith("scan")])
 
 if args.plot_only:
     # In plot-only mode reuse the latest existing scan directory instead of creating a new one.
     if not existing:
         raise SystemExit("No existing scans found under data/; cannot run in --plot-only mode")
-    latest = existing[-1]
-    scan_dir = os.path.join(data_base, latest)
+    latest: str = existing[-1]
+    scan_dir: str = os.path.join(data_base, latest)
     print("Plot-only mode: using existing scan folder:", scan_dir)
-    params_csv = os.path.join(scan_dir, "params_grid.csv")
-    results_csv = os.path.join(scan_dir, "scan_extended_results.csv")
+    params_csv: str = os.path.join(scan_dir, "params_grid.csv")
+    results_csv: str = os.path.join(scan_dir, "scan_extended_results.csv")
     # do not write any config files or params when plotting only
     run_cfg_paths = {}
 else:
-    idx = len(existing) + 1
-    scan_dir = os.path.join(data_base, f"scan{idx:04d}")
+    idx: int = len(existing) + 1
+    scan_dir: str = os.path.join(data_base, f"scan{idx:04d}")
     os.makedirs(scan_dir, exist_ok=True)
-    params_csv = os.path.join(scan_dir, "params_grid.csv")
-    results_csv = os.path.join(scan_dir, "scan_extended_results.csv")
+    params_csv: str = os.path.join(scan_dir, "params_grid.csv")
+    results_csv: str = os.path.join(scan_dir, "scan_extended_results.csv")
     # create a small per-run config that forces simulator webviewer output into scan folder
-    run_cfg_path = os.path.normpath(os.path.join(scan_dir, "scan_config.json"))
-    with open(run_cfg_path, "w") as cf:
+    run_cfg_path: str = os.path.normpath(os.path.join(scan_dir, "scan_config.json"))
+    with open(run_cfg_path, "w") as cf: os.TextIOWrapper[_WrappedBuffer]:
         json.dump({"webviewer_base": os.path.normpath(scan_dir)}, cf)
 
     # write the parameter listing
-    with open(params_csv, "w", newline="") as pf:
+    with open(params_csv, "w", newline="") as pf: os.TextIOWrapper[_WrappedBuffer]:
         pf.write(
             "maintenance_cost_per_node,reproduction_threshold,reproduction_cost,env_time_speed,death_risk,max_population\n"
         )
@@ -201,15 +219,15 @@ else:
     # create per-job config files so sim folders are predictable (prefix per job)
     run_cfg_paths = {}
     for idx, job in pairs:
-        cfgp = os.path.join(scan_dir, f"scan_config_job_{idx}.json")
-        cfg = {"webviewer_base": os.path.normpath(scan_dir), "sim_prefix": f"job{idx}_"}
-        with open(cfgp, "w") as cfj:
+        cfgp: str = os.path.join(scan_dir, f"scan_config_job_{idx}.json")
+        cfg: dict[str, str] = {"webviewer_base": os.path.normpath(scan_dir), "sim_prefix": f"job{idx}_"}
+        with open(cfgp, "w") as cfj: os.TextIOWrapper[_WrappedBuffer]:
             json.dump(cfg, cfj)
         run_cfg_paths[idx] = cfgp
 
 
 # builder: job is a tuple (maintenance, repro_thresh, repro_cost, resource_scale, env_time_speed)
-def cmd_builder(job):
+def cmd_builder(job) -> list[str]:
     # job: (idx, (maintenance, repro_thresh, repro_cost, env_time_speed, death_risk, max_population))
     idx, packed = job
     m, rt, rc, ets, dr, mp = packed
@@ -243,9 +261,9 @@ def result_row_builder(job, extinct, out_text):
     # job is (idx, packed)
     idx, packed = job
     m, rt, rc, ets, dr, mp = packed
-    survived = 1 if extinct is None else 0
+    survived: int = 1 if extinct is None else 0
     # default max if extinct none
-    max_steps = steps
+    max_steps: int = steps
     ext_val = extinct if extinct is not None else max_steps
 
     # Try to locate the most-recent sim folder that contains individuals.jsonl and
@@ -261,14 +279,14 @@ def result_row_builder(job, extinct, out_text):
         # list candidate sim dirs (prefer those starting with sim or job, but fall back
         # to any directory). Sort by modification time descending so the most-recent
         # sim folders are checked first.
-        cand = [d for d in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d))]
-        cand_paths = [os.path.join(scan_dir, d) for d in cand]
+        cand: list[str] = [d for d: str in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d))]
+        cand_paths: list[str] = [os.path.join(scan_dir, d) for d: str in cand]
         cand_paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
 
         sim_found = None
-        for p in cand_paths:
+        for p: str in cand_paths:
             if os.path.exists(os.path.join(p, "individuals.jsonl")):
-                sim_found = p
+                sim_found: str = p
                 break
 
         if sim_found:
@@ -277,9 +295,9 @@ def result_row_builder(job, extinct, out_text):
             per_frame_means = []
             all_abs = []
             # stream the large JSONL file line-by-line
-            with open(os.path.join(sim_found, "individuals.jsonl"), "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
+            with open(os.path.join(sim_found, "individuals.jsonl"), "r", encoding="utf-8") as fh: os.TextIOWrapper[_WrappedBuffer]:
+                for line: str in fh:
+                    line: str = line.strip()
                     if not line:
                         continue
                     try:
@@ -298,7 +316,7 @@ def result_row_builder(job, extinct, out_text):
                             ld = int(ind.get("last_delta", 0) or 0)
                             if ld != 0:
                                 moved_ids.add(iid)
-                            v = abs(ld)
+                            v: int = abs(ld)
                             frame_vals.append(v)
                             all_abs.append(v)
                         except Exception:
@@ -307,10 +325,10 @@ def result_row_builder(job, extinct, out_text):
                         per_frame_means.append(float(sum(frame_vals)) / float(len(frame_vals)))
 
             if per_frame_means:
-                mean_move = float(sum(per_frame_means)) / float(len(per_frame_means))
+                mean_move: float = float(sum(per_frame_means)) / float(len(per_frame_means))
                 # median
                 s = sorted(per_frame_means)
-                L = len(s)
+                L: int = len(s)
                 if L % 2 == 1:
                     median_move = float(s[L // 2])
                 else:
@@ -318,7 +336,7 @@ def result_row_builder(job, extinct, out_text):
             if all_abs:
                 max_move = float(max(all_abs))
             if seen_ids:
-                prop_moved = float(len(moved_ids)) / float(len(seen_ids))
+                prop_moved: float = float(len(moved_ids)) / float(len(seen_ids))
     except Exception:
         # if anything goes wrong, fall back to zeros (we don't want to crash the sweep)
         mean_move = median_move = max_move = prop_moved = 0.0
@@ -326,7 +344,7 @@ def result_row_builder(job, extinct, out_text):
     return [m, rt, rc, ets, dr, mp, ext_val, survived, recorded_steps, mean_move, median_move, max_move, prop_moved]
 
 
-header = [
+header: list[str] = [
     "maintenance_cost_per_node",
     "reproduction_threshold",
     "reproduction_cost",
@@ -370,19 +388,19 @@ if args.plotly or args.plot_only:
         try:
             # load results or fall back to params
             if os.path.exists(results_csv):
-                df = pd.read_csv(results_csv)
+                df: DataFrame = pd.read_csv(results_csv)
             else:
-                df = pd.read_csv(params_csv)
+                df: DataFrame = pd.read_csv(params_csv)
                 if "extinction_time" not in df.columns:
                     df["extinction_time"] = steps
                 if "survived" not in df.columns:
                     df["survived"] = 0
 
             # compute movement metrics by scanning sim subfolders (sim directories may start with 'sim' or 'job')
-            sims = sorted(
+            sims: list[str] = sorted(
                 [
                     d
-                    for d in os.listdir(scan_dir)
+                    for d: str in os.listdir(scan_dir)
                     if os.path.isdir(os.path.join(scan_dir, d)) and (d.startswith("sim") or d.startswith("job"))
                 ]
             )
@@ -394,8 +412,8 @@ if args.plotly or args.plot_only:
             recorded_steps_list = []
             from webviewer_helpers import iter_individuals_frames
 
-            for s in sims:
-                sp = os.path.join(scan_dir, s)
+            for s: str in sims:
+                sp: str = os.path.join(scan_dir, s)
                 per_frame_means = []
                 per_frame_norms = []
                 all_abs = []
@@ -435,7 +453,7 @@ if args.plotly or args.plot_only:
                     recorded_steps_list.append(0)
 
             # align lengths: df rows may equal number of pairs; we pad if sims shorter
-            n = len(df)
+            n: int = len(df)
 
             def pad(col, default=0.0):
                 arr = list(col)
@@ -452,7 +470,7 @@ if args.plotly or args.plot_only:
             df["recorded_steps"] = pad(recorded_steps_list, default=0)
 
             # Scanned dimensions (restore these so they're available in the plot/hover)
-            dims = [
+            dims: list[str] = [
                 "maintenance_cost_per_node",
                 "reproduction_threshold",
                 "reproduction_cost",
@@ -466,43 +484,43 @@ if args.plotly or args.plot_only:
             X_PARAM = "maintenance_cost_per_node"
             Y_PARAM = "reproduction_threshold"
 
-            metrics = [c for c in ["mean_move", "median_move", "max_move", "prop_moved"] if c in df.columns]
+            metrics: list[str] = [c for c: str in ["mean_move", "median_move", "max_move", "prop_moved"] if c in df.columns]
             if not metrics:
                 print("No movement metrics found to plot")
             else:
 
                 def make_pivot(metric):
                     # group and compute metric aggregation
-                    grp = df.groupby([X_PARAM, Y_PARAM]).agg({metric: "mean"})
+                    grp: DataFrame = df.groupby([X_PARAM, Y_PARAM]).agg({metric: "mean"})
                     # for each additional scanned dim compute mean for hover info
-                    extra_dims = [d for d in dims if d not in (X_PARAM, Y_PARAM) and d in df.columns]
+                    extra_dims: list[str] = [d for d: str in dims if d not in (X_PARAM, Y_PARAM) and d in df.columns]
                     if extra_dims:
-                        extras = df.groupby([X_PARAM, Y_PARAM])[extra_dims].mean()
+                        extras: DataFrame = df.groupby([X_PARAM, Y_PARAM])[extra_dims].mean()
                     else:
                         extras = None
 
-                    grp = grp.reset_index()
-                    x_vals = sorted(grp[X_PARAM].unique())
-                    y_vals = sorted(grp[Y_PARAM].unique())
+                    grp: DataFrame = grp.reset_index()
+                    x_vals: list[Any] = sorted(grp[X_PARAM].unique())
+                    y_vals: list[Any] = sorted(grp[Y_PARAM].unique())
                     z = []
                     custom = []
                     for y in y_vals:
                         row = []
                         crow = []
                         for x in x_vals:
-                            sel = grp.loc[(grp[X_PARAM] == x) & (grp[Y_PARAM] == y), metric]
-                            val = float(sel.mean()) if not sel.empty else None
+                            sel: DataFrame = grp.loc[(grp[X_PARAM] == x) & (grp[Y_PARAM] == y), metric]
+                            val: float | None = float(sel.mean()) if not sel.empty else None
                             row.append(val)
                             # build customdata for this cell: include other scanned dims (mean)
                             if extras is not None:
                                 try:
-                                    e = extras.loc[(x, y)] if (x, y) in list(extras.index) else None
+                                    e: DataFrame | None = extras.loc[(x, y)] if (x, y) in list(extras.index) else None
                                 except Exception:
                                     e = None
                                 if e is not None:
                                     parts = []
-                                    for d in extra_dims:
-                                        dv = (
+                                    for d: str in extra_dims:
+                                        dv: Series[Any] | None | float = (
                                             e.get(d, None)
                                             if hasattr(e, "get")
                                             else (float(e[d]) if d in e.index else None)
@@ -520,7 +538,7 @@ if args.plotly or args.plot_only:
                         custom.append(crow)
                     return x_vals, y_vals, z, custom
 
-                init_metric = metrics[0]
+                init_metric: str = metrics[0]
                 xs, ys, z0, custom0 = make_pivot(init_metric)
 
                 def fmt_vals(vals):
@@ -554,7 +572,7 @@ if args.plotly or args.plot_only:
 
                 # dropdown to switch metric
                 buttons = []
-                for metric in metrics:
+                for metric: str in metrics:
                     xs_m, ys_m, zm, cm = make_pivot(metric)
                     # use same formatted ticks
                     buttons.append(
@@ -593,7 +611,7 @@ if args.plotly or args.plot_only:
                 fig.data[0].colorbar.thickness = 15
                 fig.data[0].colorbar.tickfont.size = 10
 
-                html_out = os.path.join(scan_dir, "interactive_plot.html")
+                html_out: str = os.path.join(scan_dir, "interactive_plot.html")
                 fig.write_html(html_out)
                 print("Wrote interactive heatmap to", html_out)
 
@@ -601,21 +619,21 @@ if args.plotly or args.plot_only:
                 try:
                     import plotly.express as px
 
-                    matrix_dims = [d for d in dims if d in df.columns]
+                    matrix_dims: list[str] = [d for d: str in dims if d in df.columns]
                     if matrix_dims:
-                        matrix_metric = init_metric if init_metric in df.columns else matrix_dims[0]
-                        matrix_fig = px.scatter_matrix(
+                        matrix_metric: str = init_metric if init_metric in df.columns else matrix_dims[0]
+                        matrix_fig: Figure = px.scatter_matrix(
                             df,
                             dimensions=matrix_dims,
                             color=matrix_metric,
                             title=f"Parameter matrix colored by {matrix_metric}",
                         )
                         matrix_fig.update_layout(template="plotly_white", height=900, width=1200)
-                        matrix_out = os.path.join(scan_dir, "interactive_matrix.html")
+                        matrix_out: str = os.path.join(scan_dir, "interactive_matrix.html")
                         matrix_fig.write_html(matrix_out)
                         print("Wrote interactive matrix to", matrix_out)
-                except Exception as e:
+                except Exception as e: Exception:
                     print("Failed to create interactive matrix:", e)
 
-        except Exception as e:
+        except Exception as e: Exception:
             print("Failed to create interactive plot:", e)

@@ -11,20 +11,28 @@ Usage:
 """
 
 import argparse
+from csv import DictReader
+from concurrent.futures.thread import ThreadPoolExecutor
+from typing import Any
 import itertools
 import json
 import os
 import random
+from subprocess import CompletedProcess
 import tempfile
 import time
 
+from numpy import dtype, ndarray
+
 from worker_pool import run_param_sweep
 
+ParamTuple = tuple[float, float, float, float, float, float, float, int]
 
-def _parse_float_list(arg_name, raw):
+
+def _parse_float_list(arg_name, raw) -> list[float]:
     """Parse comma-separated floats from CLI arguments."""
     try:
-        vals = [float(x.strip()) for x in raw.split(",") if x.strip()]
+        vals: list[float] = [float(x.strip()) for x in raw.split(",") if x.strip()]
     except Exception:
         raise argparse.ArgumentTypeError(f"{arg_name} must be a comma-separated list of numbers")
     if not vals:
@@ -89,7 +97,7 @@ parser.add_argument(
 parser.add_argument(
     "--repro-costs", type=str, default=None, help="Comma-separated reproduction_cost values to override defaults"
 )
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 # default to release unless explicitly asked for debug
 if not args.release and not args.debug:
@@ -101,50 +109,50 @@ if args.debug:
 # also include grid size (`grid_width`) and zero-values where allowed
 if args.pilot:
     # moderately larger pilot to sample broader behavior without exploding job count
-    movement_vals = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
-    maintenance_vals = [0.0, 1e-05, 5e-05, 1e-04, 5e-04, 0.001, 0.005, 0.01]
-    repro_thresholds = [0.0, 5.0, 10.0, 20.0, 50.0, 100.0]
-    repro_costs = [0.0, 0.1, 0.5, 1.0, 5.0, 10.0]
-    env_time_speeds = [0.0, 0.0001, 0.001, 0.01, 0.1]
-    death_risks = [0.0, 1e-08, 1e-06, 1e-04, 1e-03]
-    grid_vals = [25, 50, 100, 200]
-    resource_scales = [10.0, 100.0]
+    movement_vals: list[float] = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
+    maintenance_vals: list[float] = [0.0, 1e-05, 5e-05, 1e-04, 5e-04, 0.001, 0.005, 0.01]
+    repro_thresholds: list[float] = [0.0, 5.0, 10.0, 20.0, 50.0, 100.0]
+    repro_costs: list[float] = [0.0, 0.1, 0.5, 1.0, 5.0, 10.0]
+    env_time_speeds: list[float] = [0.0, 0.0001, 0.001, 0.01, 0.1]
+    death_risks: list[float] = [0.0, 1e-08, 1e-06, 1e-04, 1e-03]
+    grid_vals: list[int] = [25, 50, 100, 200]
+    resource_scales: list[float] = [10.0, 100.0]
 else:
     # expanded full-grid ranges (much larger search space)
-    movement_vals = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
-    maintenance_vals = [0.0, 1e-05, 5e-05, 1e-04, 5e-04, 0.001, 0.005, 0.01]
-    repro_thresholds = [0.0, 5.0, 10.0, 20.0, 50.0, 100.0]
-    repro_costs = [0.0, 0.1, 0.5, 1.0, 5.0, 10.0]
-    env_time_speeds = [0.0, 0.0001, 0.001, 0.01, 0.1]
-    death_risks = [0.0, 1e-08, 1e-06, 1e-04, 1e-03]
-    grid_vals = [25, 50, 100, 200]
-    resource_scales = [10.0, 100.0]
+    movement_vals: list[float] = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
+    maintenance_vals: list[float] = [0.0, 1e-05, 5e-05, 1e-04, 5e-04, 0.001, 0.005, 0.01]
+    repro_thresholds: list[float] = [0.0, 5.0, 10.0, 20.0, 50.0, 100.0]
+    repro_costs: list[float] = [0.0, 0.1, 0.5, 1.0, 5.0, 10.0]
+    env_time_speeds: list[float] = [0.0, 0.0001, 0.001, 0.01, 0.1]
+    death_risks: list[float] = [0.0, 1e-08, 1e-06, 1e-04, 1e-03]
+    grid_vals: list[int] = [25, 50, 100, 200]
+    resource_scales: list[float] = [10.0, 100.0]
 
 # optional CLI overrides for resource scales and reproduction costs
 if args.resource_scales:
-    resource_scales = _parse_float_list("--resource-scales", args.resource_scales)
+    resource_scales: list[float] = _parse_float_list("--resource-scales", args.resource_scales)
 if args.repro_costs:
-    repro_costs = _parse_float_list("--repro-costs", args.repro_costs)
+    repro_costs: list[float] = _parse_float_list("--repro-costs", args.repro_costs)
 
 # build a manageable set of combinations (cartesian product across dims)
 # build product or sampled set
-pairs = None
+pairs: list[ParamTuple]
 if args.sample and args.sample > 0:
     # sampling mode (discrete): draw parameter values by randomly choosing
     # from the provided discrete lists so sampled values remain on the grid.
     if args.seed is not None:
         random.seed(args.seed)
-    sampled = []
-    for i in range(args.sample):
-        mv = random.choice(movement_vals)
-        mc = random.choice(maintenance_vals)
-        repro_thr = random.choice(repro_thresholds)
-        repro_cost = random.choice(repro_costs)
-        env_time_speed = random.choice(env_time_speeds)
-        death_risk = random.choice(death_risks)
+    sampled: list[ParamTuple] = []
+    for _ in range(args.sample):
+        mv: float = random.choice(movement_vals)
+        mc: float = random.choice(maintenance_vals)
+        repro_thr: float = random.choice(repro_thresholds)
+        repro_cost: float = random.choice(repro_costs)
+        env_time_speed: float = random.choice(env_time_speeds)
+        death_risk: float = random.choice(death_risks)
         # sample grid width and resource scale discretely
-        gw = random.choice(grid_vals)
-        rscales = random.choice(resource_scales)
+        gw: int = random.choice(grid_vals)
+        rscales: float = random.choice(resource_scales)
         sampled.append((mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw))
     pairs = sampled
 else:
@@ -164,20 +172,20 @@ else:
 outdir = os.path.normpath(args.outdir)
 os.makedirs(os.path.dirname(outdir) or ".", exist_ok=True)
 # create a single timestamped jobs folder to hold only the three summary files
-jobs_dir = os.path.join(outdir, f"jobs{int(time.time())}")
+jobs_dir: str = os.path.join(outdir, f"jobs{int(time.time())}")
 os.makedirs(jobs_dir, exist_ok=True)
 # jobs state file (stores canonical ordered list of parameter tuples for deterministic indexing)
-jobs_state_path = args.jobs_file if args.jobs_file else os.path.join(jobs_dir, "jobs_state.json")
+jobs_state_path: str = args.jobs_file if args.jobs_file else os.path.join(jobs_dir, "jobs_state.json")
 
 
 # helper: derive a build id for the current workspace so resumed runs can verify simulator compatibility
-def _get_workspace_build_id():
+def _get_workspace_build_id() -> str:
     import datetime
     import subprocess
 
     # prefer git short hash inside the rust crate if available
     try:
-        p = subprocess.run(
+        p: CompletedProcess[str] = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=os.path.join(os.getcwd(), "rust"),
             stdout=subprocess.PIPE,
@@ -185,7 +193,7 @@ def _get_workspace_build_id():
             text=True,
             check=True,
         )
-        bid = p.stdout.strip()
+        bid: str = p.stdout.strip()
         if bid:
             return bid
     except Exception:
@@ -194,7 +202,7 @@ def _get_workspace_build_id():
     return datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
 
-def _atomic_write_json(path, data):
+def _atomic_write_json(path, data) -> None:
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -224,10 +232,10 @@ def _atomic_write_json(path, data):
 
 
 # If not resuming, write the canonical jobs_state file now so ordering is deterministic for resumes
-current_build = _get_workspace_build_id()
+current_build: str = _get_workspace_build_id()
 if not args.resume:
     try:
-        jobs_list = [list(p) for p in pairs]
+        jobs_list: list[list[float | int]] = [list(p) for p in pairs]
         wrapper = {
             "build_id": current_build,
             "created": int(time.time()),
@@ -289,7 +297,7 @@ try:
             "grid_width",
         ],
     }
-    manifest_path = os.path.join(jobs_dir, "scan_manifest.json")
+    manifest_path: str = os.path.join(jobs_dir, "scan_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as mf:
         json.dump(manifest, mf)
     # record the explored parameter space for future reference
@@ -309,7 +317,7 @@ try:
     with open(os.path.join(jobs_dir, "explored_params.json"), "w", encoding="utf-8") as ef:
         json.dump(explored, ef, indent=2)
     # also write a tiny Plotly HTML viewer into the jobs dir that polls progress.json
-    html_path = os.path.join(jobs_dir, "plotly_live.html")
+    html_path: str = os.path.join(jobs_dir, "plotly_live.html")
     html_content = r"""
 <!doctype html>
 <html>
@@ -412,7 +420,7 @@ except Exception:
 tmp_cfg_paths = {}
 
 
-def _write_temp_config_for_job(idx, tpl):
+def _write_temp_config_for_job(idx, tpl) -> str:
     mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, grid_width = tpl
     cfg = {
         "movement_cost_factor": mv,
@@ -459,7 +467,7 @@ def _write_temp_config_for_job(idx, tpl):
             cfg["snapshot_filename"] = f"{cfg['sim_prefix']}population_snapshot.cbor"
             cfg["write_config"] = True
 
-    tf = tempfile.NamedTemporaryFile(
+    tf: tempfile._TemporaryFileWrapper[str] = tempfile.NamedTemporaryFile(
         prefix=f"scan_job_{idx}_", suffix=".json", delete=False, mode="w", encoding="utf-8"
     )
     json.dump(cfg, tf)
@@ -469,10 +477,10 @@ def _write_temp_config_for_job(idx, tpl):
     return tf.name
 
 
-def cmd_builder(job):
+def cmd_builder(job) -> list[str]:
     idx, tpl = job
-    cfgpath = _write_temp_config_for_job(idx, tpl)
-    cmd = [
+    cfgpath: str = _write_temp_config_for_job(idx, tpl)
+    cmd: list[str] = [
         "cargo",
         "run",
         "--quiet",
@@ -498,17 +506,17 @@ def cmd_builder(job):
         if args.resume and os.path.exists(os.path.join(jobs_dir, "progress.json")):
             with open(os.path.join(jobs_dir, "progress.json"), "r", encoding="utf-8") as pf:
                 existing = json.load(pf)
-            done_map = {int(e.get("job")): e for e in existing if e.get("job") is not None}
+            done_map: dict[int, Any] = {int(e.get("job")): e for e in existing if e.get("job") is not None}
             if idx in done_map:
                 # generate a one-liner python print of the JSON summary
-                jstr = json.dumps(done_map[idx])
+                jstr: str = json.dumps(done_map[idx])
                 return ["python", "-c", f"import sys, json; print('{jstr.replace('\\\'','\\\\\'')}')"]
     except Exception:
         pass
     return cmd
 
 
-def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radiate):
+def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radiate) -> None | float:
     """Run a burnin eval locally by replaying the snapshot for job idx.
     Returns prop_moved (float) or None on failure."""
     import glob
@@ -518,11 +526,11 @@ def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radia
     import subprocess
     import tempfile
 
-    snapshot_pattern = os.path.join(jobs_dir, f"**/job{idx}_population_snapshot.cbor")
-    matches = glob.glob(snapshot_pattern, recursive=True)
+    snapshot_pattern: str = os.path.join(jobs_dir, f"**/job{idx}_population_snapshot.cbor")
+    matches: list[str] = glob.glob(snapshot_pattern, recursive=True)
     if not matches:
         return None
-    snapshot = matches[0]
+    snapshot: str = matches[0]
 
     # build temporary config for burnin: load snapshot, randomize env seed and positions
     burn_cfg = {
@@ -543,14 +551,14 @@ def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radia
     if radiate and int(radiate) > 0:
         burn_cfg["radiate"] = int(radiate)
 
-    tf = tempfile.NamedTemporaryFile(
+    tf: tempfile._TemporaryFileWrapper[str] = tempfile.NamedTemporaryFile(
         prefix=f"burnin_job_{idx}_", suffix=".json", delete=False, mode="w", encoding="utf-8"
     )
     json.dump(burn_cfg, tf)
     tf.flush()
     tf.close()
 
-    cmd = ["cargo", "run", "--quiet"]
+    cmd: list[str] = ["cargo", "run", "--quiet"]
     if release:
         cmd.append("--release")
     cmd.extend(
@@ -559,35 +567,35 @@ def _run_local_burnin_eval(jobs_dir, idx, burnin_steps, bin_name, release, radia
     cmd.append("--no-write-outputs")
 
     try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+        out: str = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
     except Exception as e:
-        out = ""
+        out: str = ""
         # Try common subprocess error attributes in a safe way
         out_attr = None
         try:
-            out_attr = getattr(e, "output", None)
+            out_attr: Any | None = getattr(e, "output", None)
         except Exception:
             out_attr = None
         if out_attr is None:
             try:
-                out_attr = getattr(e, "stdout", None)
+                out_attr: Any | None = getattr(e, "stdout", None)
             except Exception:
                 out_attr = None
         if isinstance(out_attr, bytes):
             try:
-                out = out_attr.decode("utf-8", errors="replace")
+                out: str = out_attr.decode("utf-8", errors="replace")
             except Exception:
-                out = ""
+                out: str = ""
         elif out_attr is not None:
             try:
                 out = str(out_attr)
             except Exception:
-                out = ""
+                out: str = ""
 
     # parse last JSON summary line
     prop = None
-    for line in (out or "").splitlines()[::-1]:
-        line = line.strip()
+    for line: str in (out or "").splitlines()[::-1]:
+        line: str = line.strip()
         if not line.startswith("{"):
             continue
         try:
@@ -612,13 +620,13 @@ def make_progress_writer(outdir):
     import json
     import threading
 
-    lock = threading.Lock()
+    lock_obj = threading.Lock()
     entries = []
-    prog_path = os.path.join(outdir, "progress.json")
+    prog_path: str = os.path.join(outdir, "progress.json")
     last_write = 0.0
     write_interval = 30.0  # seconds between writes to reduce churn
 
-    def atomic_write(path, data):
+    def atomic_write(path, data) -> None:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
@@ -683,7 +691,7 @@ def make_progress_writer(outdir):
             final_pop = prop_moved = None
 
         # normalize job params to a dict mapping names -> values so the webviewer shows named axes
-        param_names = [
+        param_names: list[str] = [
             "movement_cost_factor",
             "maintenance_cost_per_node",
             "reproduction_threshold",
@@ -727,9 +735,9 @@ def make_progress_writer(outdir):
             "job": job[0] if isinstance(job, (list, tuple)) else None,
             "params": params,
         }
-        now = time.time()
+        now: float = time.time()
         do_write = False
-        with lock:
+        with lock_obj:
             entries.append(entry)
             # Prefer to wait for the simulator-emitted summary metrics before
             # writing the very first progress.json entry to avoid placeholder
@@ -740,14 +748,14 @@ def make_progress_writer(outdir):
                 # if metrics present, write immediately
                 if entry.get("final_population") and (entry.get("final_population") != 0 or entry.get("prop_moved")):
                     do_write = True
-                    last_write = now
+                    last_write: float = now
                 else:
                     # delay first write until either interval passes or more entries accumulate
                     do_write = False
             # otherwise write if enough time passed or we're finished
             elif (now - last_write) >= write_interval or completed >= total:
                 do_write = True
-                last_write = now
+                last_write: float = now
         if do_write:
             try:
                 atomic_write(prog_path, entries)
@@ -776,17 +784,17 @@ def find_sim_folder_for_prefix(base_dir, prefix):
     return cand_paths[0]
 
 
-def read_final_population(sim_path):
-    jf = os.path.join(sim_path, "individuals.jsonl")
+def read_final_population(sim_path) -> tuple[int, float]:
+    jf: str = os.path.join(sim_path, "individuals.jsonl")
     if not os.path.exists(jf):
         return 0, 0.0
     last = None
     with open(jf, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+        for line: str in f:
+            line: str = line.strip()
             if not line:
                 continue
-            last = line
+            last: str = line
     if last is None:
         return 0, 0.0
     try:
@@ -802,7 +810,7 @@ def read_final_population(sim_path):
                     moved += 1
             except Exception:
                 pass
-        prop = (moved / total) if total > 0 else 0.0
+        prop: float = (moved / total) if total > 0 else 0.0
         return len(inds), prop
     except Exception:
         return 0, 0.0
@@ -818,7 +826,7 @@ def result_row_builder(job, extinct, out_text):
             raise ValueError(f"job {idx}: expected parameter tuple length 8, got {len(tpl)}: {tpl!r}")
         mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, resource_scale, grid_width = tpl
     elif isinstance(tpl, dict):
-        required = [
+        required: list[str] = [
             "movement_cost_factor",
             "maintenance_cost_per_node",
             "reproduction_threshold",
@@ -828,7 +836,7 @@ def result_row_builder(job, extinct, out_text):
             "resource_scale",
             "grid_width",
         ]
-        missing = [k for k in required if k not in tpl]
+        missing: list[str] = [k for k: str in required if k not in tpl]
         if missing:
             raise KeyError(f"job {idx}: missing required parameter keys: {missing}")
         mv = tpl["movement_cost_factor"]
@@ -841,7 +849,7 @@ def result_row_builder(job, extinct, out_text):
         grid_width = tpl["grid_width"]
     else:
         raise TypeError(f"job {idx}: unsupported parameter tuple type: {type(tpl).__name__}: {tpl!r}")
-    prefix = f"job{idx}_"
+    prefix: str = f"job{idx}_"
     final_pop = 0
     prop_moved = 0.0
     # Default mode: no disk outputs. Parse the simulator-emitted JSON summary from stdout.
@@ -914,7 +922,7 @@ def result_row_builder(job, extinct, out_text):
 
 # header for short results
 # include resource_scale so progress.json exposes it as an axis
-header = [
+header: list[str] = [
     "movement_cost_factor",
     "maintenance_cost_per_node",
     "reproduction_threshold",
@@ -928,7 +936,7 @@ header = [
 ]
 
 # put summary files into the single jobs folder
-results_csv = os.path.join(jobs_dir, "results_short.csv")
+results_csv: str = os.path.join(jobs_dir, "results_short.csv")
 print(f"Running short scan ({len(pairs)} jobs) -> {results_csv}")
 # disable local matplotlib visualizer (use webviewer + progress.json instead)
 heat_cb = None
@@ -936,7 +944,7 @@ heat_cb = None
 prog_writer = make_progress_writer(jobs_dir)
 
 
-def _combined_progress(completed, total, row, job):
+def _combined_progress(completed, total, row, job) -> None:
     try:
         if heat_cb:
             heat_cb(completed, total, row, job)
@@ -978,8 +986,8 @@ promising = []
 with open(results_csv, "r", encoding="utf-8") as rf:
     import csv
 
-    r = csv.DictReader(rf)
-    for row in r:
+    r: DictReader[str] = csv.DictReader(rf)
+    for row: dict[str | Any, str | Any] in r:
         try:
             mv = float(row["movement_cost_factor"])
             mc = float(row["maintenance_cost_per_node"])
@@ -998,7 +1006,7 @@ with open(results_csv, "r", encoding="utf-8") as rf:
             promising.append((mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw, fp))
 
 print(f"Found {len(promising)} promising parameter sets (final_pop >= {args.threshold})")
-prom_csv = os.path.join(jobs_dir, "promising.csv")
+prom_csv: str = os.path.join(jobs_dir, "promising.csv")
 with open(prom_csv, "w", encoding="utf-8") as pf:
     pf.write("movement_cost_factor,maintenance_cost_per_node,resource_scale,grid_width,final_population\n")
     for entry in promising:
@@ -1007,7 +1015,7 @@ with open(prom_csv, "w", encoding="utf-8") as pf:
 
 # If burnin evaluation requested, map promising entries to job indices via progress.json
 if args.burnin_eval and promising:
-    prog_path = os.path.join(jobs_dir, "progress.json")
+    prog_path: str = os.path.join(jobs_dir, "progress.json")
     promising_with_idx = []  # (job_idx, mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw, fp)
     if os.path.exists(prog_path):
         try:
@@ -1056,7 +1064,7 @@ if args.burnin_eval and promising:
 
         def _submit_burn(job_tuple):
             job_idx = job_tuple[0]
-            prop = _run_local_burnin_eval(
+            prop: None | float = _run_local_burnin_eval(
                 jobs_dir, job_idx, args.burnin_steps, args.bin_name, args.release, args.radiate
             )
             return job_idx, prop
@@ -1079,7 +1087,7 @@ if args.burnin_eval and promising:
             if pm is not None and pm > args.burnin_threshold:
                 promising_after.append((mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw, fp))
 
-        prom_after_csv = os.path.join(jobs_dir, "promising_after_burnin.csv")
+        prom_after_csv: str = os.path.join(jobs_dir, "promising_after_burnin.csv")
         with open(prom_after_csv, "w", encoding="utf-8") as paf:
             paf.write(
                 "movement_cost_factor,maintenance_cost_per_node,resource_scale,grid_width,final_population,prop_moved\n"
@@ -1099,7 +1107,7 @@ if args.burnin_eval and promising:
 
 
 # ---- Post-processing: matrix-of-matrices heatmap generator ----
-def plot_matrix_of_matrices(results_csv, out_dir):
+def plot_matrix_of_matrices(results_csv, out_dir) -> None:
     try:
         import matplotlib
         import numpy as np
@@ -1114,8 +1122,8 @@ def plot_matrix_of_matrices(results_csv, out_dir):
     # read results into list of dicts
     rows = []
     with open(results_csv, "r", encoding="utf-8") as rf:
-        r = csv.DictReader(rf)
-        for row in r:
+        r: DictReader[str] = csv.DictReader(rf)
+        for row: dict[str | Any, str | Any] in r:
             rows.append(row)
 
     if not rows:
@@ -1156,8 +1164,8 @@ def plot_matrix_of_matrices(results_csv, out_dir):
             continue
 
     # helper to build inner matrix for a given resource_scale & grid_width
-    def inner_matrix(rs, gw, key):
-        M = np.full((len(maintenance_vals_r), len(movement_vals_r)), np.nan, dtype=float)
+    def inner_matrix(rs, gw, key) -> ndarray[tuple[int, int], dtype[Any]]:
+        M: ndarray[tuple[int, int], dtype[Any]] = np.full((len(maintenance_vals_r), len(movement_vals_r)), np.nan, dtype=float)
         for i, mc in enumerate(maintenance_vals_r):
             for j, mv in enumerate(movement_vals_r):
                 val = metrics.get((mv, mc, rs, gw))
@@ -1176,12 +1184,12 @@ def plot_matrix_of_matrices(results_csv, out_dir):
     }
 
     # create outer grid (rows = resource_scales, cols = grid_widths)
-    rows_out = len(resource_scales_r)
-    cols_out = len(grid_widths_r)
+    rows_out: int = len(resource_scales_r)
+    cols_out: int = len(grid_widths_r)
 
     for resp_key, opts in responses.items():
-        fig_w = max(6, cols_out * 2)
-        fig_h = max(4, rows_out * 2)
+        fig_w: int = max(6, cols_out * 2)
+        fig_h: int = max(4, rows_out * 2)
         fig, axes = plt.subplots(rows_out, cols_out, figsize=(fig_w, fig_h), squeeze=False)
 
         # find global vmin/vmax for consistent color scaling (except for binary 'survived')
@@ -1189,7 +1197,7 @@ def plot_matrix_of_matrices(results_csv, out_dir):
             all_vals = []
             for rs in resource_scales_r:
                 for gw in grid_widths_r:
-                    M = inner_matrix(rs, gw, resp_key)
+                    M: ndarray[tuple[int, int], dtype[Any]] = inner_matrix(rs, gw, resp_key)
                     all_vals.append(M)
             all_concat = np.concatenate([m.flatten() for m in all_vals]) if all_vals else np.array([])
             finite = all_concat[np.isfinite(all_concat)]
@@ -1197,7 +1205,7 @@ def plot_matrix_of_matrices(results_csv, out_dir):
                 vmin = float(np.nanmin(finite))
                 vmax = float(np.nanmax(finite))
                 if vmin == vmax:
-                    vmax = vmin + 1.0
+                    vmax: float = vmin + 1.0
             else:
                 vmin, vmax = 0.0, 1.0
         else:
@@ -1206,7 +1214,7 @@ def plot_matrix_of_matrices(results_csv, out_dir):
         for i, rs in enumerate(resource_scales_r):
             for j, gw in enumerate(grid_widths_r):
                 ax = axes[i][j]
-                M = inner_matrix(rs, gw, resp_key)
+                M: ndarray[tuple[int, int], dtype[Any]] = inner_matrix(rs, gw, resp_key)
                 # mask NaNs to show as light gray
                 M_masked = np.ma.masked_invalid(M)
                 im = ax.imshow(
@@ -1221,7 +1229,7 @@ def plot_matrix_of_matrices(results_csv, out_dir):
         # colorbar
         fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6)
         fig.suptitle(opts.get("title", resp_key))
-        out_path = os.path.join(out_dir, f"heatmap_{resp_key}.png")
+        out_path: str = os.path.join(out_dir, f"heatmap_{resp_key}.png")
         fig.tight_layout(rect=(0, 0.03, 1, 0.95))
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
@@ -1238,8 +1246,8 @@ if promising:
         print(f"Found {len(promising)} promising parameter sets but --no-deep specified; skipping deep sims")
     else:
         # run deeper sims for promising candidates; keep outputs in the single jobs folder
-        deep_run_dir = jobs_dir
-        deep_results_csv = os.path.join(jobs_dir, "deep_results.csv")
+        deep_run_dir: str = jobs_dir
+        deep_results_csv: str = os.path.join(jobs_dir, "deep_results.csv")
         print(f"Running {len(promising)} deep sims -> {deep_results_csv}")
         deep_cfg_paths = {}
 
@@ -1272,7 +1280,7 @@ if promising:
                 "sim_prefix": f"prom{i}_",
                 "max_population": min(20000, int(args.deep_population)),
             }
-            tf = tempfile.NamedTemporaryFile(
+            tf: tempfile._TemporaryFileWrapper[str] = tempfile.NamedTemporaryFile(
                 prefix=f"deep_prom_{i}_", suffix=".json", delete=False, mode="w", encoding="utf-8"
             )
             json.dump(cfg, tf)
@@ -1280,10 +1288,10 @@ if promising:
             tf.close()
             deep_cfg_paths[i] = tf.name
 
-        def deep_cmd(job):
+        def deep_cmd(job) -> list[str]:
             idx = job[0]
             cfgpath = deep_cfg_paths[idx]
-            cmd = [
+            cmd: list[str] = [
                 "cargo",
                 "run",
                 "--quiet",
@@ -1309,7 +1317,7 @@ if promising:
         def deep_result_builder(job, extinct, out_text):
             idx, tpl = job
             mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw = tpl
-            prefix = f"prom{idx}_"
+            prefix: str = f"prom{idx}_"
             final_pop = 0
             prop_moved = 0.0
             if not args.write_outputs:
@@ -1344,7 +1352,7 @@ if promising:
         print("DEBUG: deep_results_csv:", deep_results_csv)
         print("DEBUG: header:", header)
         # Use an explicit deep header matching deep_result_builder output
-        deep_header = [
+        deep_header: list[str] = [
             "movement_cost_factor",
             "maintenance_cost_per_node",
             "reproduction_threshold",

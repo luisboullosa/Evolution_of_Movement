@@ -13,9 +13,9 @@ import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument("scan_dir", help="scanNNNN directory containing movement_summary.csv")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 scan_dir = args.scan_dir
-csvp = os.path.join(scan_dir, "movement_summary.csv")
+csvp: str = os.path.join(scan_dir, "movement_summary.csv")
 if not os.path.exists(csvp):
     print("movement_summary.csv not found in", scan_dir)
     raise SystemExit(1)
@@ -25,9 +25,9 @@ mean_frame_avgs = []
 median_frame_avgs = []
 mean_norms = []
 surv = []
-with open(csvp, "r", newline="") as f:
-    r = csv.DictReader(f)
-    for row in r:
+with open(csvp, "r", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    r: csv.DictReader[str] = csv.DictReader(f)
+    for row: dict[str | Any, str | Any] in r:
         sims.append(row.get("sim"))
         try:
             mean_frame_avgs.append(
@@ -46,18 +46,18 @@ with open(csvp, "r", newline="") as f:
         surv.append(int(row.get("survived", "0")))
 
 # simple bar plot sorted by avg movement
-order = np.argsort(mean_frame_avgs)[::-1]
+order: np.ndarray[tuple[Any, ...], np.dtype[np.signedinteger[np._32Bit | np._64Bit]]] = np.argsort(mean_frame_avgs)[::-1]
 ord_avgs = [mean_frame_avgs[i] for i in order]
 ord_sims = [sims[i] for i in order]
 ord_surv = [surv[i] for i in order]
 
 plt.figure(figsize=(10, 4))
-cols = ["tab:blue" if v else "tab:gray" for v in ord_surv]
+cols: list[str] = ["tab:blue" if v else "tab:gray" for v in ord_surv]
 plt.bar(range(len(ord_avgs)), ord_avgs, color=cols)
 plt.xticks(range(len(ord_avgs)), ord_sims, rotation=45, fontsize=8)
 plt.ylabel("mean abs move per frame")
 plt.title("Movement summary (sorted)")
 plt.tight_layout()
-out = os.path.join(scan_dir, "movement_summary.png")
+out: str = os.path.join(scan_dir, "movement_summary.png")
 plt.savefig(out, dpi=150)
 print("Wrote", out)

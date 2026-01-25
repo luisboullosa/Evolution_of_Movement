@@ -2,28 +2,28 @@ import os
 
 import pandas as pd
 
-base = os.path.join(".", "output", "Parameter scans", "data")
-scans = [d for d in os.listdir(base) if d.startswith("scan")]
+base: str = os.path.join(".", "output", "Parameter scans", "data")
+scans: list[str] = [d for d in os.listdir(base) if d.startswith("scan")]
 if not scans:
     raise SystemExit("No scans found")
 # pick the most recently modified scan directory
-scan = max(scans, key=lambda d: os.path.getmtime(os.path.join(base, d)))
-scan_dir = os.path.join(base, scan)
-results_csv = os.path.join(scan_dir, "scan_extended_results.csv")
+scan: str = max(scans, key=lambda d: os.path.getmtime(os.path.join(base, d)))
+scan_dir: str = os.path.join(base, scan)
+results_csv: str = os.path.join(scan_dir, "scan_extended_results.csv")
 if not os.path.exists(results_csv):
     raise SystemExit(f"results CSV not found: {results_csv}")
 
 print("Using scan dir:", scan_dir)
 print("Reading results:", results_csv)
 
-df = pd.read_csv(results_csv)
+df: pd.DataFrame = pd.read_csv(results_csv)
 # ensure numeric columns
 for c in ["mean_move", "median_move", "max_move", "prop_moved", "recorded_steps"]:
     if c in df.columns:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
 # filter combos with prop_moved > 0.3 and extinction_time >= 100000
-candidates = df[(df["prop_moved"] > 0.3) & (df["extinction_time"] >= 100000)]
+candidates: pd.DataFrame = df[(df["prop_moved"] > 0.3) & (df["extinction_time"] >= 100000)]
 
 out_cmds = []
 if candidates.empty:
@@ -36,12 +36,12 @@ else:
         rc = row["reproduction_cost"]
         ets = row["env_time_speed"]
         dr = row["death_risk"]
-        mp = int(row["max_population"]) if "max_population" in row else 0
+        mp: int = int(row["max_population"]) if "max_population" in row else 0
         # build command - use large initial population for better sampling (50k)
         cmd = []
-        exe = os.path.normpath("./build/Release/evo-movement-sim.exe")
+        exe: str = os.path.normpath("./build/Release/evo-movement-sim.exe")
         if not os.path.exists(exe):
-            exe = os.path.normpath("./build/evo-movement-sim.exe")
+            exe: str = os.path.normpath("./build/evo-movement-sim.exe")
         cmd.append(exe)
         cmd.append("--steps=1001000")
         cmd.append("--burn-in=1000000")
@@ -59,7 +59,7 @@ else:
         out_cmds.append(" ".join(map(str, cmd)))
 
 # write commands file
-cmd_file = os.path.join(scan_dir, "run_long_sims.ps1")
+cmd_file: str = os.path.join(scan_dir, "run_long_sims.ps1")
 with open(cmd_file, "w", encoding="utf-8") as cf:
     cf.write("# PowerShell script to run long evo-movement-sim.exe runs for selected parameter combos\n")
     cf.write("# Created by generate_long_run_commands.py\n")

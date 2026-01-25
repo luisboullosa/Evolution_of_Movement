@@ -10,27 +10,27 @@ import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--scan-dir", help="Path to scan directory (contains scan_extended_results.csv)")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
-base = os.path.join(".", "output", "Parameter scans", "data")
+base: str = os.path.join(".", "output", "Parameter scans", "data")
 if args.scan_dir:
     scan_dir = args.scan_dir
 else:
     if not os.path.isdir(base):
         raise SystemExit(f"No scans found under {base}")
-    existing = sorted([d for d in os.listdir(base) if d.startswith("scan")])
+    existing: list[str] = sorted([d for d: str in os.listdir(base) if d.startswith("scan")])
     if not existing:
         raise SystemExit(f"No scans found under {base}")
-    scan_dir = os.path.join(base, existing[-1])
+    scan_dir: str = os.path.join(base, existing[-1])
 
-results_csv = os.path.join(scan_dir, "scan_extended_results.csv")
+results_csv: str = os.path.join(scan_dir, "scan_extended_results.csv")
 if not os.path.exists(results_csv):
     raise SystemExit(f"No results CSV at {results_csv}")
 
 out_rows = []
-with open(results_csv, newline="", encoding="utf-8") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
+with open(results_csv, newline="", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
+    reader: csv.DictReader[str] = csv.DictReader(f)
+    for row: dict[str | Any, str | Any] in reader:
         try:
             mm = float(row.get("mean_move", "0") or 0)
             med = float(row.get("median_move", "0") or 0)

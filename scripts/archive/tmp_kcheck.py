@@ -23,7 +23,7 @@ def carrying_capacity(width, resource_scale, time_amplitude, maint, death_risk):
     return k
 
 
-scenarios = [
+scenarios: list[dict[str, str | int | float]] = [
     dict(name="K<100", width=25, resource_scale=1.0, maint=0.05, time_amplitude=1.0, death_risk=0.0),
     dict(name="100<K<1000", width=50, resource_scale=1.0, maint=0.01, time_amplitude=1.0, death_risk=0.0),
     dict(name="1000<K<10000", width=100, resource_scale=2.0, maint=0.01, time_amplitude=1.0, death_risk=0.0),
@@ -31,11 +31,11 @@ scenarios = [
 ]
 
 BIN = "evo_movement_rust"
-MANIFEST = os.path.normpath("rust/Cargo.toml")
+MANIFEST: str = os.path.normpath("rust/Cargo.toml")
 RUNS = 2
 STEPS = 2000
 
-base_cfg = dict(
+base_cfg: dict[str, float] = dict(
     movement_cost_factor=0.5,
     reproduction_threshold=20.0,
     reproduction_cost=1.0,
@@ -52,34 +52,40 @@ base_cfg = dict(
 
 results = []
 
-for sc in scenarios:
+for sc: dict[str, str | int | float] in scenarios:
     est_k = carrying_capacity(sc["width"], sc["resource_scale"], sc["time_amplitude"], sc["maint"], sc["death_risk"])
-    init_pop = max(1, int(est_k * 0.5))
-    cfg_base = dict(base_cfg)
-    cfg_base.update(
-        grid_width=int(sc["width"]),
-        resource_scale=float(sc["resource_scale"]),
-        env_time_amplitude=float(sc["time_amplitude"]),
-        maintenance_cost_per_node=float(sc["maint"]),
-        death_risk=float(sc["death_risk"]),
-        steps=STEPS,
-        initial_population=init_pop,
-        sim_prefix=f"kcheck_{sc['name'].replace('>','gt').replace('<','lt').replace(' ','_')}",
+    init_pop: int = max(1, int(est_k * 0.5))
+    cfg_base: dict[str, float] = dict(base_cfg)
+    name_val = str(sc.get("name", ""))
+    safe_name: str = name_val.replace(
+        ">", "gt"
+    ).replace(
+        "<", "lt"
+    ).replace(
+        " ", "_"
     )
+    cfg_base["grid_width"] = int(sc["width"])
+    cfg_base["resource_scale"] = float(sc["resource_scale"])
+    cfg_base["env_time_amplitude"] = float(sc["time_amplitude"])
+    cfg_base["maintenance_cost_per_node"] = float(sc["maint"])
+    cfg_base["death_risk"] = float(sc["death_risk"])
+    cfg_base["steps"] = STEPS
+    cfg_base["initial_population"] = init_pop
+    cfg_base["sim_prefix"] = safe_name
 
     final_pops = []
     seeds = []
-    for run_idx in range(RUNS):
-        cfg = dict(cfg_base)
-        seed = secrets.randbelow(2**31 - 1)
+    for run_idx: int in range(RUNS):
+        cfg: dict[str, float] = dict(cfg_base)
+        seed: int = secrets.randbelow(2**31 - 1)
         if seed == 0:
             seed = 1
         cfg["env_perlin_seed"] = seed
-        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
+        tf: tempfile._TemporaryFileWrapper[str] = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
         json.dump(cfg, tf)
         tf.flush()
         tf.close()
-        cmd = [
+        cmd: list[str] = [
             "cargo",
             "run",
             "--quiet",
@@ -94,9 +100,9 @@ for sc in scenarios:
             "--no-write-outputs",
         ]
         try:
-            out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            out = e.stdout or ""
+            out: str = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e: subprocess.CalledProcessError:
+            out: json.Any | str = e.stdout or ""
         finally:
             try:
                 os.unlink(tf.name)
@@ -104,8 +110,8 @@ for sc in scenarios:
                 pass
 
         final_pop = None
-        for line in (out or "").splitlines()[::-1]:
-            line = line.strip()
+        for line: str | json.Any in (out or "").splitlines()[::-1]:
+            line: str | json.Any = line.strip()
             if not line.startswith("{"):
                 continue
             try:

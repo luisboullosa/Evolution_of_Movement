@@ -8,31 +8,31 @@ import numpy as np
 parser = argparse.ArgumentParser(description="Plot refined parameter sweep heatmap")
 parser.add_argument("--in", dest="infile", default=None, help="Input CSV path")
 parser.add_argument("--out", dest="outfile", default=None, help="Output image path")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
-output_dir = os.path.join(os.path.normpath("."), "output", "Parameter scans")
+output_dir: str = os.path.join(os.path.normpath("."), "output", "Parameter scans")
 os.makedirs(output_dir, exist_ok=True)
 
-csv_default = os.path.join(output_dir, "scan_refined_results.csv")
+csv_default: str = os.path.join(output_dir, "scan_refined_results.csv")
 if args.infile:
     csvpath = os.path.normpath(args.infile)
 else:
-    csvpath = csv_default
+    csvpath: str = csv_default
     if not os.path.exists(csvpath):
-        csvpath = os.path.normpath("scan_refined_results.csv")
+        csvpath: str = os.path.normpath("scan_refined_results.csv")
         if not os.path.exists(csvpath):
             print("scan_refined_results.csv not found at", os.path.relpath(csv_default))
             raise SystemExit(1)
 
-out_default = os.path.join(output_dir, "scan_refined_heatmap.png")
-out = os.path.normpath(args.outfile) if args.outfile else out_default
+out_default: str = os.path.join(output_dir, "scan_refined_heatmap.png")
+out: argparse.Any | str = os.path.normpath(args.outfile) if args.outfile else out_default
 
 movement_vals = []
 maintenance_vals = []
 data = {}
-with open(csvpath, "r", newline="") as f:
-    r = csv.DictReader(f)
-    for row in r:
+with open(csvpath, "r", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    r: csv.DictReader[str] = csv.DictReader(f)
+    for row: dict[str | Any, str | Any] in r:
         mv = float(row["movement_cost_factor"])
         mc = float(row["maintenance_cost_per_node"])
         # extinction_time may be written as int or float string
@@ -49,7 +49,7 @@ movement_vals = sorted(set(movement_vals))
 maintenance_vals = sorted(set(maintenance_vals))
 
 # create matrix with NaN for missing cells
-mat = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
+mat: np.ndarray[tuple[int, int], np.dtype[argparse.Any]] = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
 max_time = 0
 survivors = []
 total = 0
@@ -67,11 +67,11 @@ for i, mc in enumerate(maintenance_vals):
 vmax = max_time if max_time > 0 else 1
 
 plt.figure(figsize=(10, 6))
-cmap = plt.get_cmap("magma_r").copy()
+cmap: plt.Colormap = plt.get_cmap("magma_r").copy()
 # show missing data as light gray
 cmap.set_bad(color="#dddddd")
 
-im = plt.imshow(
+im: plt.AxesImage = plt.imshow(
     mat,
     origin="lower",
     cmap=cmap,
@@ -80,12 +80,12 @@ im = plt.imshow(
     vmax=vmax,
     interpolation="nearest",
 )
-cb = plt.colorbar(im)
+cb: plt.Colorbar = plt.colorbar(im)
 cb.set_label("extinction time (timesteps)")
 
 # axis ticks and labels
-xticks = np.arange(len(movement_vals))
-yticks = np.arange(len(maintenance_vals))
+xticks: np.ndarray[tuple[int], np.dtype[np.signedinteger[argparse.Any]]] = np.arange(len(movement_vals))
+yticks: np.ndarray[tuple[int], np.dtype[np.signedinteger[argparse.Any]]] = np.arange(len(maintenance_vals))
 plt.xticks(xticks, [f"{v:.6g}" for v in movement_vals], rotation=45)
 plt.yticks(yticks, [f"{v:.6g}" for v in maintenance_vals])
 plt.xlabel("movement_cost_factor")

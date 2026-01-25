@@ -14,18 +14,18 @@ parser.add_argument(
 parser.add_argument("--in", dest="infile", default=None, help="Input CSV path")
 parser.add_argument("--out", dest="outfile", default=None, help="Output image path")
 parser.add_argument("--burn-in", dest="burn_in", type=int, default=None, help="Burn-in steps used for the scan")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 # optional burn-in value to display in the plot title
 parser.add_argument("--burn-in", dest="burn_in", type=int, default=None, help="Burn-in steps used for the scan")
 
-output_dir = os.path.join(os.path.normpath("."), "output", "Parameter scans")
+output_dir: str = os.path.join(os.path.normpath("."), "output", "Parameter scans")
 os.makedirs(output_dir, exist_ok=True)
 
-csv_default = os.path.join(output_dir, "scan_movement_delta_results.csv")
-csvpath = os.path.normpath(args.infile) if args.infile else csv_default
+csv_default: str = os.path.join(output_dir, "scan_movement_delta_results.csv")
+csvpath: argparse.Any | str = os.path.normpath(args.infile) if args.infile else csv_default
 if not os.path.exists(csvpath):
-    csvpath = os.path.normpath("scan_movement_delta_results.csv")
+    csvpath: str = os.path.normpath("scan_movement_delta_results.csv")
     if not os.path.exists(csvpath):
         print("scan_movement_delta_results.csv not found at", os.path.relpath(csv_default))
         raise SystemExit(1)
@@ -33,16 +33,16 @@ if not os.path.exists(csvpath):
 movement_vals = []
 maintenance_vals = []
 data = {}
-with open(csvpath, "r", newline="") as f:
-    r = csv.DictReader(f)
-    for row in r:
+with open(csvpath, "r", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    r: csv.DictReader[str] = csv.DictReader(f)
+    for row: dict[str | Any, str | Any] in r:
         try:
             mv = float(row["movement_cost_factor"])
             mc = float(row["maintenance_cost_per_node"])
         except Exception:
             continue
         md = None
-        note = row.get("note", "")
+        note: str | argparse.Any = row.get("note", "")
         if row.get("median_delta", "") != "":
             try:
                 md = float(row["median_delta"])
@@ -56,7 +56,7 @@ movement_vals = sorted(set(movement_vals))
 maintenance_vals = sorted(set(maintenance_vals))
 
 # build matrix with NaN for missing cells
-mat = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
+mat: np.ndarray[tuple[int, int], np.dtype[argparse.Any]] = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
 notes = {}
 count = 0
 for i, mc in enumerate(maintenance_vals):
@@ -69,12 +69,12 @@ for i, mc in enumerate(maintenance_vals):
             else:
                 notes[(j, i)] = note
 
-vmax = np.nanmax(mat) if np.isfinite(np.nanmax(mat)) else 1.0
+vmax: argparse.Any | float = np.nanmax(mat) if np.isfinite(np.nanmax(mat)) else 1.0
 
 plt.figure(figsize=(9, 5.5))
-cmap = plt.get_cmap("viridis").copy()
+cmap: plt.Colormap = plt.get_cmap("viridis").copy()
 cmap.set_bad(color="#dddddd")
-im = plt.imshow(
+im: plt.AxesImage = plt.imshow(
     mat,
     origin="lower",
     cmap=cmap,
@@ -83,7 +83,7 @@ im = plt.imshow(
     vmin=0,
     vmax=vmax,
 )
-cb = plt.colorbar(im)
+cb: plt.Colorbar = plt.colorbar(im)
 
 cb.set_label("median |delta| (cells)")
 
@@ -91,7 +91,7 @@ plt.xticks(range(len(movement_vals)), [f"{v:.6g}" for v in movement_vals], rotat
 plt.yticks(range(len(maintenance_vals)), [f"{v:.6g}" for v in maintenance_vals])
 plt.xlabel("movement_cost_factor")
 plt.ylabel("maintenance_cost_per_node")
-title_burn = f" after burn-in {args.burn_in} steps" if args.burn_in is not None else ""
+title_burn: str = f" after burn-in {args.burn_in} steps" if args.burn_in is not None else ""
 plt.title("Median absolute movement" + title_burn)
 
 # annotate missing / notes
@@ -112,20 +112,20 @@ plt.annotate(
     bbox=dict(boxstyle="round", fc="white", alpha=0.8),
 )
 
-out = args.outfile if args.outfile else os.path.join(output_dir, "scan_movement_delta_heatmap.png")
+out: argparse.Any | str = args.outfile if args.outfile else os.path.join(output_dir, "scan_movement_delta_heatmap.png")
 # overlay numeric annotations if requested
 if args.annotate:
     # choose text color based on luminance of the colormap at the cell value
     norm = plt.Normalize(vmin=0, vmax=vmax)
-    for i in range(mat.shape[0]):
-        for j in range(mat.shape[1]):
+    for i: int in range(mat.shape[0]):
+        for j: int in range(mat.shape[1]):
             val = mat[i, j]
             if np.isfinite(val):
                 rgba = cmap(norm(val))
                 # luminance approximation
                 r, g, b, a = rgba
                 lum = 0.299 * r + 0.587 * g + 0.114 * b
-                txtcol = "white" if lum < 0.5 else "black"
+                txtcol: str = "white" if lum < 0.5 else "black"
                 plt.text(
                     j,
                     i,

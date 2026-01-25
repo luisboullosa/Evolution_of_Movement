@@ -29,7 +29,7 @@ parser.add_argument("--steps", type=int, default=100000, help="Number of steps f
 parser.add_argument("--workers", type=int, default=8, help="Number of workers for simulation")
 parser.add_argument("--plotly", action="store_true", help="Use plotly for plotting")
 parser.add_argument("--plot-metric", default="max", help="Metric to plot (default: max)")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 csvpath = os.path.abspath(args.pairs)
 if not os.path.exists(csvpath):
@@ -42,8 +42,8 @@ if not os.path.isdir(webviewer_base):
     sys.exit(1)
 
 
-def _safeval(v):
-    s = f"{v:.6g}"
+def _safeval(v) -> str:
+    s: str = f"{v:.6g}"
     return s.replace(".", "p")
 
 
@@ -58,7 +58,7 @@ def find_simdir_for_config(cfgname):
 
 
 def latest_individuals_file(simdir):
-    files = sorted(glob.glob(os.path.join(simdir, "individuals.tsv.*.tsv")))
+    files: list[str] = sorted(glob.glob(os.path.join(simdir, "individuals.tsv.*.tsv")))
     if files:
         return files[-1]
     # fallback
@@ -68,11 +68,11 @@ def latest_individuals_file(simdir):
     return None
 
 
-def load_nn_index(simdir):
-    p = os.path.join(simdir, "nn_index.json")
+def load_nn_index(simdir) -> argparse.Any | None:
+    p: str = os.path.join(simdir, "nn_index.json")
     if os.path.exists(p):
         try:
-            with open(p, "r") as f:
+            with open(p, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
                 return json.load(f)
         except Exception:
             return None
@@ -91,7 +91,7 @@ def evaluate_rec(rec, inputs):
     layer2_biases = rec.get("layer2_biases", None)
 
     # helper: single-layer evaluate assuming scalar input
-    def eval_single(x):
+    def eval_single(x) -> tuple[Any, float]:
         s = 0.0
         for w, b in zip(weights, biases):
             s += np.tanh(w * x + b)
@@ -122,7 +122,7 @@ def evaluate_rec(rec, inputs):
                     dot += wj * layer1[j]
                 dot += layer2_biases[i]
                 layer2_vals.append(np.tanh(dot))
-            s = sum(layer2_vals)
+            s: int = sum(layer2_vals)
             results.append((np.tanh(s), abs(s)))
         return results
 
@@ -132,7 +132,7 @@ def evaluate_rec(rec, inputs):
     return results
 
 
-def classify_nn(weights, biases, inputs, mag_threshold, rec=None):
+def classify_nn(weights, biases, inputs, mag_threshold, rec=None) -> str:
     # wrapper that can accept rec (preferred) or raw weights/biases
     if rec is not None:
         vals = evaluate_rec(rec, inputs)
@@ -147,8 +147,8 @@ def classify_nn(weights, biases, inputs, mag_threshold, rec=None):
             sums.append((np.tanh(s), abs(s)))
         dirs = np.array([d for d, m in sums])
         mags = np.array([m for d, m in sums])
-    mag_mean = mags.mean() if mags.size > 0 else 0.0
-    signs = np.sign(dirs)
+    mag_mean: argparse.Any | float = mags.mean() if mags.size > 0 else 0.0
+    signs: np.ndarray[tuple[Any, ...], np.dtype[argparse.Any]] = np.sign(dirs)
     if mag_mean < mag_threshold:
         return "stationary"
     if np.all(signs >= 0):
@@ -162,9 +162,9 @@ def classify_nn(weights, biases, inputs, mag_threshold, rec=None):
 movement_vals = []
 maintenance_vals = []
 pairs = []
-with open(csvpath, "r", newline="") as f:
-    r = csv.DictReader(f)
-    for row in r:
+with open(csvpath, "r", newline="") as f: os.TextIOWrapper[_WrappedBuffer]:
+    r: csv.DictReader[str] = csv.DictReader(f)
+    for row: dict[str | Any, str | Any] in r:
         try:
             mv = float(row["movement_cost_factor"])
             mc = float(row["maintenance_cost_per_node"])
@@ -177,12 +177,12 @@ with open(csvpath, "r", newline="") as f:
 movement_vals = sorted(set(movement_vals))
 maintenance_vals = sorted(set(maintenance_vals))
 
-inputs = np.linspace(-1.0, 1.0, args.samples)
+inputs: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(-1.0, 1.0, args.samples)
 
 results = {}
 
-with open(args.out_csv, "w", newline="") as outf:
-    writer = csv.writer(outf)
+with open(args.out_csv, "w", newline="") as outf: os.TextIOWrapper[_WrappedBuffer]:
+    writer: csv.Writer = csv.writer(outf)
     writer.writerow(
         [
             "movement_cost_factor",
@@ -194,7 +194,7 @@ with open(args.out_csv, "w", newline="") as outf:
         ]
     )
     for mv, mc in pairs:
-        cfgname = f"config_mv_{_safeval(mv)}_mc_{_safeval(mc)}.json"
+        cfgname: str = f"config_mv_{_safeval(mv)}_mc_{_safeval(mc)}.json"
         simdir = find_simdir_for_config(cfgname)
         if simdir is None:
             writer.writerow([mv, mc, "", 0, "", ""])
@@ -205,18 +205,18 @@ with open(args.out_csv, "w", newline="") as outf:
             writer.writerow([mv, mc, "", 0, "", ""])
             results[(mv, mc)] = (np.nan, None)
             continue
-        nn_index = load_nn_index(simdir)
+        nn_index: argparse.Any | None = load_nn_index(simdir)
         # parse individuals file: id, pos, resources, last_spend, last_delta
         ids = []
         resources = {}
         try:
-            with open(indfile, "r") as f:
-                hdr = f.readline()
-                for line in f:
+            with open(indfile, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
+                hdr: str = f.readline()
+                for line: str in f:
                     if not line.strip():
                         continue
-                    a = line.strip().split("\t")
-                    key = a[0]
+                    a: list[str] = line.strip().split("\t")
+                    key: str = a[0]
                     try:
                         res = float(a[2])
                     except Exception:
@@ -240,7 +240,7 @@ with open(args.out_csv, "w", newline="") as outf:
             if not weights or not biases:
                 continue
             # prefer passing the full record so two-layer networks are evaluated correctly
-            cat = classify_nn(weights, biases, inputs, args.mag_threshold, rec=rec)
+            cat: str = classify_nn(weights, biases, inputs, args.mag_threshold, rec=rec)
             cats.append(cat)
             fitness_by_cat.setdefault(cat, []).append(resources.get(idstr, 0.0))
 
@@ -251,13 +251,13 @@ with open(args.out_csv, "w", newline="") as outf:
 
         # determine dominant category and mean fitness
         unique, counts = np.unique(cats, return_counts=True)
-        idx = np.argmax(counts)
+        idx: np.signedinteger[np._32Bit | np._64Bit] = np.argmax(counts)
         dom_cat = unique[idx]
         dom_count = int(counts[idx])
-        dom_mean = np.nan
+        dom_mean: float = np.nan
         if dom_cat in fitness_by_cat and fitness_by_cat[dom_cat]:
             dom_mean = float(np.mean(fitness_by_cat[dom_cat]))
-        overall_mean = float(np.mean([v for lst in fitness_by_cat.values() for v in lst])) if fitness_by_cat else np.nan
+        overall_mean: float = float(np.mean([v for lst in fitness_by_cat.values() for v in lst])) if fitness_by_cat else np.nan
         writer.writerow(
             [
                 mv,
@@ -273,7 +273,7 @@ with open(args.out_csv, "w", newline="") as outf:
 print("Wrote", args.out_csv)
 
 # build matrix for dominant mean fitness
-mat = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
+mat: np.ndarray[tuple[int, int], np.dtype[argparse.Any]] = np.full((len(maintenance_vals), len(movement_vals)), np.nan, dtype=float)
 cat_map = {}
 for i, mc in enumerate(maintenance_vals):
     for j, mv in enumerate(movement_vals):
@@ -286,11 +286,11 @@ for i, mc in enumerate(maintenance_vals):
 
 # plot
 plt.figure(figsize=(9, 5.5))
-cmap = plt.get_cmap("plasma").copy()
+cmap: plt.Colormap = plt.get_cmap("plasma").copy()
 cmap.set_bad(color="#dddddd")
-vmax = np.nanmax(mat) if np.isfinite(np.nanmax(mat)) else 1.0
-im = plt.imshow(mat, origin="lower", cmap=cmap, aspect="auto", interpolation="nearest", vmin=0, vmax=vmax)
-cb = plt.colorbar(im)
+vmax: argparse.Any | float = np.nanmax(mat) if np.isfinite(np.nanmax(mat)) else 1.0
+im: plt.AxesImage = plt.imshow(mat, origin="lower", cmap=cmap, aspect="auto", interpolation="nearest", vmin=0, vmax=vmax)
+cb: plt.Colorbar = plt.colorbar(im)
 cb.set_label("mean latest fitness (resources)")
 
 plt.xticks(range(len(movement_vals)), [f"{v:.6g}" for v in movement_vals], rotation=45)
@@ -304,8 +304,8 @@ for (j, i), cat in cat_map.items():
     plt.text(j, i, cat[0], color="white", ha="center", va="center", fontsize=8, weight="bold")
 
 if args.annotate:
-    for i in range(mat.shape[0]):
-        for j in range(mat.shape[1]):
+    for i: int in range(mat.shape[0]):
+        for j: int in range(mat.shape[1]):
             val = mat[i, j]
             if np.isfinite(val):
                 plt.text(j, i - 0.2, f"{val:.2g}", ha="center", va="center", color="black", fontsize=7)

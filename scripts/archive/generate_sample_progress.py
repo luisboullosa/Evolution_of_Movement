@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Generate a synthetic progress.json for testing the scan_live viewer."""
 
+from argparse import Namespace
 import json
 import os
 import random
 from pathlib import Path
 
 
-def atomic_write(path, data):
-    tmp = str(path) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+def atomic_write(path, data) -> None:
+    tmp: str = str(path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
         json.dump(data, f, indent=2)
         f.flush()
         try:
@@ -26,24 +27,24 @@ def atomic_write(path, data):
             pass
 
 
-def generate(nx=20, ny=18, seed=42, outdir="output/scan_population"):
+def generate(nx=20, ny=18, seed=42, outdir="output/scan_population") -> None:
     random.seed(seed)
     Path(outdir).mkdir(parents=True, exist_ok=True)
-    mv_vals = [round(0.05 + i * 0.045, 3) for i in range(nx)]
-    mc_vals = [round(0.005 + i * 0.005, 4) for i in range(ny)]
+    mv_vals: list[float] = [round(0.05 + i * 0.045, 3) for i: int in range(nx)]
+    mc_vals: list[float] = [round(0.005 + i * 0.005, 4) for i: int in range(ny)]
 
     entries = []
-    total = nx * ny
+    total: int = nx * ny
     k = 0
     for i, mc in enumerate(mc_vals):
         for j, mv in enumerate(mv_vals):
             k += 1
             # make a synthetic value: center has high prop_moved
-            cx = nx / 2
-            cy = ny / 2
+            cx: float = nx / 2
+            cy: float = ny / 2
             dist = ((i - cy) ** 2 + (j - cx) ** 2) ** 0.5
-            prop = max(0.0, 1.0 - (dist / max(nx, ny) * 1.5))
-            prop = max(0.0, min(1.0, prop + (random.random() - 0.5) * 0.15))
+            prop: float = max(0.0, 1.0 - (dist / max(nx, ny) * 1.5))
+            prop: float = max(0.0, min(1.0, prop + (random.random() - 0.5) * 0.15))
             entry = {
                 "completed": k,
                 "total": total,
@@ -54,7 +55,7 @@ def generate(nx=20, ny=18, seed=42, outdir="output/scan_population"):
             }
             entries.append(entry)
 
-    out = Path(outdir) / "progress.json"
+    out: Path = Path(outdir) / "progress.json"
     atomic_write(out, entries)
     print(f"Wrote sample progress to {out}")
 
@@ -67,5 +68,5 @@ if __name__ == "__main__":
     p.add_argument("--ny", type=int, default=18)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--outdir", type=str, default="output/scan_population")
-    args = p.parse_args()
+    args: Namespace = p.parse_args()
     generate(nx=args.nx, ny=args.ny, seed=args.seed, outdir=args.outdir)

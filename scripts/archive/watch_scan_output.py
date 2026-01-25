@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 
 
-def now():
+def now() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
@@ -26,26 +26,26 @@ def snapshot(path):
     return s
 
 
-def append_log(logpath, msg):
+def append_log(logpath, msg) -> None:
     try:
-        with open(logpath, "a", encoding="utf-8") as lf:
+        with open(logpath, "a", encoding="utf-8") as lf: os.TextIOWrapper[_WrappedBuffer]:
             lf.write(msg + "\n")
     except Exception:
         pass
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--path", default="output/scan_population", help="Folder to watch")
     p.add_argument("--interval", type=float, default=1.0, help="Poll interval seconds")
     p.add_argument("--log", default=None, help="Path to append events (defaults to <path>/monitor.log)")
-    args = p.parse_args()
+    args: argparse.Namespace = p.parse_args()
 
     watch_path = os.path.normpath(args.path)
     if args.log:
         logpath = args.log
     else:
-        logpath = os.path.join(watch_path, "monitor.log")
+        logpath: str = os.path.join(watch_path, "monitor.log")
 
     os.makedirs(watch_path, exist_ok=True)
 
@@ -62,26 +62,26 @@ def main():
             removed = sorted(seen - cur)
 
             for pth in added:
-                typ = "DIR" if os.path.isdir(pth) else "FILE"
-                msg = f"[{now()}] ADDED {typ} {pth}"
+                typ: str = "DIR" if os.path.isdir(pth) else "FILE"
+                msg: str = f"[{now()}] ADDED {typ} {pth}"
                 print(msg)
                 append_log(logpath, msg)
 
             for pth in removed:
-                msg = f"[{now()}] REMOVED {pth}"
+                msg: str = f"[{now()}] REMOVED {pth}"
                 print(msg)
                 append_log(logpath, msg)
 
             # monitor progress.json length changes (concise)
-            prog = os.path.join(watch_path, "progress.json")
+            prog: str = os.path.join(watch_path, "progress.json")
             try:
                 if os.path.exists(prog):
-                    with open(prog, "r", encoding="utf-8") as f:
+                    with open(prog, "r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
                         data = json.load(f)
-                    cnt = len(data) if isinstance(data, list) else None
+                    cnt: int | None = len(data) if isinstance(data, list) else None
                     if cnt is not None and cnt != last_progress_count:
-                        last_progress_count = cnt
-                        msg = f"[{now()}] PROGRESS entries={cnt}"
+                        last_progress_count: int = cnt
+                        msg: str = f"[{now()}] PROGRESS entries={cnt}"
                         print(msg)
                         append_log(logpath, msg)
             except Exception:

@@ -4,39 +4,43 @@ import os
 import sys
 from pathlib import Path
 
+from pandas import DataFrame
+
+from pandas import DataFrame
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "scan_dir", nargs="?", default=r".\output\Parameter scans\data\scan0013", help="Path to scan directory"
 )
 parser.add_argument("--plot-metric", choices=["survived", "mean", "median", "max"], default="mean")
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 scan_dir = Path(args.scan_dir)
 if not scan_dir.exists():
     print("Scan dir not found:", scan_dir)
     sys.exit(1)
 
-results_csv = scan_dir / "scan_extended_results.csv"
-params_csv = scan_dir / "params_grid.csv"
+results_csv: Path = scan_dir / "scan_extended_results.csv"
+params_csv: Path = scan_dir / "params_grid.csv"
 
 try:
     import pandas as pd
-except Exception as e:
+except Exception as e: Exception:
     print("Missing plotting dependencies (pandas/plotly):", e)
     sys.exit(1)
 
 # load results or params
 if results_csv.exists():
-    df = pd.read_csv(results_csv)
+    df: DataFrame = pd.read_csv(results_csv)
 else:
     if params_csv.exists():
-        df = pd.read_csv(params_csv)
+        df: DataFrame = pd.read_csv(params_csv)
     else:
         print("No results or params CSV found in", scan_dir)
         sys.exit(1)
 
 # compute movement metrics by scanning sim folders
-sims = sorted(
-    [d for d in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d)) and d.startswith(("sim", "job"))]
+sims: list[str] = sorted(
+    [d for d: str in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d)) and d.startswith(("sim", "job"))]
 )
 mean_moves = []
 median_moves = []
@@ -44,9 +48,9 @@ max_moves = []
 mean_norms = []
 prop_moved = []
 
-for s in sims:
-    sp = scan_dir / s
-    ind_file = sp / "individuals.jsonl"
+for s: str in sims:
+    sp: Path = scan_dir / s
+    ind_file: Path = sp / "individuals.jsonl"
     per_frame_means = []
     per_frame_norms = []
     all_abs = []
@@ -60,9 +64,9 @@ for s in sims:
         prop_moved.append(0.0)
         continue
     try:
-        with ind_file.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+        with ind_file.open("r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
+            for line: str in f:
+                line: str = line.strip()
                 if not line:
                     continue
                 import json
@@ -84,7 +88,7 @@ for s in sims:
                 if deltas:
                     per_frame_means.append(float(sum(deltas)) / len(deltas))
                     per_frame_norms.append((float(sum(deltas)) / len(deltas)) / float(len(deltas)))
-    except Exception as e:
+    except Exception as e: Exception:
         print("Error reading", ind_file, e)
 
     import numpy as np
@@ -109,7 +113,7 @@ for s in sims:
         prop_moved.append(0.0)
 
 # pad arrays to dataframe length
-n = len(df)
+n: int = len(df)
 
 
 def pad(arr, default=0.0):
@@ -149,7 +153,7 @@ else:
 # choose color
 metric = args.plot_metric
 if metric == "survived":
-    color_col = "survived" if "survived" in df.columns else None
+    color_col: None | str = "survived" if "survived" in df.columns else None
 elif metric == "mean":
     color_col = "mean_move"
 elif metric == "median":
@@ -158,7 +162,7 @@ else:
     color_col = "max_move"
 
 # ensure dimensions exist
-dims = [
+dims: list[str] = [
     "maintenance_cost_per_node",
     "reproduction_threshold",
     "reproduction_cost",
@@ -167,11 +171,11 @@ dims = [
     "max_population",
     "extinction_time",
 ]
-for d in dims:
+for d: str in dims:
     if d not in df.columns:
         df[d] = 0
 
-html_out = scan_dir / "interactive_plot.html"
+html_out: Path = scan_dir / "interactive_plot.html"
 
 # Build a heatmap-style visualization: pick two primary axes and aggregate over others
 # Default x and y parameters (can be changed here)
@@ -179,8 +183,8 @@ X_PARAM = "maintenance_cost_per_node"
 Y_PARAM = "reproduction_threshold"
 
 # Available metrics to show
-metrics = ["mean_move", "median_move", "max_move", "prop_moved"]
-available_metrics = [m for m in metrics if m in df.columns]
+metrics: list[str] = ["mean_move", "median_move", "max_move", "prop_moved"]
+available_metrics: list[str] = [m for m: str in metrics if m in df.columns]
 if not available_metrics:
     print("No movement metrics available in dataframe; cannot build heatmap")
     sys.exit(1)
@@ -206,7 +210,7 @@ def make_pivot(metric):
 
 
 # build initial metric
-init_metric = available_metrics[0]
+init_metric: str = available_metrics[0]
 xs, ys, z0 = make_pivot(init_metric)
 
 
@@ -241,9 +245,9 @@ heat = go.Heatmap(
 fig = go.Figure(data=[heat])
 
 # Add dropdown menu to switch metric
-updatemenus = [dict(buttons=[], direction="down", showactive=True, x=0.0, y=1.15, xanchor="left", yanchor="top")]
+updatemenus: list[dict[str, str | bool | float | list[Any]]] = [dict(buttons=[], direction="down", showactive=True, x=0.0, y=1.15, xanchor="left", yanchor="top")]
 
-for metric in available_metrics:
+for metric: str in available_metrics:
     xs_m, ys_m, zm = make_pivot(metric)
     # ensure same x/y ordering
     z_for_plot = zm
@@ -278,5 +282,5 @@ fig.update_traces(xgap=1, ygap=1)
 try:
     fig.write_html(str(html_out))
     print("Wrote interactive heatmap to", html_out)
-except Exception as e:
+except Exception as e: Exception:
     print("Failed to write interactive plot:", e)

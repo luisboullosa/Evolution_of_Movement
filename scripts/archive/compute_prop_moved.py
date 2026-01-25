@@ -4,13 +4,13 @@ import os
 import sys
 
 
-def compute(sim_dir):
-    path = os.path.join(sim_dir, "individuals.jsonl")
+def compute(sim_dir) -> int:
+    path: str = os.path.join(sim_dir, "individuals.jsonl")
     moved = set()
     seen = set()
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
+        with open(path, "r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
+            for line: str in f:
                 try:
                     obj = json.loads(line)
                     for ind in obj.get("individuals", []):
@@ -31,7 +31,7 @@ def compute(sim_dir):
         print("ERROR: individuals.jsonl not found in", sim_dir, file=sys.stderr)
         return 2
 
-    prop = float(len(moved)) / float(len(seen)) if seen else 0.0
+    prop: float = float(len(moved)) / float(len(seen)) if seen else 0.0
     print(f"moved={len(moved)}, seen={len(seen)}, prop_moved={prop:.8f}")
     return 0
 

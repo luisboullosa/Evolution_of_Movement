@@ -12,22 +12,26 @@ import os
 import random
 from pathlib import Path
 
+from numpy import dtype, ndarray
+
+from matplotlib.image import AxesImage
+
 outdir = Path(os.environ.get("OUTDIR", "output/scan_population"))
 outdir.mkdir(parents=True, exist_ok=True)
 
-mv_vals = [0.1, 0.5, 1.0, 2.0, 5.0]
-mc_vals = [0.0001, 0.0005, 0.001, 0.005]
+mv_vals: list[float] = [0.1, 0.5, 1.0, 2.0, 5.0]
+mc_vals: list[float] = [0.0001, 0.0005, 0.001, 0.005]
 
 rows = []
 entries = []
 idx = 0
-total = len(mv_vals) * len(mc_vals)
+total: int = len(mv_vals) * len(mc_vals)
 for i, mc in enumerate(mc_vals):
     for j, mv in enumerate(mv_vals):
         idx += 1
         # synthetic metric: prop_moved peaks at medium mv, low mc
-        base = max(0.0, 1.0 - abs(j - 2) * 0.25 - i * 0.1)
-        prop = max(0.0, min(1.0, base + (random.random() - 0.5) * 0.08))
+        base: float = max(0.0, 1.0 - abs(j - 2) * 0.25 - i * 0.1)
+        prop: float = max(0.0, min(1.0, base + (random.random() - 0.5) * 0.08))
         final_pop = int(prop * 2000)
         rows.append((mv, mc, 0.0, 0.0, 0.0, 0.0, 50, final_pop, round(prop, 4)))
         entries.append(
@@ -42,8 +46,8 @@ for i, mc in enumerate(mc_vals):
         )
 
 # write results_short.csv
-csv_path = outdir / "results_short.csv"
-header = [
+csv_path: Path = outdir / "results_short.csv"
+header: list[str] = [
     "movement_cost_factor",
     "maintenance_cost_per_node",
     "reproduction_threshold",
@@ -54,15 +58,15 @@ header = [
     "final_population",
     "prop_moved",
 ]
-with open(csv_path, "w", encoding="utf-8") as f:
+with open(csv_path, "w", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
     f.write(",".join(header) + "\n")
     for r in rows:
         f.write(",".join(str(x) for x in r) + "\n")
 
 # atomic write progress.json
-prog_path = outdir / "progress.json"
-tmp = prog_path.with_suffix(".json.tmp")
-with open(tmp, "w", encoding="utf-8") as f:
+prog_path: Path = outdir / "progress.json"
+tmp: Path = prog_path.with_suffix(".json.tmp")
+with open(tmp, "w", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
     json.dump(entries, f, indent=2)
     f.flush()
     try:
@@ -78,11 +82,11 @@ try:
 
     mvArr = sorted(set([e["movement_cost_factor"] for e in entries]))
     mcArr = sorted(set([e["maintenance_cost_per_node"] for e in entries]))
-    z = [[float("nan")] * len(mvArr) for _ in range(len(mcArr))]
-    count = [[0] * len(mvArr) for _ in range(len(mcArr))]
+    z: list[list[float]] = [[float("nan")] * len(mvArr) for _: int in range(len(mcArr))]
+    count: list[list[int]] = [[0] * len(mvArr) for _: int in range(len(mcArr))]
     for e in entries:
-        i = mcArr.index(e["maintenance_cost_per_node"])
-        j = mvArr.index(e["movement_cost_factor"])
+        i: int = mcArr.index(e["maintenance_cost_per_node"])
+        j: int = mvArr.index(e["movement_cost_factor"])
         v = e.get("prop_moved", e.get("final_population", 0))
         if not isinstance(v, (int, float)):
             continue
@@ -90,15 +94,15 @@ try:
             z[i][j] = 0.0
         z[i][j] += v
         count[i][j] += 1
-    for i in range(len(mcArr)):
-        for j in range(len(mvArr)):
+    for i: int in range(len(mcArr)):
+        for j: int in range(len(mvArr)):
             if count[i][j] > 0:
                 z[i][j] = z[i][j] / count[i][j]
             else:
                 z[i][j] = float("nan")
-    arr = np.array(z)
+    arr: ndarray[tuple[Any, ...], dtype[Any]] = np.array(z)
     fig, ax = plt.subplots()
-    im = ax.imshow(
+    im: AxesImage = ax.imshow(
         arr,
         origin="lower",
         aspect="auto",
@@ -108,10 +112,10 @@ try:
     ax.set_ylabel("maintenance_cost_per_node")
     ax.set_title("synthetic prop_moved")
     fig.colorbar(im, ax=ax)
-    outp = outdir / "heatmap.png"
+    outp: Path = outdir / "heatmap.png"
     fig.savefig(outp)
     plt.close(fig)
-except Exception as exc:
+except Exception as exc: Exception:
     print("Could not render heatmap:", exc)
 
 print("Synthetic test outputs written to", outdir)
