@@ -46,7 +46,7 @@ def setup_fitness_axis(ax_fitness, bins, abs0, max_count):
     try:
         abs_counts, _ = np.histogram(abs0, bins=bins) if abs0.size > 0 else (np.zeros(len(bins) - 1, dtype=int), bins)
         bin_lefts = bins[:-1]
-        bin_widths = np.diff(bins)
+        bin_widths: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.diff(bins)
         abs_bar_container = ax_fitness.bar(
             bin_lefts,
             abs_counts,
@@ -206,7 +206,7 @@ def update_response_axis(
     except Exception:
         pass
     y_margin = 0.1
-    y_lim = max(1.0, n_nodes)
+    y_lim: float = max(1.0, n_nodes)
     if resp_abs_mode:
         ax_resp.set_ylim(0 - y_margin, y_lim + y_margin)
     else:
@@ -235,7 +235,7 @@ def prepare_fitness_data(ind_list, nbins=31):
     # collect absolute and relative fitness across frames and record existence ranges
     for fi, ind in enumerate(ind_list):
         res_arr = ind.get("resources", np.array([]))
-        total = float(np.sum(res_arr)) if res_arr.size > 0 else 0.0
+        total: float = float(np.sum(res_arr)) if res_arr.size > 0 else 0.0
         for iid in ind.get("ids", []):
             if iid not in existence_map:
                 existence_map[iid] = [fi, fi]
@@ -255,7 +255,7 @@ def prepare_fitness_data(ind_list, nbins=31):
     rel_fitness_by_frame = []
     for ind in ind_list:
         res_arr = ind.get("resources", np.array([]))
-        total = float(np.sum(res_arr)) if res_arr.size > 0 else 0.0
+        total: float = float(np.sum(res_arr)) if res_arr.size > 0 else 0.0
         abs_fitness_by_frame.append(np.array([float(r) for r in res_arr]) if res_arr.size > 0 else np.array([]))
         if res_arr.size > 0:
             rel_fitness_by_frame.append(np.array([float(r) / total if total > 0.0 else 0.0 for r in res_arr]))
@@ -276,8 +276,8 @@ def prepare_fitness_data(ind_list, nbins=31):
         if hist_min == hist_max:
             hist_min -= 0.5
             hist_max += 0.5
-    hist_pad = (hist_max - hist_min) * 0.05 if hist_max > hist_min else 0.5
-    bins = np.linspace(hist_min - hist_pad, hist_max + hist_pad, nbins)
+    hist_pad: float = (hist_max - hist_min) * 0.05 if hist_max > hist_min else 0.5
+    bins: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(hist_min - hist_pad, hist_max + hist_pad, nbins)
 
     # compute max bin count across frames
     max_bin = 1
@@ -289,7 +289,7 @@ def prepare_fitness_data(ind_list, nbins=31):
             cnt_abs, _ = (
                 np.histogram(abs_arr, bins=bins) if abs_arr.size > 0 else (np.zeros(len(bins) - 1, dtype=int), bins)
             )
-            max_bin = max(
+            max_bin: int = max(
                 max_bin,
                 int(
                     max(
@@ -300,7 +300,7 @@ def prepare_fitness_data(ind_list, nbins=31):
             )
         except Exception:
             pass
-    max_count = max(1, max_bin)
+    max_count: int = max(1, max_bin)
 
     return (
         all_abs_fitnesses,

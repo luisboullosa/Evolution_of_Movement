@@ -6,19 +6,19 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from playwright.sync_api import sync_playwright
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-def start_static_server(root_dir):
-    handler = partial(SimpleHTTPRequestHandler, directory=str(root_dir))
+def start_static_server(root_dir) -> tuple[ThreadingHTTPServer, int]:
+    handler: partial[SimpleHTTPRequestHandler] = partial(SimpleHTTPRequestHandler, directory=str(root_dir))
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    port = server.server_address[1]
+    port: int = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, port
 
 
-def write_test_progress(jobdir):
+def write_test_progress(jobdir) -> None:
     os.makedirs(jobdir, exist_ok=True)
     prog = [
         {
@@ -42,7 +42,7 @@ def write_test_progress(jobdir):
             "params": {"movement_cost_factor": 1.0, "maintenance_cost_per_node": 0.001},
         },
     ]
-    with open(os.path.join(jobdir, "progress.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(jobdir, "progress.json"), "w", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
         json.dump(prog, f)
     manifest = {
         "total_jobs": 2,
@@ -53,18 +53,18 @@ def write_test_progress(jobdir):
         "movement_vals": [0.1, 1.0],
         "maintenance_vals": [1e-05, 0.001],
     }
-    with open(os.path.join(jobdir, "scan_manifest.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(jobdir, "scan_manifest.json"), "w", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
         json.dump(manifest, f)
 
 
-def test_metric_prop_moved_in_overview():
+def test_metric_prop_moved_in_overview() -> None:
     # prepare a test jobs folder under output/scan_population
-    jobs_base = os.path.join(ROOT, "output", "scan_population")
-    test_jobs = os.path.join(jobs_base, "jobs_test")
+    jobs_base: str = os.path.join(ROOT, "output", "scan_population")
+    test_jobs: str = os.path.join(jobs_base, "jobs_test")
     write_test_progress(test_jobs)
 
     server, port = start_static_server(ROOT)
-    url = f"http://127.0.0.1:{port}/webviewer/plot_live_scan.html"
+    url: str = f"http://127.0.0.1:{port}/webviewer/plot_live_scan.html"
 
     try:
         with sync_playwright() as p:
@@ -86,7 +86,7 @@ def test_metric_prop_moved_in_overview():
             # check that plot contains title text indicating Prop moved distribution
             # Plotly places title text inside the plot; search for that string
             texts = page.locator("#plot").all_text_contents()
-            joined = "\n".join(texts)
+            joined: str = "\n".join(texts)
             assert "Prop moved" in joined or "prop_moved" in joined
 
             context.close()

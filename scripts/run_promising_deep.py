@@ -16,9 +16,9 @@ from worker_pool import run_param_sweep
 
 def load_results(results_path):
     rows = []
-    with open(results_path, "r", encoding="utf-8") as rf:
-        rdr = csv.DictReader(rf)
-        for row in rdr:
+    with open(results_path, "r", encoding="utf-8") as rf: os.TextIOWrapper[_WrappedBuffer]:
+        rdr: csv.DictReader[str] = csv.DictReader(rf)
+        for row: dict[str | Any, str | Any] in rdr:
             rows.append(row)
     return rows
 
@@ -27,7 +27,7 @@ def build_index(rows):
     idx = {}
     for row in rows:
         try:
-            key = (
+            key: tuple[float, float, float, int] = (
                 float(row.get("movement_cost_factor") or 0),
                 float(row.get("maintenance_cost_per_node") or 0),
                 float(row.get("resource_scale") or 0),
@@ -42,16 +42,16 @@ def build_index(rows):
 def load_promising(prom_path, index):
     tuples = []
     # read and ignore header line
-    with open(prom_path, "r", encoding="utf-8") as pf:
+    with open(prom_path, "r", encoding="utf-8") as pf: os.TextIOWrapper[_WrappedBuffer]:
         pf.readline()
-        for line in pf:
+        for line: str in pf:
             if not line.strip():
                 continue
-            parts = line.strip().split(",")
+            parts: list[str] = line.strip().split(",")
             if len(parts) < 5:
                 continue
             mv, mc, rs, gw, fp = parts[:5]
-            key = (float(mv), float(mc), float(rs), int(float(gw)))
+            key: tuple[float, float, float, int] = (float(mv), float(mc), float(rs), int(float(gw)))
             candidates = index.get(key, [])
             match = None
             for row in candidates:
@@ -66,7 +66,7 @@ def load_promising(prom_path, index):
             if match is None:
                 continue
             try:
-                tpl = (
+                tpl: tuple[float, float, float, float, float, float, float, int] = (
                     float(match.get("movement_cost_factor") or 0),
                     float(match.get("maintenance_cost_per_node") or 0),
                     float(match.get("reproduction_threshold") or 0),
@@ -82,7 +82,7 @@ def load_promising(prom_path, index):
     return tuples
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--jobs-dir", required=True, help="Path to jobs folder containing promising.csv and results_short.csv"
@@ -97,7 +97,7 @@ def main():
     ap.add_argument("--write-outputs", action="store_true")
     ap.add_argument("--timeout", type=int, default=7200, help="Per-job timeout (seconds)")
     ap.add_argument("--results-name", default="deep_results.csv")
-    args = ap.parse_args()
+    args: argparse.Namespace = ap.parse_args()
 
     if not args.release and not args.debug:
         args.release = True
@@ -105,8 +105,8 @@ def main():
         args.release = False
 
     jobs_dir = os.path.normpath(args.jobs_dir)
-    results_path = os.path.join(jobs_dir, "results_short.csv")
-    prom_path = os.path.join(jobs_dir, "promising.csv")
+    results_path: str = os.path.join(jobs_dir, "results_short.csv")
+    prom_path: str = os.path.join(jobs_dir, "promising.csv")
     if not os.path.exists(results_path) or not os.path.exists(prom_path):
         raise SystemExit("Missing results_short.csv or promising.csv in jobs dir")
 
@@ -143,7 +143,7 @@ def main():
             "sim_prefix": f"prom{i}_",
             "max_population": int(args.max_population),
         }
-        tf = tempfile.NamedTemporaryFile(
+        tf: tempfile._TemporaryFileWrapper[str] = tempfile.NamedTemporaryFile(
             prefix=f"deep_prom_{i}_", suffix=".json", delete=False, mode="w", encoding="utf-8"
         )
         json.dump(cfg, tf)
@@ -151,10 +151,10 @@ def main():
         tf.close()
         deep_cfg_paths[i] = tf.name
 
-    def deep_cmd(job):
+    def deep_cmd(job) -> list[str]:
         idx = job[0]
         cfgpath = deep_cfg_paths[idx]
-        cmd = ["cargo", "run", "--quiet"]
+        cmd: list[str] = ["cargo", "run", "--quiet"]
         if args.release:
             cmd.append("--release")
         cmd.extend(
@@ -193,7 +193,7 @@ def main():
                     continue
         return [mv, mc, repro_thr, repro_cost, env_time_speed, death_risk, rscales, gw, final_pop, prop_moved]
 
-    deep_header = [
+    deep_header: list[str] = [
         "movement_cost_factor",
         "maintenance_cost_per_node",
         "reproduction_threshold",

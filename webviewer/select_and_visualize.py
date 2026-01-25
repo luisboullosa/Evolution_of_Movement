@@ -27,8 +27,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_SEARCH = [
+ROOT: Path = Path(__file__).resolve().parent
+DEFAULT_SEARCH: List[Path] = [
     ROOT.parent / "output" / "visualize",
     ROOT.parent / "output" / "prod_runs",
     ROOT.parent / "output" / "remote_scan",
@@ -37,15 +37,15 @@ DEFAULT_SEARCH = [
 
 
 def read_build_id(run_dir: Path) -> Optional[str]:
-    candidates = [
+    candidates: List[str] = [
         "build_id.txt",
         "config.json",
         "run_config.json",
         "sim_config.json",
         "scan_config.json",
     ]
-    for name in candidates:
-        p = run_dir / name
+    for name: str in candidates:
+        p: Path = run_dir / name
         if not p.exists():
             continue
         if p.suffix == ".txt":
@@ -58,7 +58,7 @@ def read_build_id(run_dir: Path) -> Optional[str]:
         except Exception:
             continue
         if isinstance(data, dict):
-            for key in ("build_id", "BUILD_ID", "buildId"):
+            for key: str in ("build_id", "BUILD_ID", "buildId"):
                 v = data.get(key)
                 if isinstance(v, str):
                     return v
@@ -68,12 +68,12 @@ def read_build_id(run_dir: Path) -> Optional[str]:
 def discover_runs(search_dirs: List[Path]) -> List[Dict[str, object]]:
     runs = []
     seen = set()
-    for base in search_dirs:
+    for base: Path in search_dirs:
         if not base.exists():
             continue
-        for env_file in base.rglob("env.jsonl"):
-            run_dir = env_file.parent
-            if any(part in {"__pycache__", "target", ".git"} for part in run_dir.parts):
+        for env_file: Path in base.rglob("env.jsonl"):
+            run_dir: Path = env_file.parent
+            if any(part in {"__pycache__", "target", ".git"} for part: str in run_dir.parts):
                 continue
             if not (run_dir / "individuals.jsonl").exists():
                 continue
@@ -95,11 +95,11 @@ def discover_runs(search_dirs: List[Path]) -> List[Dict[str, object]]:
 def discover_snapshots(search_dirs: List[Path]) -> List[Dict[str, object]]:
     snaps = []
     seen = set()
-    for base in search_dirs:
+    for base: Path in search_dirs:
         if not base.exists():
             continue
-        for snap in base.rglob("*snapshot*.cbor"):
-            if any(part in {"__pycache__", "target", ".git"} for part in snap.parts):
+        for snap: Path in base.rglob("*snapshot*.cbor"):
+            if any(part in {"__pycache__", "target", ".git"} for part: str in snap.parts):
                 continue
             if snap in seen:
                 continue
@@ -128,9 +128,9 @@ def choose(entries: List[Dict[str, object]], auto: Optional[int]) -> Dict[str, o
 
     print("Available entries:")
     for i, e in enumerate(entries):
-        bid = e.get("build_id") or "?"
+        bid: object | str = e.get("build_id") or "?"
         print(f"[{i:02d}] {e['kind']:<9} build_id={bid:<8}  {e['path']}")
-    choice = input("Select entry number: ").strip()
+    choice: str = input("Select entry number: ").strip()
     try:
         idx = int(choice)
     except Exception:
@@ -157,7 +157,7 @@ def run_replay(
     delta_full_interval: Optional[int],
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
+    cmd: List[str] = [
         "cargo",
         "run",
         f"--{profile}",
@@ -204,7 +204,7 @@ def launch_viewers(run_path: Path, viewer: str) -> None:
     if viewer in ("individual", "both"):
         targets.append((ROOT / "visualize_individual.py", "individual"))
     for script, label in targets:
-        cmd = [sys.executable, str(script), str(run_path)]
+        cmd: List[str] = [sys.executable, str(script), str(run_path)]
         print(f"Launching {label} viewer -> {cmd}")
         subprocess.Popen(cmd)
 
@@ -283,17 +283,17 @@ def main() -> None:
         default=None,
         help="Base directory for replay outputs (default: output/visualize)",
     )
-    args = ap.parse_args()
+    args: argparse.Namespace = ap.parse_args()
 
-    search_dirs = [Path(p).resolve() for p in args.search] if args.search else DEFAULT_SEARCH
-    out_base = Path(args.out_base).resolve() if args.out_base else (ROOT.parent / "output" / "visualize")
+    search_dirs: List[Path] = [Path(p).resolve() for p in args.search] if args.search else DEFAULT_SEARCH
+    out_base: Path = Path(args.out_base).resolve() if args.out_base else (ROOT.parent / "output" / "visualize")
 
-    runs = discover_runs(search_dirs)
-    snaps = discover_snapshots(search_dirs)
-    entries = runs + snaps
+    runs: List[Dict[str, object]] = discover_runs(search_dirs)
+    snaps: List[Dict[str, object]] = discover_snapshots(search_dirs)
+    entries: List[Dict[str, object]] = runs + snaps
     if args.build_id:
-        entries = [e for e in entries if e.get("build_id") == args.build_id]
-    selection = choose(entries, args.select)
+        entries: List[Dict[str, object]] = [e for e: Dict[str, object] in entries if e.get("build_id") == args.build_id]
+    selection: Dict[str, object] = choose(entries, args.select)
 
     if selection["kind"] == "run":
         run_path: Path = selection["path"]  # type: ignore
@@ -301,8 +301,8 @@ def main() -> None:
         return
 
     snapshot_path: Path = selection["path"]  # type: ignore
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_dir = out_base / f"selector_{snapshot_path.stem}_{stamp}"
+    stamp: str = time.strftime("%Y%m%d_%H%M%S")
+    out_dir: Path = out_base / f"selector_{snapshot_path.stem}_{stamp}"
     try:
         rand_pos: Optional[bool]
         if args.randomize_start_positions and args.no_randomize_start_positions:
@@ -335,7 +335,7 @@ def main() -> None:
             use_deltas,
             args.delta_full_interval,
         )
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError as e: subprocess.CalledProcessError:
         print("Replay failed:", e)
         sys.exit(e.returncode)
     launch_viewers(out_dir, args.viewer)

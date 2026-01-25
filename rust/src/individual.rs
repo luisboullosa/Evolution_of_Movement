@@ -1,6 +1,6 @@
 use crate::neural_network::NeuralNetwork;
 use rand::Rng;
-use rand_distr::{Distribution, Cauchy};
+use rand_distr::{Cauchy, Distribution};
 
 #[derive(Clone, Debug)]
 pub struct Individual {
@@ -51,7 +51,9 @@ impl Individual {
         // Call appropriate NN forward depending on NN input shape
         // Allow benchmarking the impact of buffer reuse by disabling via env var.
         // Set `DISABLE_NN_BUFFERS=1` to force the allocator-allocating codepaths.
-        let disable_buf = std::env::var("DISABLE_NN_BUFFERS").map(|v| v == "1" || v.to_lowercase() == "true").unwrap_or(false);
+        let disable_buf = std::env::var("DISABLE_NN_BUFFERS")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
         let (direction, magnitude) = if disable_buf {
             if self.nn.inputs <= 1 {
                 self.nn.forward_single(center)
@@ -64,7 +66,8 @@ impl Individual {
                 self.nn.forward_single_buf(center, hidden_buf, out2_buf)
             } else {
                 // pass a slice view of the stack array; forward_multi will only read up to `self.inputs`
-                self.nn.forward_multi_buf(&stack_inputs, hidden_buf, out2_buf)
+                self.nn
+                    .forward_multi_buf(&stack_inputs, hidden_buf, out2_buf)
             }
         };
 

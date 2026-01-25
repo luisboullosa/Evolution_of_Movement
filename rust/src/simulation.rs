@@ -2,10 +2,11 @@ use crate::config::Config;
 use crate::environment::Environment;
 use crate::individual::Individual;
 use crate::snapshot::{PopulationSnapshot, SnapshotError};
+use crate::tensor::{run_tensor_kernel, PopulationTensor, RowRngManager};
 use crate::webviewer_writer::{resolve_individuals_encoding, IndividualsEncoding, WebviewerWriter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rand_distr::{Distribution, Cauchy};
+use rand_distr::{Cauchy, Distribution};
 use std::io::Write;
 use std::time::Instant;
 
@@ -20,6 +21,9 @@ pub struct Simulation {
     pub config: Config,
     pub nn_hidden_buf: Vec<f64>,
     pub nn_out2_buf: Vec<f64>,
+    pub tensor: PopulationTensor,
+    pub row_rng: RowRngManager,
+    pub step_count: i32,
     ind_encoding: IndividualsEncoding,
 }
 
@@ -39,6 +43,9 @@ impl Simulation {
             config: cfg.clone(),
             nn_hidden_buf: vec![0.0; cfg.nn_nodes.max(0) as usize],
             nn_out2_buf: vec![0.0; cfg.nn_nodes2.max(0) as usize],
+            tensor: PopulationTensor::new(cfg),
+            row_rng: RowRngManager::new(cfg.seed as u64),
+            step_count: 0,
             ind_encoding,
         }
     }
@@ -130,9 +137,15 @@ impl Simulation {
             ind.resources = 10.0;
             self.individuals.push(ind);
         }
+        self.tensor.record_active(self.individuals.len());
     }
 
     pub fn step(&mut self) {
+        self.step_count = self.step_count.saturating_add(1);
+        self.tensor.sync_from_individuals(&self.individuals);
+        self.row_rng
+            .prepare(self.tensor.active_count(), self.step_count);
+
         let width = self.env.width.max(1);
         self.env.step(
             self.config.seed as u64,
@@ -153,52 +166,19 @@ impl Simulation {
         self.last_delta.resize(self.individuals.len(), 0);
         self.last_movers = 0;
 
-        for (i, ind) in self.individuals.iter_mut().enumerate() {
-            let pos = ind.position % width;
-            let left_idx = if pos == 0 { width - 1 } else { pos - 1 };
-            let right_idx = (pos + 1) % width;
-            let center = self.env.resources.get(pos).copied().unwrap_or(0.0);
-            let left = self
-                .env
-                .resources
-                .get(left_idx)
-                .copied()
-                .unwrap_or(center);
-            let right = self
-                .env
-                .resources
-                .get(right_idx)
-                .copied()
-                .unwrap_or(center);
-            let local_population = if self.config.nn_use_occupancy {
-                occupancy[pos]
-            } else {
-                0
-            };
-            let out = ind.act(
-                left,
-                center,
-                right,
-                local_population,
-                self.config.movement_cost_factor,
-                &mut self.rng,
-                &mut self.nn_hidden_buf,
-                &mut self.nn_out2_buf,
-            );
-            if out != 0.0 {
-                let delta = out.round() as i32;
-                self.last_spend[i] = out.abs();
-                self.last_delta[i] = delta;
-                self.last_movers = self.last_movers.saturating_add(1);
-                let width_i64 = width as i64;
-                let mut new_position = ind.position as i64 + delta as i64;
-                new_position %= width_i64;
-                if new_position < 0 {
-                    new_position += width_i64;
-                }
-                ind.position = new_position as usize;
-            }
-        }
+        run_tensor_kernel(
+            &mut self.tensor,
+            &self.env.resources,
+            &occupancy,
+            &self.config,
+            &self.row_rng,
+            &mut self.nn_hidden_buf,
+            &mut self.nn_out2_buf,
+            &mut self.last_spend,
+            &mut self.last_delta,
+            &mut self.last_movers,
+        );
+        self.tensor.apply_to_individuals(&mut self.individuals);
 
         for ind in &mut self.individuals {
             ind.age += 1;
@@ -252,6 +232,7 @@ impl Simulation {
             }
             true
         });
+        self.tensor.sync_from_individuals(&self.individuals);
     }
 
     pub fn run(&mut self) {
@@ -287,9 +268,7 @@ impl Simulation {
         let wants_frames = write_frames && self.config.write_outputs;
         let estimated_bytes = self.estimate_output_bytes(wants_frames);
         if !self.enforce_output_budget(estimated_bytes) {
-            eprintln!(
-                "[error] aborting run because projected outputs exceed configured budget"
-            );
+            eprintln!("[error] aborting run because projected outputs exceed configured budget");
             return;
         }
         let needs_simdir = wants_frames
@@ -303,7 +282,9 @@ impl Simulation {
             let repo_root = std::env::current_dir()
                 .ok()
                 .and_then(find_repo_root)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                .unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
 
             // If an explicit output directory is provided, write everything there.
             // Otherwise create/find a per-sim directory under `output_dir_base`.
@@ -366,7 +347,8 @@ impl Simulation {
             }
 
             if self.config.write_config {
-                let cfg_json = serde_json::to_string(&self.config).unwrap_or_else(|_| "{}".to_string());
+                let cfg_json =
+                    serde_json::to_string(&self.config).unwrap_or_else(|_| "{}".to_string());
                 if let Some(w) = writer.as_mut() {
                     w.write_frames_config_header(&cfg_json);
                 }
@@ -377,7 +359,12 @@ impl Simulation {
                 w.write_frames_header_row();
                 if self.config.write_outputs {
                     w.dump_env(&self.env, Some(0));
-                    w.dump_individuals(&self.individuals, &self.last_spend, &self.last_delta, Some(0));
+                    w.dump_individuals(
+                        &self.individuals,
+                        &self.last_spend,
+                        &self.last_delta,
+                        Some(0),
+                    );
                 }
             }
         } else if self.config.write_outputs {
@@ -392,7 +379,12 @@ impl Simulation {
             w.open_frames_if_needed();
             w.write_frames_header_row();
             w.dump_env(&self.env, Some(0));
-            w.dump_individuals(&self.individuals, &self.last_spend, &self.last_delta, Some(0));
+            w.dump_individuals(
+                &self.individuals,
+                &self.last_spend,
+                &self.last_delta,
+                Some(0),
+            );
             writer = Some(w);
         }
 
@@ -500,6 +492,7 @@ impl Simulation {
                             Some(t),
                         );
                     }
+                    w.flush_output_buffers(t);
                     w.maybe_flush_nn_index(t);
                 }
             }
@@ -519,9 +512,6 @@ impl Simulation {
             }
         }
 
-        if let Some(w) = writer.as_mut() {
-            w.flush_all();
-        }
         if self.config.show_progress {
             println!();
         }
@@ -535,6 +525,7 @@ impl Simulation {
                     Some(final_step_index),
                 );
             }
+            w.flush_output_buffers(final_step_index);
             w.flush_all();
         }
 
@@ -548,9 +539,7 @@ impl Simulation {
             if !simdir.is_empty() {
                 if let Ok(cwd) = std::env::current_dir() {
                     if let Some(root) = find_repo_root(cwd) {
-                        let helper = root
-                            .join("scripts")
-                            .join("generate_webviewer_outputs.ps1");
+                        let helper = root.join("scripts").join("generate_webviewer_outputs.ps1");
                         if helper.exists() {
                             let dst = std::path::Path::new(&simdir)
                                 .join("generate_webviewer_outputs.ps1");
@@ -586,12 +575,19 @@ impl Simulation {
             0.0
         };
         let mut summary_map = serde_json::Map::new();
-        summary_map.insert("final_population".to_string(), serde_json::Value::from(final_pop));
-        summary_map.insert("prop_moved".to_string(), serde_json::Value::from(prop_moved));
+        summary_map.insert(
+            "final_population".to_string(),
+            serde_json::Value::from(final_pop),
+        );
+        summary_map.insert(
+            "prop_moved".to_string(),
+            serde_json::Value::from(prop_moved),
+        );
         if let Ok(s) = serde_json::to_string(&summary_map) {
             // include build id in the JSON summary so external drivers can record it
             if let Some(bid) = option_env!("BUILD_ID") {
-                let mut v: serde_json::Value = serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
+                let mut v: serde_json::Value =
+                    serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
                 if let serde_json::Value::Object(ref mut map) = v {
                     map.insert("build_id".to_string(), serde_json::Value::from(bid));
                 }
@@ -674,7 +670,9 @@ impl Simulation {
             return;
         }
         if simdir.is_empty() {
-            eprintln!("[warn] snapshot requested but no simulation directory was created; skipping");
+            eprintln!(
+                "[warn] snapshot requested but no simulation directory was created; skipping"
+            );
             return;
         }
         let snapshot = PopulationSnapshot::capture(
@@ -735,16 +733,8 @@ impl Simulation {
             self.env.perlin_time = snapshot.env_perlin_time;
         } else {
             // Otherwise, restore the exact environment from the snapshot.
-            self.env.resources = snapshot
-                .env_resources
-                .iter()
-                .map(|v| *v as f64)
-                .collect();
-            self.env.perlin_base = snapshot
-                .env_perlin_base
-                .iter()
-                .map(|v| *v as f64)
-                .collect();
+            self.env.resources = snapshot.env_resources.iter().map(|v| *v as f64).collect();
+            self.env.perlin_base = snapshot.env_perlin_base.iter().map(|v| *v as f64).collect();
         }
 
         // Rebuild individuals from snapshot records.
@@ -784,8 +774,10 @@ impl Simulation {
             if self.config.write_individual_deltas {
                 let per_entry = self.estimate_individual_delta_entry_bytes();
                 let (full_frames, delta_frames) = self.estimate_delta_frame_counts(history_steps);
-                let updates_per_frame = self.estimate_delta_updates_per_frame(pop_ceiling as usize) as u64;
-                let removals_per_frame = self.estimate_delta_removals_per_frame(pop_ceiling as usize) as u64;
+                let updates_per_frame =
+                    self.estimate_delta_updates_per_frame(pop_ceiling as usize) as u64;
+                let removals_per_frame =
+                    self.estimate_delta_removals_per_frame(pop_ceiling as usize) as u64;
 
                 let full_record = 96u64.saturating_add(pop_ceiling.saturating_mul(per_entry));
                 total = total.saturating_add(full_record.saturating_mul(full_frames));
@@ -803,7 +795,8 @@ impl Simulation {
 
         if frames_enabled {
             let frame_chars = (self.config.vis_cols.max(1)
-                * (self.config.vis_height + self.config.vis_pop_height + 6)) as u64;
+                * (self.config.vis_height + self.config.vis_pop_height + 6))
+                as u64;
             total = total.saturating_add((frame_chars + 64).saturating_mul(history_steps));
         }
 
@@ -916,7 +909,10 @@ impl Simulation {
         let est_mb = estimated_bytes as f64 / (1024.0 * 1024.0);
         if self.config.output_budget_mb <= 0.0 {
             if estimated_bytes > 0 {
-                println!("[info] projected outputs ≈{:.2} MiB (no budget configured)", est_mb);
+                println!(
+                    "[info] projected outputs ≈{:.2} MiB (no budget configured)",
+                    est_mb
+                );
             }
             return true;
         }
@@ -925,10 +921,7 @@ impl Simulation {
         if budget_bytes == 0 {
             return true;
         }
-        let warn_fraction = self
-            .config
-            .output_budget_warn_fraction
-            .clamp(0.0, 1.0);
+        let warn_fraction = self.config.output_budget_warn_fraction.clamp(0.0, 1.0);
         let warn_bytes = (budget_bytes as f64 * warn_fraction) as u64;
         let budget_mb = budget_bytes as f64 / (1024.0 * 1024.0);
 

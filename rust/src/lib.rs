@@ -5,4 +5,5 @@ pub mod neural_network;
 pub mod perlin;
 pub mod simulation;
 pub mod snapshot;
+pub mod tensor;
 pub mod webviewer_writer;

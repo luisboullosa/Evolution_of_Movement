@@ -18,6 +18,9 @@ import os
 import sys
 
 import matplotlib
+from matplotlib.transforms import Bbox
+from matplotlib.transforms import Bbox
+from matplotlib.backend_bases import TimerBase
 import numpy as np
 
 # Decide headless mode early (before importing pyplot) so we can set a
@@ -47,12 +50,12 @@ try:
 
     # importlib.util may not be exposed to some static analyzers or runtimes;
     # access it safely and provide a fallback to importlib.find_spec when needed.
-    _util = getattr(importlib, "util", None)
+    _util: Any | None = getattr(importlib, "util", None)
     if _util is not None and getattr(_util, "find_spec", None) is not None:
-        HAS_NX = _util.find_spec("networkx") is not None
+        HAS_NX: bool = _util.find_spec("networkx") is not None
     else:
         # fallback to top-level find_spec if available, otherwise assume absent
-        HAS_NX = getattr(importlib, "find_spec", lambda name: None)("networkx") is not None
+        HAS_NX: bool = getattr(importlib, "find_spec", lambda name: None)("networkx") is not None
 except Exception:
     HAS_NX = False
 
@@ -65,8 +68,8 @@ from matplotlib.collections import LineCollection  # noqa: E402
 # --- assume helper modules provide necessary functionality ---
 
 # First arg can be the webviewer base directory or a specific simulation directory.
-arg = sys.argv[1] if len(sys.argv) > 1 else "webviewer"
-base = arg
+arg: str = sys.argv[1] if len(sys.argv) > 1 else "webviewer"
+base: str = arg
 
 # widget placeholders (defined later in setup_visualizer)
 btn: Optional[Button] = None
@@ -81,7 +84,7 @@ slider: Optional[Slider] = None
 def _safe_set_label(widget: Optional[Any], text: str) -> None:
     if widget is None:
         return
-    lab = getattr(widget, "label", None)
+    lab: Any | None = getattr(widget, "label", None)
     if lab is None:
         return
     try:
@@ -116,27 +119,27 @@ def _set_lines_ydata(lines_obj: Any, ydata: Any) -> None:
 # Layout / UI coordinates (moved here from webviewer/graph_coords.py)
 # Tweak these values to adjust figure layout without editing other code.
 # figure gridspec ratios
-GS_WIDTH_RATIOS = [1.0, 0.35, 0.22]
+GS_WIDTH_RATIOS: list[float] = [1.0, 0.35, 0.22]
 # increase middle row to give more vertical space to the NN node plot
-GS_HEIGHT_RATIOS = [1.0, 1.8, 1.0]
+GS_HEIGHT_RATIOS: list[float] = [1.0, 1.8, 1.0]
 
 # info box position (figure coordinates)
-AX_INFO_POS = [0.74, 0.68, 0.22, 0.22]
+AX_INFO_POS: list[float] = [0.74, 0.68, 0.22, 0.22]
 AX_INFO_ALPHA = 0.95
 
 # slider position
-AX_SLIDER_POS = [0.2, 0.02, 0.6, 0.03]
+AX_SLIDER_POS: list[float] = [0.2, 0.02, 0.6, 0.03]
 AX_SLIDER_FACECOLOR = "0.9"
 
 # play button and resp toggle positions
-AX_PLAY_POS = [0.82, 0.92, 0.04, 0.04]
-AX_RESP_TOGGLE_POS = [0.74, 0.92, 0.04, 0.04]
+AX_PLAY_POS: list[float] = [0.82, 0.92, 0.04, 0.04]
+AX_RESP_TOGGLE_POS: list[float] = [0.74, 0.92, 0.04, 0.04]
 
 # prev/next/random/text box positions
-AX_TEXT_POS = [0.01, 0.05, 0.12, 0.05]
-AX_PREV_POS = [0.01, 0.82, 0.045, 0.05]
-AX_NEXT_POS = [0.06, 0.82, 0.045, 0.05]
-AX_RAND_POS = [0.11, 0.82, 0.045, 0.05]
+AX_TEXT_POS: list[float] = [0.01, 0.05, 0.12, 0.05]
+AX_PREV_POS: list[float] = [0.01, 0.82, 0.045, 0.05]
+AX_NEXT_POS: list[float] = [0.06, 0.82, 0.045, 0.05]
+AX_RAND_POS: list[float] = [0.11, 0.82, 0.045, 0.05]
 
 # NN axis area (for potential adjustments)
 AX_NN_GRIDPOS = (1, 0)  # same as in the main gridspec usage
@@ -145,34 +148,34 @@ AX_NN_GRIDPOS = (1, 0)  # same as in the main gridspec usage
 # Default to the latest sim
 if os.path.isdir(arg):
     # list sim directories
-    sims = sorted([d for d in os.listdir(arg) if os.path.isdir(os.path.join(arg, d)) and d.startswith("sim")])
+    sims: list[str] = sorted([d for d: str in os.listdir(arg) if os.path.isdir(os.path.join(arg, d)) and d.startswith("sim")])
     if len(sims) == 1:
-        base = os.path.join(arg, sims[0])
+        base: str = os.path.join(arg, sims[0])
     elif len(sims) > 1:
         # choose the last by default; the user can pass the exact sim folder otherwise
-        base = os.path.join(arg, sims[-1])
+        base: str = os.path.join(arg, sims[-1])
 
 # Prefer NDJSON (.jsonl) cumulative files; fall back to per-frame TSVs
-env_jsonl = os.path.join(base, "env.jsonl")
-ind_jsonl = os.path.join(base, "individuals.jsonl")
-ind_delta = os.path.join(base, "individuals.delta.jsonl")
+env_jsonl: str = os.path.join(base, "env.jsonl")
+ind_jsonl: str = os.path.join(base, "individuals.jsonl")
+ind_delta: str = os.path.join(base, "individuals.delta.jsonl")
 
 env_files = []
 ind_files = []
 delta_mode = False
 
 if os.path.exists(env_jsonl):
-    env_files = [env_jsonl]
+    env_files: list[str] = [env_jsonl]
 if os.path.exists(ind_jsonl):
-    ind_files = [ind_jsonl]
+    ind_files: list[str] = [ind_jsonl]
 elif os.path.exists(ind_delta):
-    ind_files = [ind_delta]
+    ind_files: list[str] = [ind_delta]
     delta_mode = True
 else:
-    env_pattern = os.path.join(base, "env.tsv.*.tsv")
-    ind_pattern = os.path.join(base, "individuals.tsv.*.tsv")
-    env_files = sorted(glob.glob(env_pattern))
-    ind_files = sorted(glob.glob(ind_pattern))
+    env_pattern: str = os.path.join(base, "env.tsv.*.tsv")
+    ind_pattern: str = os.path.join(base, "individuals.tsv.*.tsv")
+    env_files: list[str] = sorted(glob.glob(env_pattern))
+    ind_files: list[str] = sorted(glob.glob(ind_pattern))
 
 if not env_files or not ind_files:
     print("No env/individual snapshot files found in", base)
@@ -184,10 +187,10 @@ n_frames = 0
 # index mapping:
 #   nn_index.json -> { "<id>": {"weights":[..],"biases":[..]}, ... }
 nn_index = None
-nn_index_file = os.path.join(base, "nn_index.json")
+nn_index_file: str = os.path.join(base, "nn_index.json")
 if os.path.exists(nn_index_file):
     try:
-        with open(nn_index_file, "r") as f:
+        with open(nn_index_file, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
             nn_index = json.load(f)
     except Exception:
         nn_index = None
@@ -198,7 +201,7 @@ ind_list = []
 times = []
 
 
-def _append_individual_frame(frame_inds):
+def _append_individual_frame(frame_inds) -> None:
     ids = []
     poss = []
     ress = []
@@ -226,10 +229,10 @@ def _append_individual_frame(frame_inds):
 
 if os.path.exists(env_jsonl) and not delta_mode:
     # jsonl individuals
-    with open(env_jsonl, "r") as ef, open(ind_jsonl, "r") as inf:
+    with open(env_jsonl, "r") as ef: os.TextIOWrapper[_WrappedBuffer], open(ind_jsonl, "r") as inf: os.TextIOWrapper[_WrappedBuffer]:
         for eline, iline in zip(ef, inf):
-            eline = eline.strip()
-            iline = iline.strip()
+            eline: str = eline.strip()
+            iline: str = iline.strip()
             if not eline or not iline:
                 continue
             try:
@@ -240,15 +243,15 @@ if os.path.exists(env_jsonl) and not delta_mode:
             t = eobj.get("t", None)
             times.append(t if t is not None else len(times))
             res = eobj.get("resources", [])
-            idx = list(range(len(res)))
+            idx: list[int] = list(range(len(res)))
             env_list.append((np.array(idx), np.array(res)))
             _append_individual_frame(iobj.get("individuals", []))
-    n_frames = min(len(env_list), len(ind_list))
+    n_frames: int = min(len(env_list), len(ind_list))
 elif delta_mode:
     # env jsonl + individuals.delta.jsonl
-    with open(env_jsonl, "r") as ef:
-        for eline in ef:
-            eline = eline.strip()
+    with open(env_jsonl, "r") as ef: os.TextIOWrapper[_WrappedBuffer]:
+        for eline: str in ef:
+            eline: str = eline.strip()
             if not eline:
                 continue
             try:
@@ -258,13 +261,13 @@ elif delta_mode:
             t = eobj.get("t", None)
             times.append(t if t is not None else len(times))
             res = eobj.get("resources", [])
-            idx = list(range(len(res)))
+            idx: list[int] = list(range(len(res)))
             env_list.append((np.array(idx), np.array(res)))
 
     state = {}
-    with open(ind_delta, "r") as df:
-        for line in df:
-            line = line.strip()
+    with open(ind_delta, "r") as df: os.TextIOWrapper[_WrappedBuffer]:
+        for line: str in df:
+            line: str = line.strip()
             if not line:
                 continue
             try:
@@ -294,22 +297,22 @@ elif delta_mode:
                     except Exception:
                         continue
             _append_individual_frame(list(state.values()))
-    n_frames = min(len(env_list), len(ind_list))
+    n_frames: int = min(len(env_list), len(ind_list))
 else:
     # legacy TSV per-frame parsing
-    for i in range(n_frames):
-        ef = env_files[i]
-        inf = ind_files[i]
-        t = os.path.basename(ef).split(".")[2]
+    for i: int in range(n_frames):
+        ef: str = env_files[i]
+        inf: str = ind_files[i]
+        t: str = os.path.basename(ef).split(".")[2]
         times.append(t)
         # read env
         e_idx = []
         e_res = []
-        with open(ef, "r") as f:
-            for line in f.read().splitlines()[1:]:
+        with open(ef, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
+            for line: str in f.read().splitlines()[1:]:
                 if not line.strip():
                     continue
-                a = line.split("\t")
+                a: list[str] = line.split("\t")
                 e_idx.append(int(a[0]))
                 e_res.append(float(a[1]))
         env_list.append((np.array(e_idx), np.array(e_res)))
@@ -319,11 +322,11 @@ else:
         ress = []
         spends = []
         deltas = []
-        with open(inf, "r") as f:
-            for line in f.read().splitlines()[1:]:
+        with open(inf, "r") as f: os.TextIOWrapper[_WrappedBuffer]:
+            for line: str in f.read().splitlines()[1:]:
                 if not line.strip():
                     continue
-                a = line.split("\t")
+                a: list[str] = line.split("\t")
                 ids.append(int(a[0]))
                 poss.append(int(a[1]))
                 ress.append(float(a[2]))
@@ -350,7 +353,7 @@ sel_index = 0
 env_global_max = 0.0
 for _, er in env_list:
     if er.size > 0:
-        env_global_max = max(env_global_max, float(er.max()))
+        env_global_max: float = max(env_global_max, float(er.max()))
 
 (
     all_abs_fitnesses,
@@ -371,7 +374,7 @@ for _, er in env_list:
 env_idx, env_res = env_list[0]
 
 
-def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, max_width=6.0, color="tab:blue"):
+def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, max_width=6.0, color="tab:blue") -> None | LineCollection:
     """Draw environment as a LineCollection where segment linewidth encodes
     local individual density. `positions` is an array-like of individual
     positions (integers); if None or empty, draw plain line with min_width.
@@ -385,15 +388,15 @@ def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, m
     segs = np.stack([points[:-1], points[1:]], axis=1)
 
     if positions is None or len(positions) == 0:
-        lw = np.full(len(segs), min_width)
+        lw: np.ndarray[tuple[int], np.dtype[Any]] = np.full(len(segs), min_width)
     else:
         try:
-            counts = np.bincount(np.asarray(positions, dtype=int), minlength=len(env_res))
+            counts: np.ndarray[tuple[Any, ...], np.dtype[np.signedinteger[np._32Bit | np._64Bit]]] = np.bincount(np.asarray(positions, dtype=int), minlength=len(env_res))
             seg_counts = (counts[:-1] + counts[1:]) / 2.0
-            maxc = float(seg_counts.max()) if seg_counts.max() > 0 else 1.0
+            maxc: float = float(seg_counts.max()) if seg_counts.max() > 0 else 1.0
             lw = min_width + (max_width - min_width) * (seg_counts / maxc)
         except Exception:
-            lw = np.full(len(segs), min_width)
+            lw: np.ndarray[tuple[int], np.dtype[Any]] = np.full(len(segs), min_width)
 
     # matplotlib LineCollection expects a sequence of segments (list of array-likes).
     # Convert the numpy ndarray to a list to satisfy type-checkers and some backends.
@@ -407,7 +410,7 @@ def draw_env_with_density(ax, env_idx, env_res, positions=None, min_width=0.8, m
     return lc
 
 
-def setup_visualizer():
+def setup_visualizer() -> None:
     """Create the figure, axes, artists and widgets used by the visualizer.
 
     This pulls together the top-level setup that used to live at module
@@ -421,19 +424,19 @@ def setup_visualizer():
     global btn, btn_resp, btn_prev, btn_next, btn_rand
 
     # build plot
-    fig = plt.figure(figsize=(12, 10))
+    fig: plt.Figure = plt.figure(figsize=(12, 10))
     # add a dedicated right-hand column for controls / NN text table
     # layout: 3 rows x 3 cols:
     #   main visual (col0),
     #   fitness histogram (col1),
     #   sidebar (col2)
     # honor top-level layout constants so changes propagate consistently
-    gs = fig.add_gridspec(3, 3, width_ratios=GS_WIDTH_RATIOS, height_ratios=GS_HEIGHT_RATIOS)
-    ax_env = fig.add_subplot(gs[0, 0])
-    ax_nn = fig.add_subplot(gs[1, 0])
-    ax_resp = fig.add_subplot(gs[2, 0])
-    ax_fitness = fig.add_subplot(gs[:, 1])
-    ax_sidebar = fig.add_subplot(gs[:, 2])
+    gs: plt.GridSpec = fig.add_gridspec(3, 3, width_ratios=GS_WIDTH_RATIOS, height_ratios=GS_HEIGHT_RATIOS)
+    ax_env: plt.Axes = fig.add_subplot(gs[0, 0])
+    ax_nn: plt.Axes = fig.add_subplot(gs[1, 0])
+    ax_resp: plt.Axes = fig.add_subplot(gs[2, 0])
+    ax_fitness: plt.Axes = fig.add_subplot(gs[:, 1])
+    ax_sidebar: plt.Axes = fig.add_subplot(gs[:, 2])
 
     # prepare resources histogram using graphs_resp_fitness helpers when available
     if len(abs_fitness_by_frame) > 0:
@@ -456,14 +459,14 @@ def setup_visualizer():
     except Exception:
         pass
     # place a dedicated info area inside the sidebar (top portion)
-    sp = ax_sidebar.get_position()
-    info_pos = (
+    sp: Bbox = ax_sidebar.get_position()
+    info_pos: tuple[float, float, float, float] = (
         sp.x0 + 0.03 * sp.width,
         sp.y0 + 0.45 * sp.height,
         0.94 * sp.width,
         0.5 * sp.height,
     )
-    ax_info = fig.add_axes(info_pos)
+    ax_info: plt.Axes = fig.add_axes(info_pos)
     ax_info.axis("off")
     ax_info.patch.set_facecolor("white")
     ax_info.patch.set_alpha(AX_INFO_ALPHA)
@@ -485,7 +488,7 @@ def setup_visualizer():
     # draw the environment line once and update it per-frame for animation
     env_idx, env_res = env_list[0]
     # draw environment line via density-aware helper (thicker where more individuals are)
-    ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=[])
+    ln_env: None | LineCollection = draw_env_with_density(ax_env, env_idx, env_res, positions=[])
     # individual marker in dark grey
     (marker,) = ax_env.plot([], [], marker="o", color="0.0", linestyle="")
     ax_env.set_xlim(env_idx.min(), env_idx.max())
@@ -501,12 +504,12 @@ def setup_visualizer():
     #            g_nn.draw_nn_graph(ax_nn, nn_index[key], output_val=0)
 
     # response curve (filled in per-frame/update using the selected individual's NN)
-    xs = np.linspace(0, max(env_global_max * 1.2, 1.0), 300)
+    xs: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(0, max(env_global_max * 1.2, 1.0), 300)
     # initialize response curve and input marker using helper if available
     # note: g_rf.init_response now returns nested tuples: ((std_lines, full_lines), vline, dot)
     try:
         ln_resp_nested, ln_input_vline, ln_input_dot = g_rf.init_response(ax_resp, xs)
-        ln_resp = ln_resp_nested
+        ln_resp: tuple[tuple[Line2D, Line2D, Line2D, Line2D, Line2D], tuple[Line2D, Line2D, Line2D, Line2D, Line2D]] = ln_resp_nested
     except Exception:
         # fallback to legacy single-line return
         ln_resp, ln_input_vline, ln_input_dot = g_rf.init_response(ax_resp, xs)
@@ -515,63 +518,63 @@ def setup_visualizer():
     ax_resp.set_ylabel("response")
 
     # slider (place at bottom of sidebar)
-    sp = ax_sidebar.get_position()
-    slider_pos = (
+    sp: Bbox = ax_sidebar.get_position()
+    slider_pos: tuple[float, float, float, float] = (
         sp.x0 + 0.03 * sp.width,
         sp.y0 + 0.04 * sp.height,
         0.94 * sp.width,
         0.06 * sp.height,
     )
-    ax_slider = fig.add_axes(slider_pos)
+    ax_slider: plt.Axes = fig.add_axes(slider_pos)
     slider = Slider(ax_slider, "timepoint", 0, n_frames - 1, valinit=0, valstep=1)
     ax_slider.set_facecolor(AX_SLIDER_FACECOLOR)
 
-    playing = {"val": False}
+    playing: dict[str, bool] = {"val": False}
     timer = None
 
     # response y-axis mode: False -> signed response (default)
     #                       True  -> absolute (non-negative)
-    resp_abs_mode = {"val": False}
+    resp_abs_mode: dict[str, bool] = {"val": False}
 
     # place buttons stacked inside the sidebar just above the slider
-    btn_w = 0.44 * sp.width
-    btn_h = 0.08 * sp.height
-    gap = 0.02 * sp.height
+    btn_w: float = 0.44 * sp.width
+    btn_h: float = 0.08 * sp.height
+    gap: float = 0.02 * sp.height
     # compute centers to arrange two-column layout for small buttons
-    left_x = sp.x0 + 0.06 * sp.width
-    right_x = sp.x0 + 0.5 * sp.width
+    left_x: float = sp.x0 + 0.06 * sp.width
+    right_x: float = sp.x0 + 0.5 * sp.width
     # top area start
-    top_y = sp.y0 + 0.16 * sp.height + 4 * (btn_h + gap)
+    top_y: float = sp.y0 + 0.16 * sp.height + 4 * (btn_h + gap)
     # Play button (full width)
-    play_pos = (sp.x0 + 0.03 * sp.width, top_y, 0.94 * sp.width, btn_h)
-    ax_play = fig.add_axes(play_pos)
+    play_pos: tuple[float, float, float, float] = (sp.x0 + 0.03 * sp.width, top_y, 0.94 * sp.width, btn_h)
+    ax_play: plt.Axes = fig.add_axes(play_pos)
     ax_play.set_zorder(50)
     btn = Button(ax_play, "Play")
     # play button created
     # Resp toggle beneath play
-    resp_pos = (sp.x0 + 0.03 * sp.width, top_y - (btn_h + gap), 0.94 * sp.width, btn_h)
-    ax_resp_toggle = fig.add_axes(resp_pos)
+    resp_pos: tuple[float, float, float, float] = (sp.x0 + 0.03 * sp.width, top_y - (btn_h + gap), 0.94 * sp.width, btn_h)
+    ax_resp_toggle: plt.Axes = fig.add_axes(resp_pos)
     ax_resp_toggle.set_zorder(50)
     btn_resp = Button(ax_resp_toggle, "Abs")
     # Prev/Next/Random row
-    row_y = top_y - 2 * (btn_h + gap)
-    ax_prev = fig.add_axes((left_x, row_y, btn_w, btn_h))
+    row_y: float = top_y - 2 * (btn_h + gap)
+    ax_prev: plt.Axes = fig.add_axes((left_x, row_y, btn_w, btn_h))
     ax_prev.set_zorder(50)
     btn_prev = Button(ax_prev, "<")
-    ax_next = fig.add_axes((right_x, row_y, btn_w, btn_h))
+    ax_next: plt.Axes = fig.add_axes((right_x, row_y, btn_w, btn_h))
     ax_next.set_zorder(50)
     btn_next = Button(ax_next, ">")
-    ax_rand = fig.add_axes((left_x, row_y - (btn_h + gap), btn_w, btn_h))
+    ax_rand: plt.Axes = fig.add_axes((left_x, row_y - (btn_h + gap), btn_w, btn_h))
     ax_rand.set_zorder(50)
     btn_rand = Button(ax_rand, "R")
     # Text box for ID entry below random
-    txt_pos = (
+    txt_pos: tuple[float, float, float, float] = (
         left_x,
         row_y - 2 * (btn_h + gap),
         btn_w + (0.5 * sp.width - btn_w),
         btn_h,
     )
-    ax_text = fig.add_axes(txt_pos)
+    ax_text: plt.Axes = fig.add_axes(txt_pos)
     ax_text.set_zorder(50)
     txtbox = TextBox(ax_text, "ID ")
 
@@ -586,7 +589,7 @@ def setup_visualizer():
 
     # create a GUI timer to advance frames when playing; don't start it here
     try:
-        timer = fig.canvas.new_timer(interval=int(round(1000.0 / 24.0)))
+        timer: TimerBase = fig.canvas.new_timer(interval=int(round(1000.0 / 24.0)))
         timer.add_callback(anim_step)
     except Exception:
         # some backends may not support timers; ignore
@@ -594,11 +597,11 @@ def setup_visualizer():
 
 
 # Callback implementations (defined early so setup_visualizer can bind them).
-def on_slider(val):
+def on_slider(val) -> None:
     update(val)
 
 
-def toggle(event):
+def toggle(event) -> None:
     playing["val"] = not playing["val"]
     try:
         if timer is not None:
@@ -614,7 +617,7 @@ def toggle(event):
     _safe_set_label(btn, "Pause" if playing.get("val", False) else "Play")
 
 
-def toggle_resp(event):
+def toggle_resp(event) -> None:
     resp_abs_mode["val"] = not resp_abs_mode["val"]
     _safe_set_label(btn_resp, "Abs" if resp_abs_mode.get("val", False) else "Signed")
     # force a redraw with current slider value
@@ -624,18 +627,18 @@ def toggle_resp(event):
         pass
 
 
-def on_text_submit(text):
+def on_text_submit(text) -> None:
     global selected_id
     try:
         val = int(text)
-        selected_id = val
+        selected_id: int = val
         update(getattr(slider, "val", 0))
     except ValueError:
         # ignore invalid integer input
         pass
 
 
-def step_selected(delta):
+def step_selected(delta) -> None:
     """Step selection through sorted all_ids by delta (-1 or 1).
 
     This remains available but Prev/Next buttons now prefer frame-local
@@ -647,10 +650,10 @@ def step_selected(delta):
         return
     try:
         # find current index in all_ids; if current selected_id not present, pick 0
-        idx = all_ids.index(selected_id) if selected_id in all_ids else 0
+        idx: int = all_ids.index(selected_id) if selected_id in all_ids else 0
     except Exception:
         idx = 0
-    idx = max(0, min(len(all_ids) - 1, idx + int(delta)))
+    idx: int = max(0, min(len(all_ids) - 1, idx + int(delta)))
     selected_id = all_ids[idx]
     if txtbox is not None:
         try:
@@ -663,7 +666,7 @@ def step_selected(delta):
         pass
 
 
-def step_selected_in_frame(delta):
+def step_selected_in_frame(delta) -> None:
     """Step selection through individuals present in the current frame only.
 
     This is used by the Prev/Next buttons so arrows cycle through "live"
@@ -700,17 +703,17 @@ def step_selected_in_frame(delta):
             pass
 
 
-def on_prev(event):
+def on_prev(event) -> None:
     # prefer stepping through individuals present in the current frame
     step_selected_in_frame(-1)
 
 
-def on_next(event):
+def on_next(event) -> None:
     # prefer stepping through individuals present in the current frame
     step_selected_in_frame(1)
 
 
-def on_rand(event):
+def on_rand(event) -> None:
     global selected_id
     # pick a random individual present in the current frame
     try:
@@ -729,7 +732,7 @@ def on_rand(event):
         pass
 
 
-def anim_step():
+def anim_step() -> None:
     # advance frames while playing; stop at final frame instead of wrapping
     if playing.get("val", False):
         try:
@@ -757,14 +760,14 @@ def anim_step():
 setup_visualizer()
 
 
-def update(frame_idx):
+def update(frame_idx) -> None:
     # only declare globals that are assigned in this function to satisfy linters
     global ln_env, ln_fitness_marker, abs_bar_patches
     i = int(frame_idx)
     # update called for frame i
     env_idx, env_res = env_list[i]
     ind = ind_list[i]
-    pop = len(ind.get("ids", []))
+    pop: int = len(ind.get("ids", []))
     # select chosen individual id in this frame (if present)
     if len(ind["ids"]) == 0:
         marker.set_data([], [])
@@ -809,11 +812,11 @@ def update(frame_idx):
             except Exception:
                 pass
         # draw new density-aware environment line using current individuals positions
-        ln_env = draw_env_with_density(ax_env, env_idx, env_res, positions=ind.get("pos", []))
+        ln_env: None | LineCollection = draw_env_with_density(ax_env, env_idx, env_res, positions=ind.get("pos", []))
     except Exception:
         # fallback to simple line plot
         try:
-            ln_env = ax_env.plot(env_idx, env_res, label="resource")
+            ln_env: list[Line2D] = ax_env.plot(env_idx, env_res, label="resource")
         except Exception:
             pass
     ax_env.set_ylim(0, max(env_global_max * 1.2, 1.0))
@@ -831,7 +834,7 @@ def update(frame_idx):
             key = str(selected_id)
             if key in nn_index:
                 ind_nn = nn_index[key]
-        use_nn = ind_nn
+        use_nn: Any | None = ind_nn
         if use_nn is None:
             ax_nn.clear()
             ax_nn.axis("off")
@@ -844,12 +847,12 @@ def update(frame_idx):
             )
         else:
             # compute local neighborhood input vector: left, center, right, occupancy
-            env_w = len(env_res)
+            env_w: int = len(env_res)
             left_idx = (pos - 1) % env_w
             right_idx = (pos + 1) % env_w
-            left_val = float(env_res[left_idx]) if left_idx < len(env_res) else 0.0
-            center_val = float(env_res[pos]) if pos is not None and pos < len(env_res) else 0.0
-            right_val = float(env_res[right_idx]) if right_idx < len(env_res) else 0.0
+            left_val: float = float(env_res[left_idx]) if left_idx < len(env_res) else 0.0
+            center_val: float = float(env_res[pos]) if pos is not None and pos < len(env_res) else 0.0
+            right_val: float = float(env_res[right_idx]) if right_idx < len(env_res) else 0.0
             # occupancy: count individuals at this position in current frame
             try:
                 occupancy = int(np.sum(ind.get("pos", []) == pos))
@@ -857,7 +860,7 @@ def update(frame_idx):
                 occupancy = 0
 
             # include individual's internal resources as an extra input to match C++ Individual::act
-            input_vec = [left_val, center_val, right_val, float(occupancy), float(resources)]
+            input_vec: list[float] = [left_val, center_val, right_val, float(occupancy), float(resources)]
 
             # compute local forward for display using the loaded nn (vector-aware)
             direction, magnitude = g_nn.forward_single_with_nn(input_vec, use_nn)
@@ -871,13 +874,13 @@ def update(frame_idx):
             #                  total resources of population in this frame
             try:
                 total_resources = float(np.sum(ind.get("resources", [])))
-                fitness = float(resources) / total_resources if total_resources > 0 else 0.0
+                fitness: float = float(resources) / total_resources if total_resources > 0 else 0.0
             except Exception:
                 fitness = 0.0
             # update resources histogram for this time-frame
             try:
                 cur_abs = abs_fitness_by_frame[i] if i < len(abs_fitness_by_frame) else np.array([])
-                new_abs_counts = (
+                new_abs_counts: np.ndarray[tuple[Any, ...], np.dtype[Any]] | np.ndarray[tuple[int], np.dtype[Any]] = (
                     np.histogram(cur_abs, bins=bins)[0] if cur_abs.size > 0 else np.zeros(len(bins) - 1, dtype=int)
                 )
                 abs_bar_patches, ln_fitness_marker = g_rf.update_fitness_axis(
@@ -912,17 +915,17 @@ def update(frame_idx):
                     if rel_arr.size > 0:
                         # use the individual's relative fitness value from rel_arr when possible
                         try:
-                            indiv_rel = float(rel_arr[sel_index]) if sel_index < len(rel_arr) else float(fitness)
+                            indiv_rel: float = float(rel_arr[sel_index]) if sel_index < len(rel_arr) else float(fitness)
                         except Exception:
                             indiv_rel = float(fitness)
                         less = float(np.sum(rel_arr < indiv_rel))
                         equal = float(np.sum(rel_arr == indiv_rel))
-                        fitness_rank_pct = 100.0 * (less + 0.5 * equal) / float(len(rel_arr))
+                        fitness_rank_pct: float = 100.0 * (less + 0.5 * equal) / float(len(rel_arr))
             except Exception:
                 fitness_rank_pct = None
 
             # show center value as the local_input in the info box
-            local_input_val = center_val if pos is not None else None
+            local_input_val: float | None = center_val if pos is not None else None
 
             # render info box via graphs_nn if available
             try:
@@ -962,11 +965,11 @@ def update(frame_idx):
         # prepare constant neighbor and occupancy values
         # ensure local variables are defined even if NN is missing
         try:
-            left_const = left_val
+            left_const: float = left_val
         except NameError:
             left_const = 0.0
         try:
-            right_const = right_val
+            right_const: float = right_val
         except NameError:
             right_const = 0.0
         try:
@@ -1054,19 +1057,19 @@ def update(frame_idx):
             except Exception:
                 return np.full_like(xs, np.nan, dtype=float)
 
-        ys_peak_a = _ensure_arr(ys_peak)
-        ys_slope_r_a = _ensure_arr(ys_slope_r)
-        ys_slope_l_a = _ensure_arr(ys_slope_l)
-        ys_sink_a = _ensure_arr(ys_sink)
-        ys_flat_a = _ensure_arr(ys_flat)
+        ys_peak_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_peak)
+        ys_slope_r_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_slope_r)
+        ys_slope_l_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_slope_l)
+        ys_sink_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_sink)
+        ys_flat_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_flat)
 
-        ys_peak_full_a = _ensure_arr(ys_peak_full)
-        ys_slope_r_full_a = _ensure_arr(ys_slope_r_full)
-        ys_slope_l_full_a = _ensure_arr(ys_slope_l_full)
-        ys_sink_full_a = _ensure_arr(ys_sink_full)
-        ys_flat_full_a = _ensure_arr(ys_flat_full)
+        ys_peak_full_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_peak_full)
+        ys_slope_r_full_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_slope_r_full)
+        ys_slope_l_full_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_slope_l_full)
+        ys_sink_full_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_sink_full)
+        ys_flat_full_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = _ensure_arr(ys_flat_full)
 
-        ys_display_dict = {
+        ys_display_dict: dict[str, ndarray[tuple[Any, ...], dtype[Any]]] = {
             "peak": np.abs(ys_peak_a) if resp_abs else ys_peak_a,
             "slope_r": np.abs(ys_slope_r_a) if resp_abs else ys_slope_r_a,
             "slope_l": np.abs(ys_slope_l_a) if resp_abs else ys_slope_l_a,
@@ -1099,8 +1102,8 @@ def update(frame_idx):
         if fallback_allowed:
             ys = g_nn.compute_nn_response_for(xs, use_nn)
             resp_abs_fallback = bool(resp_abs_mode.get("val", False))
-            ys_a = np.asarray(ys, dtype=float)
-            ys_display_dict = {
+            ys_a: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.asarray(ys, dtype=float)
+            ys_display_dict: dict[str, ndarray[tuple[Any, ...], dtype[Any]]] = {
                 "peak": np.abs(ys_a) if resp_abs_fallback else ys_a,
                 "slope_r": np.abs(ys_a) if resp_abs_fallback else ys_a,
                 "slope_l": np.abs(ys_a) if resp_abs_fallback else ys_a,
@@ -1114,8 +1117,8 @@ def update(frame_idx):
                 "flat_full": np.abs(ys_a) if resp_abs_fallback else ys_a,
             }
         else:
-            nan_arr = np.full_like(xs, np.nan)
-            ys_display_dict = {
+            nan_arr: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.full_like(xs, np.nan)
+            ys_display_dict: dict[str, ndarray[tuple[Any, ...], dtype[float64]]] = {
                 "peak": nan_arr,
                 "slope_r": nan_arr,
                 "slope_l": nan_arr,
@@ -1132,7 +1135,7 @@ def update(frame_idx):
     try:
         n_nodes = 0
         if use_nn is not None:
-            n_nodes = max(len(use_nn.get("weights", [])), len(use_nn.get("biases", [])))
+            n_nodes: int = max(len(use_nn.get("weights", [])), len(use_nn.get("biases", [])))
         curr_x = float(env_res[pos])
         g_rf.update_response_axis(
             ax_resp,
@@ -1151,13 +1154,13 @@ def update(frame_idx):
             # robustly set y-data on possibly-nested line objects
             try:
                 # choose a representative array to fall back to
-                rep = ys_display_dict.get("peak", None)
+                rep: np.ndarray[tuple[Any, ...], np.dtype[Any]] | None | np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = ys_display_dict.get("peak", None)
                 if rep is None:
-                    rep = next(iter(ys_display_dict.values()))
+                    rep: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = next(iter(ys_display_dict.values()))
                 try:
-                    rep_arr = np.asarray(rep, dtype=float)
+                    rep_arr: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.asarray(rep, dtype=float)
                 except Exception:
-                    rep_arr = np.full_like(xs, np.nan, dtype=float)
+                    rep_arr: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.full_like(xs, np.nan, dtype=float)
 
                 if isinstance(ln_resp, (list, tuple, np.ndarray)):
                     # iterate over the first five scenario lines and set each one
@@ -1180,12 +1183,12 @@ def update(frame_idx):
         try:
             curr_x = float(env_res[pos])
             ln_input_vline.set_xdata([curr_x, curr_x])
-            rep = ys_display_dict.get("peak", None) if isinstance(ys_display_dict, dict) else ys_display_dict
+            rep: np.ndarray[tuple[Any, ...], np.dtype[Any]] | None | np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = ys_display_dict.get("peak", None) if isinstance(ys_display_dict, dict) else ys_display_dict
             # ensure rep is array-like for numpy.interp and has float dtype
             try:
                 rep_arr = np.asarray(rep, dtype=float) if rep is not None else np.full_like(xs, np.nan, dtype=float)
             except Exception:
-                rep_arr = np.full_like(xs, np.nan, dtype=float)
+                rep_arr: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.full_like(xs, np.nan, dtype=float)
             try:
                 yval = float(np.interp(curr_x, xs, rep_arr))
             except Exception:
@@ -1198,9 +1201,9 @@ def update(frame_idx):
             pass
         n_nodes = 0
         if use_nn is not None:
-            n_nodes = max(len(use_nn.get("weights", [])), len(use_nn.get("biases", [])))
+            n_nodes: int = max(len(use_nn.get("weights", [])), len(use_nn.get("biases", [])))
         y_margin = 0.1
-        y_lim = max(1.0, n_nodes)
+        y_lim: float = max(1.0, n_nodes)
         if resp_abs_mode.get("val", False):
             ax_resp.set_ylim(0 - y_margin, y_lim + y_margin)
         else:
@@ -1214,15 +1217,15 @@ def update(frame_idx):
 update(0)
 # Save screenshot or show depending on early-detected headless flag.
 if explicit_headless:
-    out_path = os.path.join(base, "screenshot.png")
+    out_path: str = os.path.join(base, "screenshot.png")
     try:
         fig.savefig(out_path, dpi=150)
         print("Saved screenshot to", out_path)
-    except Exception as ex:
+    except Exception as ex: Exception:
         print("Failed saving screenshot:", ex)
 else:
     try:
         plt.show()
-    except Exception as ex:
+    except Exception as ex: Exception:
         print("plt.show() raised an exception:", ex)
         print("If you intended a headless run, re-run with --headless")
