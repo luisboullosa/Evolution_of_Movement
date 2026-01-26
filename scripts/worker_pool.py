@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 from _thread import lock
+from typing import IO, Iterable, Optional
+
 import csv
 import os
 import queue
 import subprocess
 import threading
 import time
-from collections.abc import Iterable
 
 
-def _parse_extinction(output_text) -> None | int:
-    extinct = None
+def _parse_extinction(output_text) -> Optional[int]:
+    extinct: Optional[int] = None
     for line in (output_text or "").splitlines():
         if "population extinct at t=" in line:
             try:
@@ -62,8 +63,8 @@ def run_param_sweep(
 
     # open CSV file once
     os.makedirs(os.path.dirname(outpath) or ".", exist_ok=True)
-    csvf: os.IO[csv.Any] = open(outpath, writer_mode, newline="", encoding="utf-8")
-    writer: csv.Writer = csv.writer(csvf)
+    csvf: IO[str] = open(outpath, writer_mode, newline="", encoding="utf-8")
+    writer = csv.writer(csvf)
     if writer_mode == "w":
         writer.writerow(header)
         csvf.flush()
@@ -79,7 +80,7 @@ def run_param_sweep(
             job = (i, row)
             cmd = cmd_builder(job)
             start: float = time.time()
-            proc: os.Popen[str] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            proc: subprocess.Popen[str] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             with active_lock:
                 active_procs.add(proc)
             try:
@@ -156,24 +157,22 @@ def run_param_sweep(
             # build csv row using flexible result_row_builder
             csv_row = None
             if callable(result_row_builder):
-                exc_val: None | int = _parse_extinction(out_text)
-                # try common signatures, swallow and log exceptions so threads don't die
-                try:
-                    csv_row: object = result_row_builder(job, out_text)
-                except Exception:
+                exc_val: Optional[int] = _parse_extinction(out_text)
+                candidates = [
+                    lambda: result_row_builder(job, out_text),
+                    lambda: result_row_builder(job, exc_val, out_text),
+                    lambda: result_row_builder(row, out_text),
+                    lambda: result_row_builder(row, out_text, exc_val),
+                    lambda: result_row_builder(job),
+                ]
+                for candidate in candidates:
                     try:
-                        csv_row: object = result_row_builder(job, exc_val, out_text)
+                        candidate_val = candidate()
                     except Exception:
-                        try:
-                            csv_row: object = result_row_builder(row, out_text)
-                        except Exception:
-                            try:
-                                csv_row: object = result_row_builder(row, out_text, exc_val)
-                            except Exception:
-                                try:
-                                    csv_row: object = result_row_builder(job)
-                                except Exception:
-                                    csv_row = None
+                        continue
+                    if candidate_val is not None:
+                        csv_row = candidate_val
+                        break
 
             if csv_row is None:
                 # fallback: flatten row
