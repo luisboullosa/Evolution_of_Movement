@@ -183,13 +183,13 @@ def run_param_sweep(
 
             # normalize csv_row to an iterable of fields (avoid passing non-iterable or string)
             if not isinstance(csv_row, Iterable) or isinstance(csv_row, (str, bytes)):
-                csv_row: list[object | str | bytes] = [csv_row]
+                csv_row_list: list[object | str | bytes] = [csv_row]
             else:
-                csv_row = list(csv_row)
+                csv_row_list = list(csv_row)
 
             # write row safely
             with writer_lock:
-                writer.writerow(csv_row)
+                writer.writerow(csv_row_list)
                 csvf.flush()
                 stats["completed"] += 1
                 stats["last_params"] = str(row)
@@ -198,7 +198,7 @@ def run_param_sweep(
             # call progress callback
             try:
                 if callable(progress_callback):
-                    progress_callback(stats["completed"], total, csv_row, job)
+                    progress_callback(stats["completed"], total, csv_row_list, job)
             except Exception:
                 pass
 
