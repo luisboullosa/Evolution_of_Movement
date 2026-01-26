@@ -155,7 +155,7 @@ def run_param_sweep(
                     pass
 
             # build csv row using flexible result_row_builder
-            csv_row: Iterable[object | str | bytes] | None = None
+            csv_row: object | None = None
             if callable(result_row_builder):
                 rrb: Callable[..., object | None] = cast(Callable[..., object | None], result_row_builder)
                 exc_val: Optional[int] = _parse_extinction(out_text)
