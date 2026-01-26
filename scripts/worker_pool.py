@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from _thread import lock
-from _thread import lock
 import csv
 import os
 import queue
@@ -53,7 +52,7 @@ def run_param_sweep(
         return
 
     job_q = queue.Queue()
-    for idx: int in range(total):
+    for idx in range(total):
         job_q.put(idx)
 
     writer_lock: lock = threading.Lock()
@@ -207,7 +206,7 @@ def run_param_sweep(
 
     # start threads
     threads = []
-    for tid: int in range(min(workers, total)):
+    for tid in range(min(workers, total)):
         t = threading.Thread(target=worker, args=(tid,), daemon=True)
         t.start()
         threads.append(t)

@@ -21,6 +21,7 @@ import random
 from subprocess import CompletedProcess
 import tempfile
 import time
+import warnings
 
 from numpy import dtype, ndarray
 
@@ -60,6 +61,23 @@ def _make_param_tuple(
         float(resource_scale),
         int(grid_width),
     )
+
+
+def _to_param_tuple(raw) -> ParamTuple:
+    if isinstance(raw, dict):
+        return _make_param_tuple(
+            raw["movement_cost_factor"],
+            raw["maintenance_cost_per_node"],
+            raw["reproduction_threshold"],
+            raw["reproduction_cost"],
+            raw["env_time_speed"],
+            raw["death_risk"],
+            raw["resource_scale"],
+            raw["grid_width"],
+        )
+    if isinstance(raw, (list, tuple)) and len(raw) == 8:
+        return _make_param_tuple(*raw)
+    raise ValueError(f"Invalid parameter tuple: {raw!r}")
 
 
 parser = argparse.ArgumentParser()
@@ -299,7 +317,13 @@ else:
                 )
                 raise SystemExit(1)
 
-            pairs = [tuple(p) for p in jobs_list]
+            recovered: list[ParamTuple] = []
+            for raw in jobs_list:
+                try:
+                    recovered.append(_to_param_tuple(raw))
+                except Exception:
+                    continue
+            pairs = recovered
             print(f"Resuming using jobs file: {jobs_state_path}; total jobs = {len(pairs)}")
         except SystemExit:
             raise
@@ -1259,7 +1283,12 @@ def plot_matrix_of_matrices(results_csv, out_dir) -> None:
         fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6)
         fig.suptitle(opts.get("title", resp_key))
         out_path: str = os.path.join(out_dir, f"heatmap_{resp_key}.png")
-        fig.tight_layout(rect=(0, 0.03, 1, 0.95))
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="This figure includes Axes that are not compatible with tight_layout",
+            )
+            fig.tight_layout(rect=(0, 0.03, 1, 0.95))
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
         print(f"Wrote heatmap: {out_path}")
