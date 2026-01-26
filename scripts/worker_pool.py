@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from _thread import lock
-from typing import IO, Iterable, Optional
+from typing import Callable, IO, Iterable, Optional, cast
 
 import csv
 import os
@@ -16,7 +16,7 @@ def _parse_extinction(output_text) -> Optional[int]:
         if "population extinct at t=" in line:
             try:
                 t = int(line.split("population extinct at t=")[1].split(",")[0])
-                extinct: int = t
+                extinct = t
             except Exception:
                 extinct = -1
     return extinct
@@ -155,15 +155,16 @@ def run_param_sweep(
                     pass
 
             # build csv row using flexible result_row_builder
-            csv_row = None
+            csv_row: Iterable[object | str | bytes] | None = None
             if callable(result_row_builder):
+                rrb: Callable[..., object | None] = cast(Callable[..., object | None], result_row_builder)
                 exc_val: Optional[int] = _parse_extinction(out_text)
                 candidates = [
-                    lambda: result_row_builder(job, out_text),
-                    lambda: result_row_builder(job, exc_val, out_text),
-                    lambda: result_row_builder(row, out_text),
-                    lambda: result_row_builder(row, out_text, exc_val),
-                    lambda: result_row_builder(job),
+                    lambda: rrb(job, out_text),
+                    lambda: rrb(job, exc_val, out_text),
+                    lambda: rrb(row, out_text),
+                    lambda: rrb(row, out_text, exc_val),
+                    lambda: rrb(job),
                 ]
                 for candidate in candidates:
                     try:
