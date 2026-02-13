@@ -52,4 +52,3 @@ webviewer/**/*.jsonl
 webviewer/sim*/
 output/**/sim*/
 rust/webviewer/sim*/
-rust/src/config.rs
