@@ -6,6 +6,8 @@ use evo_movement_rust::{
     hex_grid::{HexCoord, HexGrid},
     individual::Individual,
     neural_network::NeuralNetwork,
+    nn_viz,
+    save_state::SimulationState,
     simulation::Simulation,
 };
 use rand::Rng;
@@ -31,6 +33,7 @@ struct PetriDish {
     simulation: Simulation,
     cladogram: Cladogram,
     name: String,
+    timestep: i32,
 }
 
 impl PetriDish {
@@ -45,6 +48,7 @@ impl PetriDish {
             simulation,
             cladogram,
             name: format!("Dish {}", id),
+            timestep: 0,
         }
     }
 
@@ -55,12 +59,35 @@ impl PetriDish {
         // Generate unique colors for each founder
         for i in 0..count {
             let color = Self::generate_color(i);
-            let nn = NeuralNetwork::new(
+            let mut nn = NeuralNetwork::new(
                 self.simulation.config.nn_nodes.max(0) as usize,
                 self.simulation.config.nn_inputs.max(0) as usize,
                 self.simulation.config.nn_layers,
                 self.simulation.config.nn_nodes2.max(0) as usize,
             );
+
+            // Apply initial mutations if configured
+            if self.simulation.config.radiate > 0 {
+                use rand_distr::{Cauchy, Distribution};
+                let cauchy = Cauchy::new(0.0, self.simulation.config.mutation_sigma).unwrap();
+                let mutation_rate = self.simulation.config.mutation_rate;
+                let events = self.simulation.config.radiate as usize;
+
+                for w in nn.weights.iter_mut() {
+                    for _ in 0..events {
+                        if rng.gen::<f64>() < mutation_rate {
+                            *w += cauchy.sample(&mut rng);
+                        }
+                    }
+                }
+                for w in nn.weights_multi.iter_mut() {
+                    for _ in 0..events {
+                        if rng.gen::<f64>() < mutation_rate {
+                            *w += cauchy.sample(&mut rng);
+                        }
+                    }
+                }
+            }
 
             let pos = rng.gen_range(0..self.hex_grid.width * self.hex_grid.height);
             let id = self.simulation.next_id;
@@ -76,6 +103,64 @@ impl PetriDish {
                 cell.individuals.push(self.simulation.individuals.len() - 1);
             }
         }
+
+        // Initialize environment resources
+        self.update_resource_grid();
+    }
+
+    fn update_resource_grid(&mut self) {
+        // Update hex grid cells with environment resources
+        for r in 0..self.hex_grid.height {
+            for q in 0..self.hex_grid.width {
+                let flat_idx = r * self.hex_grid.width + q;
+                if flat_idx < self.simulation.env.resources.len() {
+                    let resource = self.simulation.env.resources[flat_idx];
+                    let coord = HexCoord::new(q as i32, r as i32);
+                    if let Some(cell) = self.hex_grid.get_cell_mut(coord) {
+                        cell.resource_level = resource;
+                    }
+                }
+            }
+        }
+    }
+
+    fn step(&mut self) {
+        // Step the simulation
+        // Note: The actual simulation stepping logic would need to be
+        // integrated here. For now, we'll implement a simplified version.
+        
+        // Clear individual positions in hex grid
+        for cell in self.hex_grid.cells.values_mut() {
+            cell.individuals.clear();
+        }
+
+        // Advance time
+        self.timestep += 1;
+        self.cladogram.advance_time();
+
+        // Update environment (time-varying)
+        self.simulation.env.step(
+            self.simulation.config.seed as u64,
+            self.simulation.config.env_time_speed,
+            self.simulation.config.env_time_amplitude,
+            self.simulation.config.env_perlin_spatial_scale,
+            self.simulation.config.env_perlin_time_scale,
+            self.simulation.config.resource_scale,
+        );
+
+        // Update individuals and rebuild hex grid positions
+        for (idx, ind) in self.simulation.individuals.iter_mut().enumerate() {
+            ind.age += 1;
+            
+            // Add back to hex grid
+            let coord = HexCoord::from_flat(ind.position, self.hex_grid.width);
+            if let Some(cell) = self.hex_grid.get_cell_mut(coord) {
+                cell.individuals.push(idx);
+            }
+        }
+
+        // Update resource display
+        self.update_resource_grid();
     }
 
     fn generate_color(index: usize) -> [u8; 3] {
@@ -163,10 +248,119 @@ impl EvolutionApp {
     fn step_simulation(&mut self) {
         if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
             for _ in 0..self.timesteps_per_frame {
-                // Update simulation logic here
-                // For now, just advance time
-                dish.cladogram.advance_time();
+                dish.step();
             }
+        }
+    }
+
+    fn restart_simulation(&mut self) {
+        if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
+            // Clear all individuals
+            dish.simulation.individuals.clear();
+            dish.cladogram = Cladogram::new();
+            dish.timestep = 0;
+            
+            // Clear hex grid
+            for cell in dish.hex_grid.cells.values_mut() {
+                cell.individuals.clear();
+            }
+            
+            // Reinitialize
+            dish.init_population(self.config.initial_population as usize);
+        }
+    }
+
+    fn save_state(&self, filename: &str) {
+        if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+            let state = SimulationState::from_individuals_and_grid(
+                &dish.simulation.individuals,
+                &dish.hex_grid,
+                &dish.cladogram,
+                &dish.simulation.config,
+                dish.timestep,
+                dish.simulation.next_id,
+            );
+
+            match state.save_to_file(filename) {
+                Ok(_) => println!("State saved to {}", filename),
+                Err(e) => eprintln!("Failed to save state: {}", e),
+            }
+        }
+    }
+
+    fn load_state(&mut self, filename: &str) {
+        match SimulationState::load_from_file(filename) {
+            Ok(state) => {
+                // Reconstruct the petri dish from the saved state
+                let dish_id = self.selected_dish;
+                let mut dish = PetriDish::new(
+                    dish_id,
+                    state.grid_width,
+                    state.grid_height,
+                    state.hex_size,
+                    state.config.clone(),
+                );
+
+                dish.timestep = state.timestep;
+                dish.simulation.next_id = state.next_id;
+
+                // Reconstruct individuals
+                for ind_state in state.individuals {
+                    let mut nn = NeuralNetwork::new(
+                        ind_state.nn_nodes,
+                        ind_state.nn_inputs,
+                        ind_state.nn_layers,
+                        ind_state.nn_nodes2,
+                    );
+                    nn.weights = ind_state.nn_weights;
+                    nn.weights_multi = ind_state.nn_weights_multi;
+                    nn.biases = ind_state.nn_biases;
+                    nn.weights2 = ind_state.nn_weights2;
+                    nn.biases2 = ind_state.nn_biases2;
+
+                    let mut ind = Individual::new_with_color(
+                        nn,
+                        ind_state.position,
+                        ind_state.id,
+                        ind_state.lineage_color,
+                    );
+                    ind.resources = ind_state.resources;
+                    ind.age = ind_state.age;
+                    ind.parent_id = ind_state.parent_id;
+
+                    dish.simulation.individuals.push(ind);
+                }
+
+                // Reconstruct cladogram
+                for node_state in state.cladogram_nodes {
+                    use evo_movement_rust::cladogram::LineageNode;
+                    dish.cladogram.nodes.insert(
+                        node_state.id,
+                        LineageNode {
+                            id: node_state.id,
+                            parent_id: node_state.parent_id,
+                            children: node_state.children,
+                            birth_time: node_state.birth_time,
+                            death_time: node_state.death_time,
+                            color: node_state.color,
+                        },
+                    );
+                }
+                dish.cladogram.current_time = state.timestep;
+
+                // Reconstruct hex cells
+                for ((q, r), cell_state) in state.hex_cells {
+                    let coord = HexCoord::new(q, r);
+                    if let Some(cell) = dish.hex_grid.get_cell_mut(coord) {
+                        cell.resource_level = cell_state.resource_level;
+                        cell.individuals = cell_state.individual_indices;
+                    }
+                }
+
+                self.petri_dishes[self.selected_dish] = dish;
+                println!("State loaded from {}", filename);
+            }
+            Err(e) => eprintln!("Failed to load state: {}", e),
         }
     }
 }
@@ -178,13 +372,13 @@ impl eframe::App for EvolutionApp {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New Simulation").clicked() {
-                        // Reset simulation
+                        self.restart_simulation();
                     }
                     if ui.button("Save State").clicked() {
-                        // Implement save
+                        self.save_state("simulation_state.json");
                     }
                     if ui.button("Load State").clicked() {
-                        // Implement load
+                        self.load_state("simulation_state.json");
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
@@ -215,7 +409,7 @@ impl eframe::App for EvolutionApp {
                 }
 
                 if ui.button("🔄 Restart").clicked() {
-                    // Implement restart
+                    self.restart_simulation();
                 }
 
                 ui.separator();
@@ -262,7 +456,7 @@ impl eframe::App for EvolutionApp {
             if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                 ui.heading("Statistics");
                 ui.label(format!("Individuals: {}", dish.simulation.individuals.len()));
-                ui.label(format!("Generation: {}", dish.cladogram.current_time));
+                ui.label(format!("Timestep: {}", dish.timestep));
 
                 if let Some(idx) = self.selected_individual {
                     if let Some(ind) = dish.simulation.individuals.get(idx) {
@@ -282,15 +476,58 @@ impl eframe::App for EvolutionApp {
             egui::SidePanel::right("viz_panel").min_width(400.0).show(ctx, |ui| {
                 if self.show_nn_diagram {
                     ui.heading("Neural Network");
-                    ui.label("NN visualization will be rendered here");
-                    // TODO: Implement NN visualization
+                    
+                    if let Some(idx) = self.selected_individual {
+                        if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+                            if let Some(ind) = dish.simulation.individuals.get(idx) {
+                                let available = ui.available_size();
+                                let rect = egui::Rect::from_min_size(
+                                    ui.cursor().min,
+                                    egui::vec2(available.x - 20.0, 300.0),
+                                );
+                                
+                                let (response, painter) = ui.allocate_painter(
+                                    rect.size(),
+                                    egui::Sense::hover(),
+                                );
+                                
+                                nn_viz::draw_neural_network(ui, &ind.nn, &painter, response.rect);
+                                
+                                ui.add_space(310.0);
+                                
+                                // Show some weight statistics
+                                ui.separator();
+                                ui.label("Weight Statistics:");
+                                let (nodes, inputs, nodes2, layers) = ind.nn.shape();
+                                ui.label(format!("Architecture: {}x{} (layers: {})", nodes, inputs, layers));
+                                if nodes2 > 0 {
+                                    ui.label(format!("Hidden2: {}", nodes2));
+                                }
+                            } else {
+                                ui.label("Select an individual to see its neural network");
+                            }
+                        }
+                    } else {
+                        ui.label("Select an individual to see its neural network");
+                    }
                 }
 
                 if self.show_cladogram {
                     ui.separator();
                     ui.heading("Cladogram");
-                    ui.label("Cladogram will be rendered here");
-                    // TODO: Implement cladogram visualization
+                    ui.label("Phylogenetic tree visualization");
+                    
+                    if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+                        ui.label(format!("Total nodes: {}", dish.cladogram.nodes.len()));
+                        
+                        if let Some(idx) = self.selected_individual {
+                            if let Some(ind) = dish.simulation.individuals.get(idx) {
+                                let lineage = dish.cladogram.get_lineage_path(ind.id);
+                                ui.label(format!("Lineage depth: {}", lineage.len()));
+                                ui.label(format!("Ancestor IDs: {:?}", &lineage[..lineage.len().min(10)]));
+                            }
+                        }
+                    }
                 }
             });
         }
