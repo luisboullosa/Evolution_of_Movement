@@ -69,6 +69,7 @@ pub fn draw_neural_network(
         for (i, &hidden_pos) in hidden_positions.iter().enumerate() {
             for (j, &hidden2_pos) in hidden2_positions.iter().enumerate() {
                 if i < hidden_count && j < nn.nodes2 {
+                    // weights2 are stored in row-major order: idx = i * nodes2 + j
                     let weight_idx = i * nn.nodes2 + j;
                     if weight_idx < nn.weights2.len() {
                         let weight = nn.weights2[weight_idx];
@@ -91,8 +92,8 @@ pub fn draw_neural_network(
         &hidden_positions
     };
 
-    for (i, &last_pos) in last_layer_positions.iter().enumerate() {
-        // For simplicity, assume uniform connection from last layer to output
+    for &last_pos in last_layer_positions.iter() {
+        // Simplified: draw uniform connections to output
         painter.line_segment(
             [last_pos, output_pos],
             egui::Stroke::new(1.0, egui::Color32::GRAY),

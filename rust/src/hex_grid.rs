@@ -89,14 +89,15 @@ pub struct HexGrid {
 #[derive(Debug, Clone)]
 pub struct HexCell {
     pub resource_level: f64,
-    pub individuals: Vec<usize>, // indices of individuals at this location
+    /// Indices of individuals at this location (into the simulation's individuals Vec)
+    pub individual_indices: Vec<usize>,
 }
 
 impl HexCell {
     pub fn new() -> Self {
         Self {
             resource_level: 0.0,
-            individuals: Vec::new(),
+            individual_indices: Vec::new(),
         }
     }
 }

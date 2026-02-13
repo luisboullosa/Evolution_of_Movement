@@ -55,6 +55,7 @@ pub struct CladogramNodeState {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HexCellState {
     pub resource_level: f64,
+    /// Indices into the individuals Vec (not IDs)
     pub individual_indices: Vec<usize>,
 }
 
@@ -119,7 +120,7 @@ impl SimulationState {
                 (coord.q, coord.r),
                 HexCellState {
                     resource_level: cell.resource_level,
-                    individual_indices: cell.individuals.clone(),
+                    individual_indices: cell.individual_indices.clone(),
                 },
             );
         }

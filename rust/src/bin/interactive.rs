@@ -100,7 +100,7 @@ impl PetriDish {
             // Add to hex grid
             let coord = HexCoord::from_flat(pos, self.hex_grid.width);
             if let Some(cell) = self.hex_grid.get_cell_mut(coord) {
-                cell.individuals.push(self.simulation.individuals.len() - 1);
+                cell.individual_indices.push(self.simulation.individuals.len() - 1);
             }
         }
 
@@ -131,7 +131,7 @@ impl PetriDish {
         
         // Clear individual positions in hex grid
         for cell in self.hex_grid.cells.values_mut() {
-            cell.individuals.clear();
+            cell.individual_indices.clear();
         }
 
         // Advance time
@@ -155,7 +155,7 @@ impl PetriDish {
             // Add back to hex grid
             let coord = HexCoord::from_flat(ind.position, self.hex_grid.width);
             if let Some(cell) = self.hex_grid.get_cell_mut(coord) {
-                cell.individuals.push(idx);
+                cell.individual_indices.push(idx);
             }
         }
 
@@ -262,7 +262,7 @@ impl EvolutionApp {
             
             // Clear hex grid
             for cell in dish.hex_grid.cells.values_mut() {
-                cell.individuals.clear();
+                cell.individual_indices.clear();
             }
             
             // Reinitialize
@@ -353,7 +353,7 @@ impl EvolutionApp {
                     let coord = HexCoord::new(q, r);
                     if let Some(cell) = dish.hex_grid.get_cell_mut(coord) {
                         cell.resource_level = cell_state.resource_level;
-                        cell.individuals = cell_state.individual_indices;
+                        cell.individual_indices = cell_state.individual_indices;
                     }
                 }
 
@@ -584,7 +584,7 @@ impl eframe::App for EvolutionApp {
                     ));
 
                     // Draw individuals
-                    for &ind_idx in &cell.individuals {
+                    for &ind_idx in &cell.individual_indices {
                         if let Some(ind) = individuals.get(ind_idx) {
                             let color = egui::Color32::from_rgb(
                                 ind.lineage_color[0],
@@ -622,8 +622,8 @@ impl eframe::App for EvolutionApp {
             if let Some(coord) = clicked_hex {
                 if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                     if let Some(cell) = dish.hex_grid.get_cell(coord) {
-                        if !cell.individuals.is_empty() {
-                            self.selected_individual = Some(cell.individuals[0]);
+                        if !cell.individual_indices.is_empty() {
+                            self.selected_individual = Some(cell.individual_indices[0]);
                         }
                     }
                 }

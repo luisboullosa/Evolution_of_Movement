@@ -4,7 +4,7 @@ Minimal C++ simulation of evolving movement in digital individuals.
 
 ## Interactive Viewer (New!)
 
-An interactive, GPU-accelerated visualization system for exploring evolution in real-time:
+An interactive visualization system for exploring evolution in real-time:
 
 ```bash
 cd rust
@@ -18,6 +18,7 @@ Features:
 - **Save/load functionality** for preserving states
 - **Cladogram tracking** for phylogenetic analysis
 - **Light-based resources** with dynamic environments
+- **GPU support planned** for future acceleration with large populations
 
 See [rust/INTERACTIVE_VIEWER.md](rust/INTERACTIVE_VIEWER.md) for detailed documentation.
 

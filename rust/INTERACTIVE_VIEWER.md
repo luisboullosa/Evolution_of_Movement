@@ -1,6 +1,6 @@
 # Interactive Evolution Simulation Viewer
 
-A real-time, GPU-accelerated interactive visualization of evolving digital organisms in a hexagonal grid environment.
+A real-time interactive visualization of evolving digital organisms in a hexagonal grid environment.
 
 ## Features
 
@@ -106,7 +106,7 @@ config.nn_layers = 2;              // Network depth
 ### Technology Stack
 - **Rust**: Core simulation and logic
 - **egui/eframe**: Cross-platform GUI framework
-- **wgpu**: GPU compute support (planned for acceleration)
+- **wgpu**: GPU compute support (planned for future acceleration)
 - **serde**: Serialization for save/load
 
 ### Key Modules
@@ -119,9 +119,10 @@ config.nn_layers = 2;              // Network depth
 - `interactive.rs`: Main GUI application
 
 ### Performance
+- Current: CPU-based simulation
 - Target: 60 timesteps per second
 - Adjustable via speed multiplier (up to 10x = 600 steps/sec)
-- Future: GPU acceleration for large populations
+- Future: GPU acceleration for large populations using wgpu
 
 ## Memory Safety
 All code is written in Rust, providing memory safety guarantees through:
@@ -132,7 +133,7 @@ All code is written in Rust, providing memory safety guarantees through:
 
 ## Future Enhancements
 - [ ] Drag-and-drop individuals between petri dishes
-- [ ] GPU-accelerated simulation for large populations
+- [ ] GPU-accelerated simulation using wgpu for large populations
 - [ ] Full phylogenetic tree visualization with branch rendering
 - [ ] File picker dialogs for save/load
 - [ ] Multiple selection and batch operations
