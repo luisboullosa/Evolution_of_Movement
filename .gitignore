@@ -42,6 +42,10 @@ Thumbs.db
 *.tsv
 *.jsonl
 
+# Simulation state files
+simulation_state.json
+**/simulation_state*.json
+
 # ignore tsv/jsonl under output and webviewer sim folders
 output/**/*.tsv
 output/**/*.jsonl
