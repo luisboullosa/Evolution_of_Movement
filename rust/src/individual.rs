@@ -9,6 +9,8 @@ pub struct Individual {
     pub position: usize,
     pub id: i32,
     pub age: i32,
+    pub lineage_color: [u8; 3], // RGB color inherited from founder
+    pub parent_id: Option<i32>,  // Track parent for cladogram
 }
 
 impl Individual {
@@ -26,6 +28,20 @@ impl Individual {
             position: pos,
             id,
             age: 0,
+            lineage_color: [128, 128, 128], // default gray
+            parent_id: None,
+        }
+    }
+
+    pub fn new_with_color(nn: NeuralNetwork, pos: usize, id: i32, color: [u8; 3]) -> Self {
+        Individual {
+            nn,
+            resources: 10.0,
+            position: pos,
+            id,
+            age: 0,
+            lineage_color: color,
+            parent_id: None,
         }
     }
 
@@ -131,7 +147,15 @@ impl Individual {
                     *b += cauchy.sample(rng);
                 }
             }
-            let child = Individual::new(child_nn, self.position, *next_id);
+            let child = Individual {
+                nn: child_nn,
+                resources: 10.0,
+                position: self.position,
+                id: *next_id,
+                age: 0,
+                lineage_color: self.lineage_color, // inherit color
+                parent_id: Some(self.id),          // track parent
+            };
             *next_id += 1;
             Some(child)
         } else {
