@@ -17,6 +17,8 @@ venv/
 # Generated outputs
 /output/
 output/
+/temp_outputs/
+/rust/temp_outputs/
 webviewer/sim*/
 
 # IDE / editor
