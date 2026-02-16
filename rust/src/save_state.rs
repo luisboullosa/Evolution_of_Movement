@@ -2,7 +2,7 @@
 use crate::{
     cladogram::Cladogram,
     config::Config,
-    hex_grid::{HexCoord, HexGrid, HexCell},
+    hex_grid::HexGrid,
     individual::Individual,
 };
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,8 @@ pub struct CladogramNodeState {
     pub birth_time: i32,
     pub death_time: Option<i32>,
     pub color: [u8; 3],
+    #[serde(default)]
+    pub genetic_distance_to_parent: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -111,6 +113,7 @@ impl SimulationState {
                 birth_time: node.birth_time,
                 death_time: node.death_time,
                 color: node.color,
+                genetic_distance_to_parent: node.genetic_distance_to_parent,
             })
             .collect();
 

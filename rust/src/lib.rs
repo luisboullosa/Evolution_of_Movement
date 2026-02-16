@@ -1,6 +1,7 @@
 pub mod cladogram;
 pub mod config;
 pub mod environment;
+pub mod gpu_resource;
 pub mod hex_grid;
 pub mod individual;
 pub mod neural_network;

@@ -132,16 +132,8 @@ impl Simulation {
         }
     }
 
-    pub fn step(&mut self) {
+    pub fn step_with_existing_resources(&mut self) {
         let width = self.env.width.max(1);
-        self.env.step(
-            self.config.seed as u64,
-            self.config.env_time_speed,
-            self.config.env_time_amplitude,
-            self.config.env_perlin_spatial_scale,
-            self.config.env_perlin_time_scale,
-            self.config.resource_scale,
-        );
 
         let mut occupancy = vec![0i32; width];
         for ind in &self.individuals {
@@ -175,6 +167,7 @@ impl Simulation {
             } else {
                 0
             };
+            let before_resources = ind.resources;
             let out = ind.act(
                 left,
                 center,
@@ -185,6 +178,12 @@ impl Simulation {
                 &mut self.nn_hidden_buf,
                 &mut self.nn_out2_buf,
             );
+            let gathered = (ind.resources - before_resources).max(0.0);
+            if gathered > 0.0 {
+                if let Some(resource_slot) = self.env.resources.get_mut(pos) {
+                    *resource_slot = (*resource_slot - gathered).max(0.0);
+                }
+            }
             if out != 0.0 {
                 let delta = out.round() as i32;
                 self.last_spend[i] = out.abs();
@@ -252,6 +251,18 @@ impl Simulation {
             }
             true
         });
+    }
+
+    pub fn step(&mut self) {
+        self.env.step(
+            self.config.seed as u64,
+            self.config.env_time_speed,
+            self.config.env_time_amplitude,
+            self.config.env_perlin_spatial_scale,
+            self.config.env_perlin_time_scale,
+            self.config.resource_scale,
+        );
+        self.step_with_existing_resources();
     }
 
     pub fn run(&mut self) {

@@ -197,16 +197,15 @@ impl Default for Config {
 
 impl Config {
     /// Load configuration from a JSON file.
-    pub fn from_file(path: &str) -> Result<Self, io::Error> {
-        let contents = fs::read_to_string(path)?;
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
+        let contents = fs::read_to_string(path.as_ref())?;
         serde_json::from_str(&contents)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     /// Try to load configuration from a JSON file, returning None on error.
     pub fn try_load<P: AsRef<Path>>(path: P) -> Option<Self> {
-        let path_str = path.as_ref().to_str()?;
-        Self::from_file(path_str).ok()
+        Self::from_file(path).ok()
     }
 
     /// Save configuration to a JSON file.

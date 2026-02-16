@@ -22,6 +22,14 @@ impl HexCoord {
         }
     }
 
+    /// Hex distance in axial coordinates.
+    pub fn distance_to(&self, other: HexCoord) -> i32 {
+        let dq = self.q - other.q;
+        let dr = self.r - other.r;
+        let ds = -dq - dr;
+        (dq.abs() + dr.abs() + ds.abs()) / 2
+    }
+
     /// Convert hex coordinates to flat index
     pub fn to_flat(&self, width: usize) -> usize {
         (self.r as usize) * width + (self.q as usize)
@@ -119,6 +127,31 @@ impl HexGrid {
         }
     }
 
+    /// Create a hexagonal dish (axial hexagon) embedded in a bounding box.
+    pub fn new_hex_dish(radius: i32, hex_size: f32) -> Self {
+        let radius = radius.max(0);
+        let diameter = (radius * 2 + 1) as usize;
+        let center = HexCoord::new(radius, radius);
+        let mut cells = HashMap::new();
+
+        for q in -radius..=radius {
+            for r in -radius..=radius {
+                let axial = HexCoord::new(q, r);
+                if axial.distance_to(HexCoord::new(0, 0)) <= radius {
+                    let shifted = HexCoord::new(center.q + q, center.r + r);
+                    cells.insert(shifted, HexCell::new());
+                }
+            }
+        }
+
+        Self {
+            width: diameter,
+            height: diameter,
+            hex_size,
+            cells,
+        }
+    }
+
     pub fn get_cell(&self, coord: HexCoord) -> Option<&HexCell> {
         self.cells.get(&coord)
     }
@@ -166,5 +199,12 @@ mod tests {
         let (x, y) = hex.to_pixel(10.0);
         let back = HexCoord::from_pixel(x, y, 10.0);
         assert_eq!(hex, back);
+    }
+
+    #[test]
+    fn test_hex_dish_cell_count() {
+        let grid = HexGrid::new_hex_dish(2, 10.0);
+        // 1 + 3r(r+1) for hex radius r
+        assert_eq!(grid.cells.len(), 19);
     }
 }

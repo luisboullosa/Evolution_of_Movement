@@ -2,6 +2,23 @@
 use crate::neural_network::NeuralNetwork;
 use eframe::egui;
 
+fn input_label(i: usize) -> String {
+    // Interactive mode uses 8 canonical inputs:
+    // 6 edge resource sensors + local occupancy + internal resources.
+    // Additional inputs (if any) are still rendered with generic labels.
+    match i {
+        0 => "Edge 0".to_string(),
+        1 => "Edge 1".to_string(),
+        2 => "Edge 2".to_string(),
+        3 => "Edge 3".to_string(),
+        4 => "Edge 4".to_string(),
+        5 => "Edge 5".to_string(),
+        6 => "Local Occupancy".to_string(),
+        7 => "Internal Resources".to_string(),
+        _ => format!("Input {}", i),
+    }
+}
+
 pub fn draw_neural_network(
     ui: &mut egui::Ui,
     nn: &NeuralNetwork,
@@ -110,6 +127,13 @@ pub fn draw_neural_network(
             format!("I{}", i),
             egui::FontId::proportional(10.0),
             egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::pos2(pos.x - 14.0, pos.y),
+            egui::Align2::RIGHT_CENTER,
+            input_label(i),
+            egui::FontId::proportional(10.0),
+            egui::Color32::LIGHT_GRAY,
         );
     }
 

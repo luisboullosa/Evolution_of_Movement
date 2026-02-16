@@ -1,5 +1,4 @@
 /// Cladogram tracking and genetic distance calculation
-use crate::individual::Individual;
 use crate::neural_network::NeuralNetwork;
 use std::collections::HashMap;
 
@@ -11,6 +10,9 @@ pub struct LineageNode {
     pub birth_time: i32,
     pub death_time: Option<i32>,
     pub color: [u8; 3],
+    /// Genetic distance from this node to its direct parent.
+    /// Founders use 0.0 by definition.
+    pub genetic_distance_to_parent: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -37,11 +39,12 @@ impl Cladogram {
                 birth_time: self.current_time,
                 death_time: None,
                 color,
+                genetic_distance_to_parent: 0.0,
             },
         );
     }
 
-    pub fn add_offspring(&mut self, parent_id: i32, child_id: i32, color: [u8; 3]) {
+    pub fn add_offspring(&mut self, parent_id: i32, child_id: i32, color: [u8; 3], genetic_distance_to_parent: f64) {
         // Add child node
         self.nodes.insert(
             child_id,
@@ -52,6 +55,7 @@ impl Cladogram {
                 birth_time: self.current_time,
                 death_time: None,
                 color,
+                genetic_distance_to_parent,
             },
         );
 
@@ -150,6 +154,24 @@ impl Cladogram {
         path.reverse();
         path
     }
+
+    /// Sum edge distances from the given node back to its founder.
+    /// Useful for plotting phylogeny branch length on an x-axis.
+    pub fn cumulative_genetic_distance(&self, id: i32) -> f64 {
+        let mut total = 0.0;
+        let mut current_id = id;
+
+        while let Some(node) = self.nodes.get(&current_id) {
+            total += node.genetic_distance_to_parent.max(0.0);
+            if let Some(parent_id) = node.parent_id {
+                current_id = parent_id;
+            } else {
+                break;
+            }
+        }
+
+        total
+    }
 }
 
 #[cfg(test)]
@@ -160,7 +182,7 @@ mod tests {
     fn test_cladogram_basic() {
         let mut clado = Cladogram::new();
         clado.add_founder(1, [255, 0, 0]);
-        clado.add_offspring(1, 2, [255, 0, 0]);
+        clado.add_offspring(1, 2, [255, 0, 0], 0.2);
         
         assert_eq!(clado.nodes.len(), 2);
         assert_eq!(clado.nodes[&1].children.len(), 1);
@@ -179,5 +201,37 @@ mod tests {
         nn2.weights[0] = 1.0;
         let dist2 = Cladogram::genetic_distance(&nn1, &nn2);
         assert!(dist2 > 0.0);
+    }
+
+    #[test]
+    fn test_lineage_path_and_descendants() {
+        let mut clado = Cladogram::new();
+        clado.add_founder(1, [255, 0, 0]);
+        clado.add_offspring(1, 2, [255, 0, 0], 0.1);
+        clado.add_offspring(2, 3, [255, 0, 0], 0.3);
+
+        let path = clado.get_lineage_path(3);
+        assert_eq!(path, vec![1, 2, 3]);
+
+        let descendants = clado.get_living_descendants(1);
+        assert!(descendants.contains(&1));
+        assert!(descendants.contains(&2));
+        assert!(descendants.contains(&3));
+        assert!((clado.cumulative_genetic_distance(3) - 0.4).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_mark_death_filters_living_descendants() {
+        let mut clado = Cladogram::new();
+        clado.add_founder(10, [0, 255, 0]);
+        clado.add_offspring(10, 11, [0, 255, 0], 0.15);
+        clado.add_offspring(11, 12, [0, 255, 0], 0.25);
+
+        clado.mark_death(11);
+
+        let living = clado.get_living_descendants(10);
+        assert!(living.contains(&10));
+        assert!(!living.contains(&11));
+        assert!(living.contains(&12));
     }
 }
