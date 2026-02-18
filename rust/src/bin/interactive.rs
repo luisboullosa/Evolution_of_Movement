@@ -409,6 +409,7 @@ struct EvolutionApp {
     petri_dishes: Vec<PetriDish>,
     selected_dish: usize,
     selected_individual_id: Option<i32>,
+    selected_hex: Option<HexCoord>,
     paused: bool,
     paused_before_drag: bool,
     is_dragging_individual: bool,
@@ -441,6 +442,7 @@ impl EvolutionApp {
             petri_dishes: dishes,
             selected_dish: 0,
             selected_individual_id: None,
+            selected_hex: None,
             paused: true,
             paused_before_drag: true,
             is_dragging_individual: false,
@@ -518,6 +520,7 @@ impl EvolutionApp {
             dish.init_population(self.config.initial_population as usize);
         }
         self.selected_individual_id = None;
+        self.selected_hex = None;
     }
 
     fn save_state(&self, filename: &str) {
@@ -774,6 +777,78 @@ impl eframe::App for EvolutionApp {
                 ui.label(format!("Timestep: {}", dish.timestep));
                 ui.label(format!("Move Threshold: {:.2}", self.move_threshold));
                 ui.label(format!("Avg Move Signal (last step): {:.3}", dish.last_avg_move_signal));
+
+                // Display selected hex information
+                if let Some(hex_coord) = self.selected_hex {
+                    if let Some(cell) = dish.hex_grid.get_cell(hex_coord) {
+                        ui.separator();
+                        ui.heading("Selected Hex");
+                        ui.label(format!("Coordinates: ({}, {})", hex_coord.q, hex_coord.r));
+                        
+                        let pop_density = cell.individual_indices.len();
+                        ui.label(format!("Population: {}", pop_density));
+                        
+                        // Calculate approximate resources per individual per timestep
+                        let resource_level = cell.resource_level;
+                        let resources_per_ind = if pop_density > 0 {
+                            resource_level / pop_density as f64
+                        } else {
+                            resource_level
+                        };
+                        ui.label(format!("Resource Level: {:.2}", resource_level));
+                        ui.label(format!("Resources/Individual: {:.2}", resources_per_ind));
+                        
+                        // Display unique lineage colors present in this hex
+                        if !cell.individual_indices.is_empty() {
+                            ui.separator();
+                            ui.label("Lineages in this hex:");
+                            
+                            // Collect unique lineage colors
+                            let mut lineage_colors: std::collections::HashMap<[u8; 3], Vec<usize>> = 
+                                std::collections::HashMap::new();
+                            
+                            for &ind_idx in &cell.individual_indices {
+                                if let Some(ind) = dish.simulation.individuals.get(ind_idx) {
+                                    lineage_colors.entry(ind.lineage_color)
+                                        .or_insert_with(Vec::new)
+                                        .push(ind_idx);
+                                }
+                            }
+                            
+                            // Display each lineage with a button to select a random individual
+                            for (color, individual_indices) in lineage_colors.iter() {
+                                ui.horizontal(|ui| {
+                                    // Color swatch
+                                    let color_rect = egui::Rect::from_min_size(
+                                        ui.cursor().min,
+                                        egui::vec2(16.0, 16.0),
+                                    );
+                                    let (color_resp, color_painter) = ui.allocate_painter(
+                                        color_rect.size(), 
+                                        egui::Sense::hover()
+                                    );
+                                    color_painter.rect_filled(
+                                        color_resp.rect,
+                                        2.0,
+                                        egui::Color32::from_rgb(color[0], color[1], color[2]),
+                                    );
+                                    
+                                    ui.label(format!("Count: {}", individual_indices.len()));
+                                    
+                                    // Button to select random individual from this lineage
+                                    if ui.small_button("Select Random").clicked() {
+                                        use rand::seq::SliceRandom;
+                                        if let Some(&random_idx) = individual_indices.choose(&mut rand::thread_rng()) {
+                                            if let Some(ind) = dish.simulation.individuals.get(random_idx) {
+                                                self.selected_individual_id = Some(ind.id);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
 
                 if let Some(idx) = self.selected_individual_index(dish) {
                     if let Some(ind) = dish.simulation.individuals.get(idx) {
@@ -1269,11 +1344,17 @@ impl eframe::App for EvolutionApp {
             // Handle selection outside of the closure
             if let Some(coord) = clicked_hex {
                 if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+                    // Always set the selected hex
+                    self.selected_hex = Some(coord);
+                    
                     if let Some(cell) = dish.hex_grid.get_cell(coord) {
                         if !cell.individual_indices.is_empty() {
                             if let Some(ind) = dish.simulation.individuals.get(cell.individual_indices[0]) {
                                 self.selected_individual_id = Some(ind.id);
                             }
+                        } else {
+                            // Clicked on empty hex, clear individual selection
+                            self.selected_individual_id = None;
                         }
                     }
                 }
