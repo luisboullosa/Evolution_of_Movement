@@ -17,9 +17,17 @@ venv/
 # Generated outputs
 /output/
 output/
+**/output/
 /temp_outputs/
+temp_outputs/
+**/temp_outputs/
 /rust/temp_outputs/
+rust/temp_outputs/
 webviewer/sim*/
+webviewer/sim*/**
+rust/webviewer/sim*/
+rust/webviewer/sim*/**
+build/tests_out/
 
 # IDE / editor
 .vscode/
@@ -57,12 +65,5 @@ webviewer/**/*.jsonl
 # ignore generated sim directories (e.g., webviewer/sim0061)
 webviewer/sim*/
 output/**/sim*/
-rust/webviewer/sim*/
-<<<<<<< HEAD
-rust/src/config.rs
-temp_outputs/
-rust/temp_outputs/
 tmp_push_repo/
 scripts/__pycache__/worker_pool.cpython-313.pyc
-=======
->>>>>>> origin/copilot/interactive-simulation-environment
