@@ -787,26 +787,28 @@ impl eframe::App for EvolutionApp {
 
                 // Display selected hex information
                 if let Some(hex_coord) = self.selected_hex {
-                    if let Some(cell) = dish.hex_grid.get_cell(hex_coord) {
-                        ui.separator();
-                        ui.heading("Selected Hex");
-                        ui.label(format!("Coordinates: ({}, {})", hex_coord.q, hex_coord.r));
-                        
-                        let pop_density = cell.individual_indices.len();
-                        ui.label(format!("Population: {}", pop_density));
-                        
-                        // Calculate approximate resources per individual per timestep
-                        let resource_level = cell.resource_level;
-                        let resources_per_ind = if pop_density > 0 {
-                            resource_level / pop_density as f64
-                        } else {
-                            resource_level
-                        };
-                        ui.label(format!("Resource Level: {:.2}", resource_level));
-                        ui.label(format!("Resources/Individual: {:.2}", resources_per_ind));
-                        
-                        // Display unique lineage colors present in this hex
-                        if !cell.individual_indices.is_empty() {
+                    ui.label(format!("DEBUG: Trying to get cell for hex ({}, {})", hex_coord.q, hex_coord.r));
+                    match dish.hex_grid.get_cell(hex_coord) {
+                        Some(cell) => {
+                            ui.separator();
+                            ui.heading("Selected Hex");
+                            ui.label(format!("Coordinates: ({}, {})", hex_coord.q, hex_coord.r));
+                            
+                            let pop_density = cell.individual_indices.len();
+                            ui.label(format!("Population: {}", pop_density));
+                            
+                            // Calculate approximate resources per individual per timestep
+                            let resource_level = cell.resource_level;
+                            let resources_per_ind = if pop_density > 0 {
+                                resource_level / pop_density as f64
+                            } else {
+                                resource_level
+                            };
+                            ui.label(format!("Resource Level: {:.2}", resource_level));
+                            ui.label(format!("Resources/Individual: {:.2}", resources_per_ind));
+                            
+                            // Display unique lineage colors present in this hex
+                            if !cell.individual_indices.is_empty() {
                             ui.separator();
                             ui.label("Lineages in this hex:");
                             
@@ -853,6 +855,11 @@ impl eframe::App for EvolutionApp {
                                     }
                                 });
                             }
+                        }
+                        },
+                        None => {
+                            ui.label(format!("DEBUG: Cell not found for hex ({}, {})", hex_coord.q, hex_coord.r));
+                            ui.label(format!("DEBUG: Grid has {} cells", dish.hex_grid.cells.len()));
                         }
                     }
                 }
