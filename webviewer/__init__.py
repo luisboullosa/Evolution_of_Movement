@@ -13,8 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-_HERE = Path(__file__).resolve().parent
-_SCRIPTS_DIR = (_HERE.parent / "scripts").resolve()
+_HERE: Path = Path(__file__).resolve().parent
+_SCRIPTS_DIR: Path = (_HERE.parent / "scripts").resolve()
 
 # Names of modules that were moved from webviewer/ to scripts/
 __all__: List[str] = []

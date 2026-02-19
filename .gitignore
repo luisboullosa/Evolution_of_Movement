@@ -53,3 +53,7 @@ webviewer/sim*/
 output/**/sim*/
 rust/webviewer/sim*/
 rust/src/config.rs
+temp_outputs/
+rust/temp_outputs/
+tmp_push_repo/
+scripts/__pycache__/worker_pool.cpython-313.pyc

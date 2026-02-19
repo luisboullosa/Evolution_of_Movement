@@ -27,8 +27,8 @@ from typing import Any
 
 def _parse_last_summary_json(text: str) -> dict[str, Any] | None:
     last_obj: dict[str, Any] | None = None
-    for line in (text or "").splitlines():
-        s = line.strip()
+    for line: str in (text or "").splitlines():
+        s: str = line.strip()
         if not s or not s.startswith("{"):
             continue
         if "final_population" not in s:
@@ -52,16 +52,16 @@ def main() -> int:
     ap.add_argument("--output-run-dir", default="", help="If set, pass --output-run-dir to simulator")
     ap.add_argument("--no-write-outputs", action="store_true", help="Pass --no-write-outputs to simulator")
     ap.add_argument("--replay-snapshot", default="", help="If set, pass --replay-snapshot to simulator")
-    args = ap.parse_args()
+    args: argparse.Namespace = ap.parse_args()
 
     repo_dir = os.path.abspath(args.repo_dir)
     manifest = args.manifest_path
 
     # Source cargo env if it exists (for non-interactive SSH sessions)
-    cargo_env = os.path.expanduser("~/.cargo/env")
-    shell_prefix = f". {cargo_env} && " if os.path.exists(cargo_env) else ""
+    cargo_env: str = os.path.expanduser("~/.cargo/env")
+    shell_prefix: str = f". {cargo_env} && " if os.path.exists(cargo_env) else ""
 
-    cmd = [
+    cmd: list[str] = [
         "cargo",
         "run",
         "--quiet",
@@ -89,10 +89,10 @@ def main() -> int:
     # Build shell command string to source cargo env
     import shlex
 
-    cmd_str = shell_prefix + " ".join(shlex.quote(str(c)) for c in cmd)
+    cmd_str: str = shell_prefix + " ".join(shlex.quote(str(c)) for c: str in cmd)
 
     # Run and stream output, but also capture so we can parse summary at end.
-    proc = subprocess.Popen(
+    proc: os.Popen[str] = subprocess.Popen(
         cmd_str,
         cwd=repo_dir,
         stdout=subprocess.PIPE,
@@ -102,13 +102,13 @@ def main() -> int:
     )
     captured: list[str] = []
     assert proc.stdout is not None
-    for raw in proc.stdout:
+    for raw: str in proc.stdout:
         sys.stdout.write(raw)
         sys.stdout.flush()
         captured.append(raw)
-    rc = proc.wait()
-    out_text = "".join(captured)
-    summary = _parse_last_summary_json(out_text)
+    rc: int = proc.wait()
+    out_text: str = "".join(captured)
+    summary: dict[str, Any] | None = _parse_last_summary_json(out_text)
 
     result = {
         "ok": rc == 0,

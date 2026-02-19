@@ -22,7 +22,11 @@ impl fmt::Display for SnapshotError {
             SnapshotError::Io(e) => write!(f, "snapshot I/O error: {}", e),
             SnapshotError::Codec(e) => write!(f, "snapshot codec error: {}", e),
             SnapshotError::UnsupportedVersion { expected, found } => {
-                write!(f, "snapshot version {} not supported (expected {})", found, expected)
+                write!(
+                    f,
+                    "snapshot version {} not supported (expected {})",
+                    found, expected
+                )
             }
         }
     }
@@ -145,7 +149,10 @@ impl PopulationSnapshot {
             env_perlin_time: env.perlin_time,
             env_resources: env.resources.iter().map(|v| *v as f32).collect(),
             env_perlin_base: env.perlin_base.iter().map(|v| *v as f32).collect(),
-            individuals: individuals.iter().map(SnapshotIndividual::from_individual).collect(),
+            individuals: individuals
+                .iter()
+                .map(SnapshotIndividual::from_individual)
+                .collect(),
         }
     }
 

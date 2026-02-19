@@ -17,6 +17,8 @@ import random
 import sys
 from typing import Any, Dict
 
+from matplotlib.backend_bases import TimerBase
+
 import graphs_env as g_env
 import graphs_nn as g_nn
 import matplotlib.pyplot as plt
@@ -24,9 +26,9 @@ import numpy as np
 from matplotlib.widgets import Button
 
 # first arg: base folder (default 'webviewer')
-arg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "webviewer"
-root_arg = arg
-base = arg
+arg: str = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "webviewer"
+root_arg: str = arg
+base: str = arg
 
 
 # discover available sim folders (if arg is a directory)
@@ -41,48 +43,48 @@ sims = []
 if os.path.isdir(arg):
     sims = discover_sims(arg)
     if len(sims) == 1:
-        base = os.path.join(arg, sims[0])
+        base: str = os.path.join(arg, sims[0])
     elif len(sims) > 1:
         # default to latest sim
-        base = os.path.join(arg, sims[-1])
+        base: str = os.path.join(arg, sims[-1])
 
 # headless detection: if the script is run headless we prefer to load only
 # the last (most recent) sim rather than scanning many subfolders.
-explicit_headless = any(a in ("--headless", "--screenshot") for a in sys.argv)
+explicit_headless: bool = any(a in ("--headless", "--screenshot") for a: str in sys.argv)
 
 # globals that will be (re)populated by load_sim
 sim_list = []
 
 
-def try_load_json(path):
+def try_load_json(path) -> Any | None:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
             return json.load(f)
     except Exception:
         return None
 
 
-def sim_supports_display(sim_path):
+def sim_supports_display(sim_path) -> bool:
     """Return True if the sim folder contains valid env.jsonl and individuals.jsonl
     with at least one parseable JSON line each. This filters out sims that are
     missing files or are corrupted.
     """
-    env_jsonl = os.path.join(sim_path, "env.jsonl")
-    ind_jsonl = os.path.join(sim_path, "individuals.jsonl")
+    env_jsonl: str = os.path.join(sim_path, "env.jsonl")
+    ind_jsonl: str = os.path.join(sim_path, "individuals.jsonl")
     if not (os.path.exists(env_jsonl) and os.path.exists(ind_jsonl)):
         return False
     try:
         # try to parse first non-empty line from each file
-        with open(env_jsonl, "r", encoding="utf-8") as ef:
-            for el in ef:
-                el = el.strip()
+        with open(env_jsonl, "r", encoding="utf-8") as ef: os.TextIOWrapper[_WrappedBuffer]:
+            for el: str in ef:
+                el: str = el.strip()
                 if not el:
                     continue
                 json.loads(el)
                 break
-        with open(ind_jsonl, "r", encoding="utf-8") as inf:
-            for il in inf:
-                il = il.strip()
+        with open(ind_jsonl, "r", encoding="utf-8") as inf: os.TextIOWrapper[_WrappedBuffer]:
+            for il: str in inf:
+                il: str = il.strip()
                 if not il:
                     continue
                 json.loads(il)
@@ -93,14 +95,14 @@ def sim_supports_display(sim_path):
 
 
 def _load_individuals_delta(sim_base):
-    delta_path = os.path.join(sim_base, "individuals.delta.jsonl")
+    delta_path: str = os.path.join(sim_base, "individuals.delta.jsonl")
     if not os.path.exists(delta_path):
         return None
     frames = []
     state = {}
-    with open(delta_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+    with open(delta_path, "r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
+        for line: str in f:
+            line: str = line.strip()
             if not line:
                 continue
             try:
@@ -150,12 +152,12 @@ def _load_individuals_delta(sim_base):
 
 
 def _load_individual_frames(sim_base):
-    ind_jsonl = os.path.join(sim_base, "individuals.jsonl")
+    ind_jsonl: str = os.path.join(sim_base, "individuals.jsonl")
     if os.path.exists(ind_jsonl):
         ind_list = []
         times_local = []
-        with open(ind_jsonl, "r", encoding="utf-8") as inf:
-            for il in inf:
+        with open(ind_jsonl, "r", encoding="utf-8") as inf: os.TextIOWrapper[_WrappedBuffer]:
+            for il: str in inf:
                 try:
                     iobj = json.loads(il)
                 except Exception:
@@ -177,15 +179,15 @@ def load_sim(sim_base):
     ind_list = []
     times = []
 
-    env_jsonl = os.path.join(sim_base, "env.jsonl")
-    nn_index_file = os.path.join(sim_base, "nn_index.json")
+    env_jsonl: str = os.path.join(sim_base, "env.jsonl")
+    nn_index_file: str = os.path.join(sim_base, "nn_index.json")
 
     if not os.path.exists(env_jsonl):
         raise FileNotFoundError(f"No env snapshot file found in {sim_base}")
 
     # load env frames
-    with open(env_jsonl, "r", encoding="utf-8") as ef:
-        for el in ef:
+    with open(env_jsonl, "r", encoding="utf-8") as ef: os.TextIOWrapper[_WrappedBuffer]:
+        for el: str in ef:
             try:
                 eobj = json.loads(el)
             except Exception:
@@ -201,7 +203,7 @@ def load_sim(sim_base):
         raise RuntimeError("No individuals frames found")
 
     # align lengths
-    n_frames = min(len(env_list), len(ind_list))
+    n_frames: int = min(len(env_list), len(ind_list))
     env_list = env_list[:n_frames]
     ind_list = ind_list[:n_frames]
     times = times[:n_frames]
@@ -213,14 +215,14 @@ def load_sim(sim_base):
     cur_frame = 0
     environment = np.array(env_list[cur_frame])
     individuals = ind_list[cur_frame]
-    n_frames = min(len(env_list), len(ind_list))
+    n_frames: int = min(len(env_list), len(ind_list))
 
     # compute a global max for stable y-axis across animation
     env_global_max = 0.0
     for r in env_list:
         try:
             if len(r) > 0:
-                env_global_max = max(env_global_max, float(np.max(r)))
+                env_global_max: float = max(env_global_max, float(np.max(r)))
         except Exception:
             pass
     if env_global_max <= 0.0:
@@ -230,17 +232,17 @@ def load_sim(sim_base):
     nn_index = None
     if os.path.exists(nn_index_file):
         try:
-            with open(nn_index_file, "r", encoding="utf-8") as f:
+            with open(nn_index_file, "r", encoding="utf-8") as f: os.TextIOWrapper[_WrappedBuffer]:
                 nn_index = json.load(f)
         except Exception:
             nn_index = None
 
     # try to read any config/params JSONs in this sim folder
     sim_params = {}
-    for fname in ["config.json", "sim_config.json", "scan_config.json", "run_config.json"]:
-        p = os.path.join(sim_base, fname)
+    for fname: str in ["config.json", "sim_config.json", "scan_config.json", "run_config.json"]:
+        p: str = os.path.join(sim_base, fname)
         if os.path.exists(p):
-            j = try_load_json(p)
+            j: Any | None = try_load_json(p)
             if isinstance(j, dict):
                 sim_params.update(j)
     # also try nn_index (it sometimes stores metadata)
@@ -283,8 +285,8 @@ def find_and_load_initial(base_path, root_path):
     last_exc = None
     try:
         return load_sim(base_path)
-    except Exception as e:
-        last_exc = e
+    except Exception as e: Exception:
+        last_exc: Exception = e
     # If root_path is a directory, and we are *not* running headless, try sim
     # subfolders (prefer newest first). For headless runs we only attempt the
     # provided base (which should already point to the last sim) to avoid
@@ -295,8 +297,8 @@ def find_and_load_initial(base_path, root_path):
             candidate = os.path.join(root_path, s)
             try:
                 return load_sim(candidate)
-            except Exception as e:
-                last_exc = e
+            except Exception as e: Exception:
+                last_exc: Exception = e
                 continue
     # nothing worked
     raise last_exc if last_exc is not None else RuntimeError("No sim folders found")
@@ -309,13 +311,13 @@ if os.path.isdir(root_arg):
     # if no displayable sims found but the base itself is a sim folder, try that
     if not sim_list and os.path.basename(base).startswith("sim"):
         if sim_supports_display(base):
-            sim_list = [os.path.basename(base)]
+            sim_list: list[str] = [os.path.basename(base)]
     if sim_list:
         try:
-            current_sim_index = sim_list.index(os.path.basename(base))
+            current_sim_index: int = sim_list.index(os.path.basename(base))
         except Exception:
-            current_sim_index = max(0, len(sim_list) - 1)
-i_resources = np.array([])
+            current_sim_index: int = max(0, len(sim_list) - 1)
+i_resources: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.array([])
 sim_params = {}
 # movement overlay controls
 show_movement = False
@@ -330,17 +332,17 @@ try:
     env_global_max = _meta["env_global_max"]
     nn_index = _meta["nn_index"]
     sim_params = _meta["sim_params"]
-except Exception as e:
+except Exception as e: Exception:
     # Friendly error: only complain if no sim subfolder contained valid snapshots
     print(f"Failed to find a sim with valid env/individual snapshots: {e}")
     sys.exit(1)
 
 
 # setup figure with two panels: left env map, right reaction-norm + NN
-fig = plt.figure(figsize=(12, 6))
+fig: plt.Figure = plt.figure(figsize=(12, 6))
 
 try:
-    mgr = getattr(getattr(fig, "canvas", None), "manager", None)
+    mgr: Any | None = getattr(getattr(fig, "canvas", None), "manager", None)
     if mgr is not None and hasattr(mgr, "set_window_title"):
         try:
             mgr.set_window_title("Environment and individuals (click a dot)")
@@ -348,7 +350,7 @@ try:
             pass
     else:
         try:
-            gm = plt.get_current_fig_manager()
+            gm: plt.FigureManagerBase | None = plt.get_current_fig_manager()
             if gm is not None and hasattr(gm, "set_window_title"):
                 try:
                     gm.set_window_title("Environment and individuals (click a dot)")
@@ -358,7 +360,7 @@ try:
             pass
 except Exception:
     try:
-        gm = plt.get_current_fig_manager()
+        gm: plt.FigureManagerBase | None = plt.get_current_fig_manager()
         if gm is not None and hasattr(gm, "set_window_title"):
             try:
                 gm.set_window_title("Environment and individuals (click a dot)")
@@ -367,9 +369,9 @@ except Exception:
     except Exception:
         pass
 
-ax_map = fig.add_subplot(1, 2, 1)
-ax_info = fig.add_subplot(2, 2, 2)
-ax_resp = fig.add_subplot(2, 2, 4)
+ax_map: plt.Axes = fig.add_subplot(1, 2, 1)
+ax_info: plt.Axes = fig.add_subplot(2, 2, 2)
+ax_resp: plt.Axes = fig.add_subplot(2, 2, 4)
 
 # --- UI: sim chooser (dropdown fallback to prev/next) and params display ---
 # `sim_list` is computed earlier and already filtered to displayable sims.
@@ -382,42 +384,42 @@ if "sim_list" not in globals() or not isinstance(sim_list, list):
         sim_list = [s for s in raw_sims if sim_supports_display(os.path.join(root_arg, s))]
         if not sim_list and os.path.basename(base).startswith("sim"):
             if sim_supports_display(base):
-                sim_list = [os.path.basename(base)]
+                sim_list: list[str] = [os.path.basename(base)]
 if sim_list:
     try:
-        current_sim_index = sim_list.index(os.path.basename(base))
+        current_sim_index: int = sim_list.index(os.path.basename(base))
     except Exception:
-        current_sim_index = max(0, len(sim_list) - 1)
+        current_sim_index: int = max(0, len(sim_list) - 1)
 
 # small dropdown-like selector (popup RadioButtons) + prev/next buttons at the top for sim selection
-ax_simbox = fig.add_axes((0.01, 0.92, 0.20, 0.045))
+ax_simbox: plt.Axes = fig.add_axes((0.01, 0.92, 0.20, 0.045))
 from matplotlib.widgets import RadioButtons
 
 sim_button = Button(ax_simbox, sim_list[current_sim_index] if sim_list else os.path.basename(base))
-ax_prev = fig.add_axes((0.22, 0.92, 0.03, 0.045))
-ax_next = fig.add_axes((0.26, 0.92, 0.03, 0.045))
+ax_prev: plt.Axes = fig.add_axes((0.22, 0.92, 0.03, 0.045))
+ax_next: plt.Axes = fig.add_axes((0.26, 0.92, 0.03, 0.045))
 btn_prev = Button(ax_prev, "<")
 btn_next = Button(ax_next, ">")
-ax_move_toggle = fig.add_axes((0.30, 0.92, 0.09, 0.045))
+ax_move_toggle: plt.Axes = fig.add_axes((0.30, 0.92, 0.09, 0.045))
 btn_move = Button(ax_move_toggle, "Show move: Off")
 
 # params display area
-ax_params = fig.add_axes((0.72, 0.92, 0.27, 0.07))
+ax_params: plt.Axes = fig.add_axes((0.72, 0.92, 0.27, 0.07))
 ax_params.axis("off")
-params_text_obj = ax_params.text(0, 1.0, "", va="top", family="monospace", wrap=True)
+params_text_obj: plt.Text = ax_params.text(0, 1.0, "", va="top", family="monospace", wrap=True)
 # population count display (small label on the map)
-pop_text_obj = ax_map.text(
+pop_text_obj: plt.Text = ax_map.text(
     0.02, 0.98, "", transform=ax_map.transAxes, va="top", ha="left", family="monospace", fontsize=9
 )
 
 
-def render_sim_params():
+def render_sim_params() -> None:
     try:
         if not sim_params:
             params_text_obj.set_text("No simulation parameters found")
             return
 
-        def fmt_val(v):
+        def fmt_val(v) -> str:
             # Try to format numbers compactly, otherwise fall back to str()
             try:
                 if isinstance(v, float):
@@ -451,16 +453,16 @@ def render_sim_params():
         params_text_obj.set_text("Failed to render params")
 
 
-def on_sim_change(sim_name):
+def on_sim_change(sim_name) -> None:
     global base, env_list, ind_list, times, n_frames, env_global_max, nn_index, sim_params, cur_frame
     # compute new base path
     if os.path.isdir(root_arg):
-        new_base = os.path.join(root_arg, sim_name)
+        new_base: str = os.path.join(root_arg, sim_name)
     else:
         new_base = sim_name
     try:
         meta = load_sim(new_base)
-    except Exception as e:
+    except Exception as e: Exception:
         print("Failed to load sim", new_base, e)
         return
     # update globals
@@ -491,11 +493,11 @@ def on_sim_change(sim_name):
     render_sim_params()
 
 
-def prev_sim(event):
+def prev_sim(event) -> None:
     global current_sim_index
     if not sim_list:
         return
-    current_sim_index = (current_sim_index - 1) % len(sim_list)
+    current_sim_index: int | Any = (current_sim_index - 1) % len(sim_list)
     try:
         btn_text = sim_list[current_sim_index]
         sim_button.label.set_text(btn_text)
@@ -504,11 +506,11 @@ def prev_sim(event):
     on_sim_change(sim_list[current_sim_index])
 
 
-def next_sim(event):
+def next_sim(event) -> None:
     global current_sim_index
     if not sim_list:
         return
-    current_sim_index = (current_sim_index + 1) % len(sim_list)
+    current_sim_index: int | Any = (current_sim_index + 1) % len(sim_list)
     try:
         btn_text = sim_list[current_sim_index]
         sim_button.label.set_text(btn_text)
@@ -521,9 +523,9 @@ btn_prev.on_clicked(prev_sim)
 btn_next.on_clicked(next_sim)
 
 
-def toggle_movement(event):
+def toggle_movement(event) -> None:
     global show_movement
-    show_movement = not show_movement
+    show_movement: bool = not show_movement
     try:
         btn_move.label.set_text("Show move: On" if show_movement else "Show move: Off")
     except Exception:
@@ -538,19 +540,19 @@ def toggle_movement(event):
 btn_move.on_clicked(toggle_movement)
 
 
-def open_sim_dropdown(event):
+def open_sim_dropdown(event) -> None:
     """Open a small popup with radio buttons to choose a sim from sim_list."""
     if not sim_list:
         return
     try:
         # small popup figure
-        pop = plt.figure(figsize=(3, min(6, 0.2 + 0.3 * len(sim_list))))
-        axr = pop.add_axes((0.05, 0.05, 0.9, 0.9))
+        pop: plt.Figure = plt.figure(figsize=(3, min(6, 0.2 + 0.3 * len(sim_list))))
+        axr: plt.Axes = pop.add_axes((0.05, 0.05, 0.9, 0.9))
         radios = RadioButtons(axr, sim_list, active=current_sim_index)
 
-        def _on_pick(label):
+        def _on_pick(label) -> None:
             try:
-                _idx = sim_list.index(label)
+                _idx: int = sim_list.index(label)
             except Exception:
                 _idx = 0
             # update main UI button label and load sim
@@ -560,7 +562,7 @@ def open_sim_dropdown(event):
                 pass
             # set the global index and change
             global current_sim_index
-            current_sim_index = _idx
+            current_sim_index: int = _idx
             on_sim_change(label)
             try:
                 plt.close(pop)
@@ -568,7 +570,7 @@ def open_sim_dropdown(event):
                 pass
 
         radios.on_clicked(_on_pick)
-    except Exception as ex:
+    except Exception as ex: Exception:
         print("Failed to open sim selector popup", ex)
 
 
@@ -576,8 +578,8 @@ sim_button.on_clicked(open_sim_dropdown)
 
 
 # draw environment line
-env_idx = np.arange(len(environment))
-ln_env = g_env.draw_env_line(ax_map, env_idx, environment)
+env_idx: np.ndarray[tuple[int], np.dtype[np.signedinteger[Any]]] = np.arange(len(environment))
+ln_env: plt.Line2D = g_env.draw_env_line(ax_map, env_idx, environment)
 # ensure environment line has a low zorder so individuals plot on top
 try:
     if hasattr(ln_env, "set_zorder"):
@@ -596,7 +598,7 @@ except Exception:
 
 # plot individuals exactly at the environment resource values for their positions
 # ensure we use data coordinates (transData) and place markers above the line
-sc = ax_map.scatter(
+sc: plt.PathCollection = ax_map.scatter(
     positions,
     environment[positions],
     c=i_resources,
@@ -614,14 +616,14 @@ selected: Dict[str, Any] = {"id": None, "index": None}
 
 
 # helper to build input vector: left, center, right, occupancy, resources
-def build_input_for(idx, ind_rec):
-    w = len(environment)
+def build_input_for(idx, ind_rec) -> list[float]:
+    w: int = len(environment)
     pos = int(ind_rec.get("pos", 0))
-    left_idx = (pos - 1) % w
-    right_idx = (pos + 1) % w
-    left_val = float(environment[left_idx]) if left_idx < len(environment) else 0.0
-    center_val = float(environment[pos]) if pos is not None and pos < len(environment) else 0.0
-    right_val = float(environment[right_idx]) if right_idx < len(environment) else 0.0
+    left_idx: int = (pos - 1) % w
+    right_idx: int = (pos + 1) % w
+    left_val: float = float(environment[left_idx]) if left_idx < len(environment) else 0.0
+    center_val: float = float(environment[pos]) if pos is not None and pos < len(environment) else 0.0
+    right_val: float = float(environment[right_idx]) if right_idx < len(environment) else 0.0
     try:
         occ = int(np.sum([1 for x in individuals if int(x.get("pos", 0)) == pos]))
     except Exception:
@@ -631,10 +633,10 @@ def build_input_for(idx, ind_rec):
 
 
 # reaction norm plotting helper
-xs = np.linspace(0, max(float(environment.max()) * 1.2 if environment.size > 0 else 1.0, 1.0), 300)
+xs: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.linspace(0, max(float(environment.max()) * 1.2 if environment.size > 0 else 1.0, 1.0), 300)
 
 
-def plot_for_selection(sel_idx):
+def plot_for_selection(sel_idx) -> None:
     ax_info.clear()
     ax_resp.clear()
     if sel_idx is None:
@@ -693,13 +695,13 @@ def plot_for_selection(sel_idx):
     try:
         ys_arr = np.asarray(ys, dtype=float) if ys is not None else np.full_like(xs, np.nan, dtype=float)
     except Exception:
-        ys_arr = np.full_like(xs, np.nan, dtype=float)
+        ys_arr: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.full_like(xs, np.nan, dtype=float)
     ax_resp.plot(xs, ys_arr)
     ax_resp.set_title(f"Reaction norm for id {sel_id}")
     fig.canvas.draw_idle()
 
 
-def find_index_by_id(ind_id):
+def find_index_by_id(ind_id) -> None | int:
     """Return the index of individual with given id in the current frame, or None."""
     try:
         lst = ind_list[cur_frame]
@@ -715,7 +717,7 @@ def find_index_by_id(ind_id):
 
 
 # click handler
-def on_click(event):
+def on_click(event) -> None:
     global individuals, environment
     if event.inaxes != ax_map:
         return
@@ -724,10 +726,10 @@ def on_click(event):
         return
     x = int(round(event.xdata))
     # find individuals at that position in the current frame, pick first
-    matches = [i for i, rec in enumerate(ind_list[cur_frame]) if int(rec.get("pos", 0)) == x]
+    matches: list[int] = [i for i, rec in enumerate(ind_list[cur_frame]) if int(rec.get("pos", 0)) == x]
     if not matches:
         return
-    sel = matches[0]
+    sel: int = matches[0]
     selected["id"] = int(ind_list[cur_frame][sel].get("id", 0))
     selected["index"] = sel
     # update current frame's indivs and env_res before plotting
@@ -746,16 +748,16 @@ from matplotlib.patches import FancyArrowPatch
 from matplotlib.widgets import Button, Slider
 
 # axes for controls
-ax_play = fig.add_axes((0.45, 0.01, 0.1, 0.04))
+ax_play: plt.Axes = fig.add_axes((0.45, 0.01, 0.1, 0.04))
 btn_play = Button(ax_play, "Play")
-ax_slider = fig.add_axes((0.1, 0.01, 0.3, 0.04))
+ax_slider: plt.Axes = fig.add_axes((0.1, 0.01, 0.3, 0.04))
 slider = Slider(ax_slider, "frame", 0, n_frames - 1, valinit=0, valstep=1)
 
-playing = {"val": False}
+playing: Dict[str, bool] = {"val": False}
 timer = None
 
 
-def update_scatter_data(frame_idx):
+def update_scatter_data(frame_idx) -> None:
     global positions, i_resources, ids, environment, individuals, ln_env, env_idx
     environment = np.array(env_list[frame_idx])
     individuals = ind_list[frame_idx]
@@ -770,8 +772,8 @@ def update_scatter_data(frame_idx):
         except Exception:
             continue
     if len(poses_list) == 0:
-        positions = np.array([])
-        i_resources = np.array([])
+        positions: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.array([])
+        i_resources: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.array([])
         # clear scatter
         sc.set_offsets(np.empty((0, 2)))
         sc.set_array(np.array([]))
@@ -797,8 +799,8 @@ def update_scatter_data(frame_idx):
         pass
     # compute new env index and draw
     try:
-        env_idx = np.arange(len(environment))
-        ln_env = g_env.draw_env_line(ax_map, env_idx, environment)
+        env_idx: np.ndarray[tuple[int], np.dtype[np.signedinteger[Any]]] = np.arange(len(environment))
+        ln_env: plt.Line2D = g_env.draw_env_line(ax_map, env_idx, environment)
         try:
             if hasattr(ln_env, "set_zorder"):
                 try:
@@ -829,7 +831,7 @@ def update_scatter_data(frame_idx):
 
     # update population size label for this frame
     try:
-        pop_count = len(individuals) if individuals is not None else 0
+        pop_count: int = len(individuals) if individuals is not None else 0
         pop_text_obj.set_text(f"Population: {pop_count}")
     except Exception:
         try:
@@ -849,7 +851,7 @@ def update_scatter_data(frame_idx):
         movement_artists = []
 
         if show_movement and frame_idx > 0:
-            prev_idx = max(0, frame_idx - 1)
+            prev_idx: int = max(0, frame_idx - 1)
             prev_inds = ind_list[prev_idx]
             # build id -> pos mapping for previous frame
             prev_pos = {}
@@ -875,7 +877,7 @@ def update_scatter_data(frame_idx):
             max_arrows = 10000
             if len(moved_pairs) > max_arrows:
                 # sample evenly
-                step = max(1, len(moved_pairs) // max_arrows)
+                step: int = max(1, len(moved_pairs) // max_arrows)
                 moved_pairs = moved_pairs[::step]
 
             for x0, x1 in moved_pairs:
@@ -899,14 +901,14 @@ def update_scatter_data(frame_idx):
         pass
 
 
-def on_slider(val):
+def on_slider(val) -> None:
     global cur_frame
     f = int(slider.val)
-    cur_frame = f
+    cur_frame: int = f
     update_scatter_data(cur_frame)
     # try to preserve selection across frames by id
     if selected.get("id", None) is not None:
-        idx = find_index_by_id(selected["id"])
+        idx: None | int = find_index_by_id(selected["id"])
         if idx is not None:
             selected["index"] = idx
             plot_for_selection(idx)
@@ -920,7 +922,7 @@ def on_slider(val):
     plot_for_selection(None)
 
 
-def play_toggle(event):
+def play_toggle(event) -> None:
     playing["val"] = not playing["val"]
     try:
         if playing["val"]:
@@ -933,17 +935,17 @@ def play_toggle(event):
         pass
 
 
-def start_timer():
+def start_timer() -> None:
     global timer
     try:
-        timer = fig.canvas.new_timer(interval=400)
+        timer: TimerBase = fig.canvas.new_timer(interval=400)
         timer.add_callback(timer_step)
         timer.start()
     except Exception:
         timer = None
 
 
-def stop_timer():
+def stop_timer() -> None:
     try:
         if timer is not None:
             timer.stop()
@@ -951,7 +953,7 @@ def stop_timer():
         pass
 
 
-def timer_step():
+def timer_step() -> None:
     global cur_frame
     if cur_frame < n_frames - 1:
         cur_frame += 1
@@ -977,19 +979,19 @@ except Exception:
     pass
 
 # headless support
-explicit_headless = any(a in ("--headless", "--screenshot") for a in sys.argv)
+explicit_headless: bool = any(a in ("--headless", "--screenshot") for a: str in sys.argv)
 if explicit_headless:
     # Save the current view (frame 0 by default)
-    out_path = os.path.join(base, "population_screenshot.png")
+    out_path: str = os.path.join(base, "population_screenshot.png")
     try:
         fig.savefig(out_path, dpi=150)
         print("Saved screenshot to", out_path)
-    except Exception as ex:
+    except Exception as ex: Exception:
         print("Failed saving screenshot:", ex)
     # Also save a snapshot at a random frame during the simulation
     try:
         if n_frames > 1:
-            rand_frame = random.randrange(0, n_frames)
+            rand_frame: int = random.randrange(0, n_frames)
         else:
             rand_frame = 0
         # update view to the random frame
@@ -997,10 +999,10 @@ if explicit_headless:
         slider.set_val(cur_frame)
         update_scatter_data(cur_frame)
         plot_for_selection(None)
-        rand_path = os.path.join(base, f"population_screenshot_random_t{cur_frame}.png")
+        rand_path: str = os.path.join(base, f"population_screenshot_random_t{cur_frame}.png")
         fig.savefig(rand_path, dpi=150)
         print("Saved random-frame screenshot to", rand_path)
-    except Exception as ex:
+    except Exception as ex: Exception:
         print("Failed saving random-frame screenshot:", ex)
 else:
     plt.show()

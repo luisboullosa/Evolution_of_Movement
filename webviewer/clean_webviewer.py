@@ -45,14 +45,14 @@ parser.add_argument(
     action="store_true",
     help="Remove empty simulation directories after cleaning (dry-run unless --yes)",
 )
-args = parser.parse_args()
+args: argparse.Namespace = parser.parse_args()
 
 base = args.base
 if not os.path.isdir(base):
     print(f"No such directory: {base}")
     exit(1)
 
-patterns = [
+patterns: list[str] = [
     os.path.join(base, "config.json"),
     os.path.join(base, "config.txt"),
     os.path.join(base, "nn_index.json"),
@@ -65,7 +65,7 @@ patterns = [
 # simNNNN directories after cleaning the top-level files.
 
 found = []
-for pat in patterns:
+for pat: str in patterns:
     found.extend(sorted(glob.glob(pat)))
 
 if found:
@@ -79,7 +79,7 @@ if found:
             try:
                 os.remove(f)
                 print("Deleted", f)
-            except Exception as e:
+            except Exception as e: Exception:
                 print("Failed to delete", f, ":", e)
         print("Done.")
     else:
@@ -121,7 +121,7 @@ if args.prune_sim_dirs:
                     try:
                         os.rmdir(d)
                         print("Removed", d)
-                    except Exception as e:
+                    except Exception as e: Exception:
                         print("Failed to remove", d, ":", e)
                 print("Done.")
             else:

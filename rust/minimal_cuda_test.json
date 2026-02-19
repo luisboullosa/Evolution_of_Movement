@@ -1,0 +1,13 @@
+{
+  "steps": 1,
+  "initial_population": 1,
+  "show_progress": false,
+  "output_dir_base": "temp_outputs",
+  "output_run_dir": "temp_outputs/minimal_cuda_run",
+  "grid_width": 4,
+  "nn_nodes": 0,
+  "nn_layers": 1,
+  "nn_nodes2": 0,
+  "nn_inputs": 1,
+  "nn_use_occupancy": false
+}
