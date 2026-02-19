@@ -1,8 +1,13 @@
+pub mod cladogram;
 pub mod config;
 pub mod environment;
+pub mod gpu_resource;
+pub mod hex_grid;
 pub mod individual;
 pub mod neural_network;
+pub mod nn_viz;
 pub mod perlin;
+pub mod save_state;
 pub mod simulation;
 pub mod snapshot;
 pub mod tensor;

@@ -140,21 +140,12 @@ impl Simulation {
         self.tensor.record_active(self.individuals.len());
     }
 
-    pub fn step(&mut self) {
+    pub fn step_with_existing_resources(&mut self) {
         self.step_count = self.step_count.saturating_add(1);
         self.tensor.sync_from_individuals(&self.individuals);
         self.row_rng
             .prepare(self.tensor.active_count(), self.step_count);
-
         let width = self.env.width.max(1);
-        self.env.step(
-            self.config.seed as u64,
-            self.config.env_time_speed,
-            self.config.env_time_amplitude,
-            self.config.env_perlin_spatial_scale,
-            self.config.env_perlin_time_scale,
-            self.config.resource_scale,
-        );
 
         let mut occupancy = vec![0i32; width];
         for ind in &self.individuals {
@@ -233,6 +224,18 @@ impl Simulation {
             true
         });
         self.tensor.sync_from_individuals(&self.individuals);
+    }
+
+    pub fn step(&mut self) {
+        self.env.step(
+            self.config.seed as u64,
+            self.config.env_time_speed,
+            self.config.env_time_amplitude,
+            self.config.env_perlin_spatial_scale,
+            self.config.env_perlin_time_scale,
+            self.config.resource_scale,
+        );
+        self.step_with_existing_resources();
     }
 
     pub fn run(&mut self) {

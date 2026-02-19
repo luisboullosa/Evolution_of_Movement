@@ -12,12 +12,26 @@ rand_distr = "0.4"
 serde_cbor = "0.11"
 cust = "0.3.2"
 
+# GUI and visualization
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.27"
+egui_extras = "0.27"
+
+# GPU compute
+wgpu = "0.19"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.3"
+
 [build-dependencies]
 chrono = "0.4"
 
 [[bin]]
 name = "evo_movement_bin_old"
 path = "src/bin/evo_movement_rust.rs"
+
+[[bin]]
+name = "evo_movement_interactive"
+path = "src/bin/interactive.rs"
 
 [package.metadata]
 build_script = true

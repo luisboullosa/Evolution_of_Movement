@@ -17,6 +17,8 @@ venv/
 # Generated outputs
 /output/
 output/
+/temp_outputs/
+/rust/temp_outputs/
 webviewer/sim*/
 
 # IDE / editor
@@ -42,6 +44,10 @@ Thumbs.db
 *.tsv
 *.jsonl
 
+# Simulation state files
+simulation_state.json
+**/simulation_state*.json
+
 # ignore tsv/jsonl under output and webviewer sim folders
 output/**/*.tsv
 output/**/*.jsonl
@@ -52,8 +58,11 @@ webviewer/**/*.jsonl
 webviewer/sim*/
 output/**/sim*/
 rust/webviewer/sim*/
+<<<<<<< HEAD
 rust/src/config.rs
 temp_outputs/
 rust/temp_outputs/
 tmp_push_repo/
 scripts/__pycache__/worker_pool.cpython-313.pyc
+=======
+>>>>>>> origin/copilot/interactive-simulation-environment

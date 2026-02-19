@@ -2,6 +2,28 @@
 
 Minimal C++ simulation of evolving movement in digital individuals.
 
+## Interactive Viewer (New!)
+
+An interactive visualization system for exploring evolution in real-time:
+
+```bash
+cd rust
+cargo run --release --bin evo_movement_interactive
+```
+
+Features:
+- **Real-time visualization** with hexagonal grid display
+- **Individual selection** and neural network inspection
+- **Multiple petri dishes** for parallel experiments
+- **Save/load functionality** for preserving states
+- **Cladogram tracking** for phylogenetic analysis
+- **Light-based resources** with dynamic environments
+- **GPU support planned** for future acceleration with large populations
+
+See [rust/INTERACTIVE_VIEWER.md](rust/INTERACTIVE_VIEWER.md) for detailed documentation.
+
+## Command-Line Simulation
+
 Build (Windows, PowerShell):
 
 ```powershell
