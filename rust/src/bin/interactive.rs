@@ -777,6 +777,13 @@ impl eframe::App for EvolutionApp {
                 ui.label(format!("Timestep: {}", dish.timestep));
                 ui.label(format!("Move Threshold: {:.2}", self.move_threshold));
                 ui.label(format!("Avg Move Signal (last step): {:.3}", dish.last_avg_move_signal));
+                
+                // Debug: show selected hex status
+                if let Some(hex) = self.selected_hex {
+                    ui.label(format!("DEBUG: Selected hex exists: ({}, {})", hex.q, hex.r));
+                } else {
+                    ui.label("DEBUG: No hex selected");
+                }
 
                 // Display selected hex information
                 if let Some(hex_coord) = self.selected_hex {
@@ -1346,6 +1353,7 @@ impl eframe::App for EvolutionApp {
                 if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                     // Always set the selected hex
                     self.selected_hex = Some(coord);
+                    println!("Selected hex: ({}, {})", coord.q, coord.r);
                     
                     if let Some(cell) = dish.hex_grid.get_cell(coord) {
                         if !cell.individual_indices.is_empty() {
@@ -1356,6 +1364,8 @@ impl eframe::App for EvolutionApp {
                             // Clicked on empty hex, clear individual selection
                             self.selected_individual_id = None;
                         }
+                    } else {
+                        println!("Warning: Clicked hex ({}, {}) not found in grid", coord.q, coord.r);
                     }
                 }
             }
