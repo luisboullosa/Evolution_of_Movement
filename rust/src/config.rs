@@ -113,6 +113,7 @@ pub struct Config {
     pub config_out_path: String,
 
     pub write_outputs: bool,
+    pub debug_buffered_output_logs: bool,
     pub write_individual_deltas: bool,
     pub individuals_delta_out_path: String,
     pub delta_full_interval: i32,
@@ -183,6 +184,7 @@ impl Default for Config {
             write_config: false,
             config_out_path: String::new(),
             write_outputs: true,
+            debug_buffered_output_logs: false,
             write_individual_deltas: false,
             individuals_delta_out_path: "output/example_sim/individuals.delta.jsonl".to_string(),
             delta_full_interval: 10,
