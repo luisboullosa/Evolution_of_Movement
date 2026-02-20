@@ -408,6 +408,7 @@ impl PetriDish {
 struct EvolutionApp {
     petri_dishes: Vec<PetriDish>,
     selected_dish: usize,
+    show_all_dishes: bool,
     selected_individual_id: Option<i32>,
     selected_hex: Option<HexCoord>,
     paused: bool,
@@ -422,6 +423,8 @@ struct EvolutionApp {
     phylogeny_zoom: f32,
     phylogeny_height: f32,
     phylogeny_max_render_nodes: usize,
+    phylogeny_last_draw_ids: Vec<i32>,
+    phylogeny_last_y_rank: HashMap<i32, f32>,
     show_config_editor: bool,
     config_radius_cells: i32,
     config_hex_size: f32,
@@ -441,6 +444,7 @@ impl EvolutionApp {
         Self {
             petri_dishes: dishes,
             selected_dish: 0,
+            show_all_dishes: true,
             selected_individual_id: None,
             selected_hex: None,
             paused: true,
@@ -455,6 +459,8 @@ impl EvolutionApp {
             phylogeny_zoom: 1.0,
             phylogeny_height: 300.0,
             phylogeny_max_render_nodes: 1500,
+            phylogeny_last_draw_ids: Vec::new(),
+            phylogeny_last_y_rank: HashMap::new(),
             show_config_editor: false,
             config_radius_cells: DEFAULT_DISH_RADIUS_CELLS,
             config_hex_size: 10.0,
@@ -505,10 +511,205 @@ impl EvolutionApp {
     }
 
     fn step_simulation(&mut self) {
-        if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
+        for dish in &mut self.petri_dishes {
             for _ in 0..self.timesteps_per_frame {
                 dish.step(self.move_threshold);
             }
+        }
+    }
+
+    fn sorted_lineages_in_cell(dish: &PetriDish, cell: &HexCell) -> Vec<([u8; 3], Vec<usize>)> {
+        let mut lineage_colors: HashMap<[u8; 3], Vec<usize>> = HashMap::new();
+        for &ind_idx in &cell.individual_indices {
+            if let Some(ind) = dish.simulation.individuals.get(ind_idx) {
+                lineage_colors
+                    .entry(ind.lineage_color)
+                    .or_insert_with(Vec::new)
+                    .push(ind_idx);
+            }
+        }
+
+        let mut lineage_vec: Vec<([u8; 3], Vec<usize>)> = lineage_colors.into_iter().collect();
+        lineage_vec.sort_unstable_by(|(ca, ia), (cb, ib)| {
+            ib.len()
+                .cmp(&ia.len())
+                .then_with(|| ca[0].cmp(&cb[0]))
+                .then_with(|| ca[1].cmp(&cb[1]))
+                .then_with(|| ca[2].cmp(&cb[2]))
+        });
+        lineage_vec
+    }
+
+    fn dominant_lineage_color(dish: &PetriDish, cell: &HexCell) -> Option<[u8; 3]> {
+        Self::sorted_lineages_in_cell(dish, cell)
+            .into_iter()
+            .next()
+            .map(|(color, _)| color)
+    }
+
+    fn sorted_extant_lineages(dish: &PetriDish) -> Vec<([u8; 3], usize, Option<usize>)> {
+        let mut pop_counts: HashMap<[u8; 3], usize> = HashMap::new();
+        let has_mover_data = dish.timestep > 0
+            && dish.simulation.last_delta.len() == dish.simulation.individuals.len();
+        let mut mover_counts: HashMap<[u8; 3], usize> = HashMap::new();
+
+        for (idx, ind) in dish.simulation.individuals.iter().enumerate() {
+            *pop_counts.entry(ind.lineage_color).or_insert(0) += 1;
+            if has_mover_data
+                && dish
+                    .simulation
+                    .last_delta
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(0)
+                    != 0
+            {
+                *mover_counts.entry(ind.lineage_color).or_insert(0) += 1;
+            }
+        }
+
+        let mut rows: Vec<([u8; 3], usize, Option<usize>)> = pop_counts
+            .into_iter()
+            .map(|(color, pop)| {
+                let movers = if has_mover_data {
+                    Some(mover_counts.get(&color).copied().unwrap_or(0))
+                } else {
+                    None
+                };
+                (color, pop, movers)
+            })
+            .collect();
+
+        rows.sort_unstable_by(|(ca, pa, ma), (cb, pb, mb)| {
+            pb.cmp(pa)
+                .then_with(|| mb.unwrap_or(0).cmp(&ma.unwrap_or(0)))
+                .then_with(|| ca[0].cmp(&cb[0]))
+                .then_with(|| ca[1].cmp(&cb[1]))
+                .then_with(|| ca[2].cmp(&cb[2]))
+        });
+        rows
+    }
+
+    fn generation_metrics(dish: &PetriDish) -> (usize, Option<f64>) {
+        if dish.simulation.individuals.is_empty() {
+            return (0, None);
+        }
+
+        let extant_ids: Vec<i32> = dish.simulation.individuals.iter().map(|ind| ind.id).collect();
+
+        let mut max_depth = 0usize;
+        for id in &extant_ids {
+            let mut cur = *id;
+            let mut depth = 0usize;
+            let mut guard = 0usize;
+            while let Some(node) = dish.cladogram.nodes.get(&cur) {
+                if let Some(parent_id) = node.parent_id {
+                    depth = depth.saturating_add(1);
+                    cur = parent_id;
+                    guard = guard.saturating_add(1);
+                    if guard > dish.cladogram.nodes.len() {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            max_depth = max_depth.max(depth);
+        }
+
+        let generations = max_depth.saturating_add(1);
+
+        let mut interval_sum = 0.0f64;
+        let mut interval_count = 0usize;
+        for node in dish.cladogram.nodes.values() {
+            if let Some(parent_id) = node.parent_id {
+                if let Some(parent) = dish.cladogram.nodes.get(&parent_id) {
+                    let dt = (node.birth_time - parent.birth_time).max(0) as f64;
+                    if dt > 0.0 {
+                        interval_sum += dt;
+                        interval_count = interval_count.saturating_add(1);
+                    }
+                }
+            }
+        }
+
+        let generation_time = if interval_count > 0 {
+            Some(interval_sum / interval_count as f64)
+        } else if max_depth > 0 {
+            Some(dish.timestep.max(0) as f64 / max_depth as f64)
+        } else {
+            None
+        };
+
+        (generations, generation_time)
+    }
+
+    fn draw_dish_thumbnail(&mut self, ui: &mut egui::Ui, dish_idx: usize, tile_size: egui::Vec2) {
+        let Some(dish) = self.petri_dishes.get(dish_idx) else {
+            return;
+        };
+
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for coord in dish.hex_grid.cells.keys() {
+            let (x, y) = coord.to_pixel(dish.hex_grid.hex_size);
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+        let (min_x, max_x, min_y, max_y) = if min_x.is_finite() {
+            (min_x, max_x, min_y, max_y)
+        } else {
+            (0.0, 1.0, 0.0, 1.0)
+        };
+
+        let width_px = (max_x - min_x) + 2.0 * dish.hex_grid.hex_size;
+        let height_px = (max_y - min_y) + 2.0 * dish.hex_grid.hex_size;
+        let scale = ((tile_size.x - 10.0) / width_px)
+            .min((tile_size.y - 10.0) / height_px)
+            .max(0.05);
+        let hex_size = dish.hex_grid.hex_size;
+        let padding = hex_size;
+
+        let canvas_size = tile_size;
+        let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::click());
+
+        let drawn_w = width_px * scale;
+        let drawn_h = height_px * scale;
+        let offset = egui::vec2(
+            (canvas_size.x - drawn_w).max(0.0) * 0.5,
+            (canvas_size.y - drawn_h).max(0.0) * 0.5,
+        );
+
+        for (coord, cell) in &dish.hex_grid.cells {
+            let (x, y) = coord.to_pixel(hex_size);
+            let local_x = (x - min_x + padding) * scale;
+            let local_y = (y - min_y + padding) * scale;
+            let screen_pos = response.rect.min + offset + egui::vec2(local_x, local_y);
+
+            let hex_points = hexagon_points(screen_pos, hex_size * scale);
+            let brightness = (cell.resource_level * 255.0).clamp(0.0, 255.0) as u8;
+            let color = egui::Color32::from_rgb(brightness, brightness, 100);
+            painter.add(egui::Shape::convex_polygon(
+                hex_points,
+                color,
+                egui::Stroke::new(0.4, egui::Color32::GRAY),
+            ));
+
+            if let Some(dom) = Self::dominant_lineage_color(dish, cell) {
+                painter.circle_filled(
+                    screen_pos,
+                    (2.2 * scale).max(1.8),
+                    egui::Color32::from_rgb(dom[0], dom[1], dom[2]),
+                );
+            }
+        }
+
+        if response.clicked() {
+            self.selected_dish = dish_idx;
         }
     }
 
@@ -679,6 +880,8 @@ impl eframe::App for EvolutionApp {
 
                 ui.separator();
 
+                ui.checkbox(&mut self.show_all_dishes, "Show All Dishes");
+
                 if ui.button("➕ Add Petri Dish").clicked() {
                     self.add_petri_dish();
                 }
@@ -775,19 +978,18 @@ impl eframe::App for EvolutionApp {
                 ui.heading("Statistics");
                 ui.label(format!("Individuals: {}", dish.simulation.individuals.len()));
                 ui.label(format!("Timestep: {}", dish.timestep));
+                let (generations, generation_time) = Self::generation_metrics(dish);
+                ui.label(format!("Generations: {}", generations));
+                if let Some(gt) = generation_time {
+                    ui.label(format!("Estimated Generation Time: {:.2} steps", gt));
+                } else {
+                    ui.label("Estimated Generation Time: n/a");
+                }
                 ui.label(format!("Move Threshold: {:.2}", self.move_threshold));
                 ui.label(format!("Avg Move Signal (last step): {:.3}", dish.last_avg_move_signal));
-                
-                // Debug: show selected hex status
-                if let Some(hex) = self.selected_hex {
-                    ui.label(format!("DEBUG: Selected hex exists: ({}, {})", hex.q, hex.r));
-                } else {
-                    ui.label("DEBUG: No hex selected");
-                }
 
                 // Display selected hex information
                 if let Some(hex_coord) = self.selected_hex {
-                    ui.label(format!("DEBUG: Trying to get cell for hex ({}, {})", hex_coord.q, hex_coord.r));
                     match dish.hex_grid.get_cell(hex_coord) {
                         Some(cell) => {
                             ui.separator();
@@ -811,21 +1013,11 @@ impl eframe::App for EvolutionApp {
                             if !cell.individual_indices.is_empty() {
                             ui.separator();
                             ui.label("Lineages in this hex:");
-                            
-                            // Collect unique lineage colors
-                            let mut lineage_colors: std::collections::HashMap<[u8; 3], Vec<usize>> = 
-                                std::collections::HashMap::new();
-                            
-                            for &ind_idx in &cell.individual_indices {
-                                if let Some(ind) = dish.simulation.individuals.get(ind_idx) {
-                                    lineage_colors.entry(ind.lineage_color)
-                                        .or_insert_with(Vec::new)
-                                        .push(ind_idx);
-                                }
-                            }
-                            
+
+                            let lineage_colors = Self::sorted_lineages_in_cell(dish, cell);
+
                             // Display each lineage with a button to select a random individual
-                            for (color, individual_indices) in lineage_colors.iter() {
+                            for (color, individual_indices) in lineage_colors {
                                 ui.horizontal(|ui| {
                                     // Color swatch
                                     let color_rect = egui::Rect::from_min_size(
@@ -847,7 +1039,7 @@ impl eframe::App for EvolutionApp {
                                     // Button to select random individual from this lineage
                                     if ui.small_button("Select Random").clicked() {
                                         use rand::seq::SliceRandom;
-                                        if let Some(&random_idx) = individual_indices.choose(&mut rand::thread_rng()) {
+                                        if let Some(&random_idx) = individual_indices.as_slice().choose(&mut rand::thread_rng()) {
                                             if let Some(ind) = dish.simulation.individuals.get(random_idx) {
                                                 self.selected_individual_id = Some(ind.id);
                                             }
@@ -858,9 +1050,41 @@ impl eframe::App for EvolutionApp {
                         }
                         },
                         None => {
-                            ui.label(format!("DEBUG: Cell not found for hex ({}, {})", hex_coord.q, hex_coord.r));
-                            ui.label(format!("DEBUG: Grid has {} cells", dish.hex_grid.cells.len()));
+                            ui.label(format!("Selected hex ({}, {}) not found", hex_coord.q, hex_coord.r));
                         }
+                    }
+                } else {
+                    ui.separator();
+                    ui.heading("Extant Lineages");
+                    let lineages = Self::sorted_extant_lineages(dish);
+                    if lineages.is_empty() {
+                        ui.label("No extant lineages yet.");
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .max_height(260.0)
+                            .show(ui, |ui| {
+                                for (color, pop, movers) in lineages {
+                                    ui.horizontal(|ui| {
+                                        let (swatch_resp, swatch_painter) = ui.allocate_painter(
+                                            egui::vec2(16.0, 16.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        let center = swatch_resp.rect.center();
+                                        let hex = hexagon_points(center, 6.5);
+                                        swatch_painter.add(egui::Shape::convex_polygon(
+                                            hex,
+                                            egui::Color32::from_rgb(color[0], color[1], color[2]),
+                                            egui::Stroke::new(0.8, egui::Color32::BLACK),
+                                        ));
+
+                                        let movers_text = match movers {
+                                            Some(v) => format!("~ movers: {}", v),
+                                            None => "~ movers: n/a".to_string(),
+                                        };
+                                        ui.label(format!("pop: {} | {}", pop, movers_text));
+                                    });
+                                }
+                            });
                     }
                 }
 
@@ -951,6 +1175,8 @@ impl eframe::App for EvolutionApp {
                     ui.add(egui::Slider::new(&mut self.phylogeny_height, 140.0..=1200.0).text("Phylogeny Height"));
                     ui.add(egui::Slider::new(&mut self.phylogeny_max_render_nodes, 200..=10000).text("Max Render Nodes"));
                     
+                    let mut next_draw_ids: Option<Vec<i32>> = None;
+                    let mut next_y_rank: Option<HashMap<i32, f32>> = None;
                     if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                         ui.label(format!("Total nodes: {}", dish.cladogram.nodes.len()));
                         
@@ -975,6 +1201,7 @@ impl eframe::App for EvolutionApp {
                             // Priority order is extant leaves + their ancestor paths, then recent nodes.
                             let original_total = ids.len();
                             if ids.len() > self.phylogeny_max_render_nodes {
+                                let id_set: HashSet<i32> = ids.iter().copied().collect();
                                 let mut extant: Vec<i32> = ids
                                     .iter()
                                     .copied()
@@ -986,6 +1213,16 @@ impl eframe::App for EvolutionApp {
                                 });
 
                                 let mut keep: HashSet<i32> = HashSet::new();
+
+                                for id in &self.phylogeny_last_draw_ids {
+                                    if id_set.contains(id) {
+                                        keep.insert(*id);
+                                        if keep.len() >= self.phylogeny_max_render_nodes {
+                                            break;
+                                        }
+                                    }
+                                }
+
                                 for id in &extant {
                                     let mut cur = *id;
                                     loop {
@@ -1024,6 +1261,8 @@ impl eframe::App for EvolutionApp {
                                     (node.birth_time, *id)
                                 });
                             }
+
+                            next_draw_ids = Some(ids.clone());
 
                             ui.label(format!("Showing {} / {} nodes", ids.len(), original_total));
 
@@ -1064,7 +1303,11 @@ impl eframe::App for EvolutionApp {
                                 }
                                 depth.insert(id, d);
                                 let mut children = dish.cladogram.nodes[&id].children.clone();
-                                children.sort_unstable_by(|a, b| b.cmp(a));
+                                children.sort_unstable_by_key(|child_id| {
+                                    let n = &dish.cladogram.nodes[child_id];
+                                    (n.birth_time, *child_id)
+                                });
+                                children.reverse();
                                 for child_id in children {
                                     if draw_set.contains(&child_id) {
                                         stack.push((child_id, d + 1));
@@ -1081,6 +1324,7 @@ impl eframe::App for EvolutionApp {
                                 id: i32,
                                 nodes: &HashMap<i32, evo_movement_rust::cladogram::LineageNode>,
                                 draw_set: &HashSet<i32>,
+                                last_y_rank: &HashMap<i32, f32>,
                                 y_map: &mut HashMap<i32, f32>,
                                 next_y: &mut f32,
                             ) -> f32 {
@@ -1089,11 +1333,21 @@ impl eframe::App for EvolutionApp {
                                 }
                                 let node = &nodes[&id];
                                 let mut children = node.children.clone();
-                                children.sort_unstable();
+                                children.sort_unstable_by(|a, b| {
+                                    let ya = last_y_rank.get(a).copied().unwrap_or(f32::INFINITY);
+                                    let yb = last_y_rank.get(b).copied().unwrap_or(f32::INFINITY);
+                                    ya.partial_cmp(&yb)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                        .then_with(|| {
+                                            let na = &nodes[a];
+                                            let nb = &nodes[b];
+                                            (na.birth_time, *a).cmp(&(nb.birth_time, *b))
+                                        })
+                                });
                                 let mut child_ys = Vec::new();
                                 for child_id in children {
                                     if draw_set.contains(&child_id) {
-                                        child_ys.push(assign_y(child_id, nodes, draw_set, y_map, next_y));
+                                        child_ys.push(assign_y(child_id, nodes, draw_set, last_y_rank, y_map, next_y));
                                     }
                                 }
                                 let y_val = if child_ys.is_empty() {
@@ -1110,13 +1364,28 @@ impl eframe::App for EvolutionApp {
                                 let mut y_map: HashMap<i32, f32> = HashMap::new();
                                 let mut next_y = 0.0f32;
                                 for root in roots {
-                                    let _ = assign_y(root, &dish.cladogram.nodes, &draw_set, &mut y_map, &mut next_y);
+                                    let _ = assign_y(
+                                        root,
+                                        &dish.cladogram.nodes,
+                                        &draw_set,
+                                        &self.phylogeny_last_y_rank,
+                                        &mut y_map,
+                                        &mut next_y,
+                                    );
                                 }
                                 for id in &ids {
                                     if !y_map.contains_key(id) {
-                                        let _ = assign_y(*id, &dish.cladogram.nodes, &draw_set, &mut y_map, &mut next_y);
+                                        let _ = assign_y(
+                                            *id,
+                                            &dish.cladogram.nodes,
+                                            &draw_set,
+                                            &self.phylogeny_last_y_rank,
+                                            &mut y_map,
+                                            &mut next_y,
+                                        );
                                     }
                                 }
+                                next_y_rank = Some(y_map.clone());
 
                                 let mut effective_depth_max = depth.values().copied().max().unwrap_or(1);
                                 let extant_ids: HashSet<i32> = dish
@@ -1221,12 +1490,42 @@ impl eframe::App for EvolutionApp {
                             });
                         }
                     }
+                    if let Some(ids) = next_draw_ids {
+                        self.phylogeny_last_draw_ids = ids;
+                    }
+                    if let Some(y_rank) = next_y_rank {
+                        self.phylogeny_last_y_rank = y_rank;
+                    }
                 }
             });
         }
 
         // Central panel - Main visualization
         egui::CentralPanel::default().show(ctx, |ui| {
+            if self.show_all_dishes {
+                ui.heading("All Petri Dishes");
+                ui.label("Click a dish preview to make it active.");
+                let cols = 2usize;
+                egui::Grid::new("all_dishes_grid")
+                    .num_columns(cols)
+                    .spacing([12.0, 10.0])
+                    .show(ui, |ui| {
+                        let total = self.petri_dishes.len();
+                        let tile_size = egui::vec2(300.0, 220.0);
+                        for i in 0..total {
+                            ui.vertical(|ui| {
+                                let selected_marker = if i == self.selected_dish { "*" } else { "" };
+                                ui.label(format!("{} {}", selected_marker, self.petri_dishes[i].name));
+                                self.draw_dish_thumbnail(ui, i, tile_size);
+                            });
+                            if i % cols == cols - 1 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+                ui.separator();
+            }
+
             let dish_name = if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                 dish.name.clone()
             } else {
@@ -1301,20 +1600,25 @@ impl eframe::App for EvolutionApp {
                         egui::Stroke::new(0.5, egui::Color32::GRAY),
                     ));
 
-                    // Draw individuals
-                    for &ind_idx in &cell.individual_indices {
-                        if let Some(ind) = individuals.get(ind_idx) {
-                            let color = egui::Color32::from_rgb(
-                                ind.lineage_color[0],
-                                ind.lineage_color[1],
-                                ind.lineage_color[2],
-                            );
-                            painter.circle_filled(screen_pos, 3.0 * scale, color);
+                    // Draw hex occupant marker using dominant lineage color.
+                    if let Some(dom) = Self::dominant_lineage_color(dish, cell) {
+                        painter.circle_filled(
+                            screen_pos,
+                            (3.0 * scale).max(2.2),
+                            egui::Color32::from_rgb(dom[0], dom[1], dom[2]),
+                        );
 
-                            if Some(ind.id) == selected_ind_id {
+                        if let Some(sel_id) = selected_ind_id {
+                            let selected_in_cell = cell.individual_indices.iter().any(|idx| {
+                                individuals
+                                    .get(*idx)
+                                    .map(|ind| ind.id == sel_id)
+                                    .unwrap_or(false)
+                            });
+                            if selected_in_cell {
                                 painter.circle_stroke(
                                     screen_pos,
-                                    5.0 * scale,
+                                    (5.0 * scale).max(3.0),
                                     egui::Stroke::new(2.0, egui::Color32::WHITE),
                                 );
                             }
@@ -1336,6 +1640,7 @@ impl eframe::App for EvolutionApp {
                 }
                 if response.secondary_clicked() {
                     self.selected_individual_id = None;
+                    self.selected_hex = None;
                 }
 
                 if response.dragged() {
