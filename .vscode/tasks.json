@@ -2,15 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "CMake: Configure (MinGW Release)",
+      "label": "CMake: Configure (Release)",
       "type": "shell",
-      "command": "cmake -S . -B build/Release -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Release",
+      "command": "cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release",
+      "windows": {
+        "command": "cmake -S . -B build/Release -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Release"
+      },
       "problemMatcher": []
     },
     {
-      "label": "CMake: Configure (MinGW Debug)",
+      "label": "CMake: Configure (Debug)",
       "type": "shell",
-      "command": "cmake -S . -B build/Debug -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Debug",
+      "command": "cmake -S . -B build/Debug -DCMAKE_BUILD_TYPE=Debug",
+      "windows": {
+        "command": "cmake -S . -B build/Debug -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Debug"
+      },
       "problemMatcher": []
     },
     {
@@ -30,13 +36,19 @@
     {
       "label": "Run: exe (Debug)",
       "type": "shell",
-      "command": "${workspaceFolder}/build/Debug/evo-movement-sim.exe",
+      "command": "${workspaceFolder}/build/Debug/evo-movement-sim",
+      "windows": {
+        "command": "${workspaceFolder}/build/Debug/evo-movement-sim.exe"
+      },
       "problemMatcher": []
     },
     {
       "label": "Run: exe (Release)",
       "type": "shell",
-      "command": "${workspaceFolder}/build/Release/evo-movement-sim.exe",
+      "command": "${workspaceFolder}/build/Release/evo-movement-sim",
+      "windows": {
+        "command": "${workspaceFolder}/build/Release/evo-movement-sim.exe"
+      },
       "problemMatcher": []
     },
     {
@@ -46,8 +58,7 @@
       "options": { "cwd": "${workspaceFolder}/build/Debug" },
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
-    }
-    ,
+    },
     {
       "label": "Run CTest (Release)",
       "type": "shell",
@@ -55,8 +66,7 @@
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
-    }
-    ,
+    },
     {
       "label": "Cargo: build (debug)",
       "type": "shell",
@@ -64,6 +74,28 @@
       "options": { "cwd": "${workspaceFolder}/rust" },
       "problemMatcher": ["$rustc"],
       "group": { "kind": "build", "isDefault": false }
+    },
+    {
+      "label": "Cargo: build (release)",
+      "type": "shell",
+      "command": "cargo build --release",
+      "options": { "cwd": "${workspaceFolder}/rust" },
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": false }
+    },
+    {
+      "label": "Cargo: test",
+      "type": "shell",
+      "command": "cargo test",
+      "options": { "cwd": "${workspaceFolder}/rust" },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "Rust: run (debug)",
+      "type": "shell",
+      "command": "cargo run --bin evo_movement_rust",
+      "options": { "cwd": "${workspaceFolder}/rust" },
+      "problemMatcher": ["$rustc"]
     }
   ]
 }

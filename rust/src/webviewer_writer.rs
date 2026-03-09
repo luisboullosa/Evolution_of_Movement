@@ -553,7 +553,7 @@ impl WebviewerWriter {
         }
         let frame = CompactIndividualsFrame { t, ind: compact };
         serde_json::to_writer(&mut *writer, &frame)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         writer.write_all(b"\n")
     }
 
@@ -583,7 +583,7 @@ impl WebviewerWriter {
         }
         let frame = CompactIndividualsFrame { t, ind: compact };
         serde_cbor::to_writer(&mut *writer, &frame)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         Ok(())
     }
 

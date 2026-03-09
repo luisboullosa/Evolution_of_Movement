@@ -17,7 +17,7 @@ fn main() {
     let cfg = if let Some(p) = cfg_path {
         let path = Path::new(&p);
         if path.exists() {
-            Config::try_load(path)
+            Config::try_load(path).unwrap_or_default()
         } else {
             Config::default()
         }
@@ -25,9 +25,9 @@ fn main() {
         let p1 = Path::new("input/config_test.json");
         let p2 = Path::new("../input/config_test.json");
         if p1.exists() {
-            Config::try_load(p1)
+            Config::try_load(p1).unwrap_or_default()
         } else if p2.exists() {
-            Config::try_load(p2)
+            Config::try_load(p2).unwrap_or_default()
         } else {
             Config::default()
         }

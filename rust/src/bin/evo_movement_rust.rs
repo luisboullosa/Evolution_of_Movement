@@ -389,14 +389,12 @@ fn main() {
     let mut sim = Simulation::new(&cfg);
     if cfg.replay_snapshot_path.is_empty() {
         sim.init_population(cfg.initial_population as usize);
-    } else {
-        if let Err(err) = sim.load_snapshot_from_path(&cfg.replay_snapshot_path) {
-            eprintln!(
-                "Failed to load replay snapshot from {}: {}",
-                cfg.replay_snapshot_path, err
-            );
-            return;
-        }
+    } else if let Err(err) = sim.load_snapshot_from_path(&cfg.replay_snapshot_path) {
+        eprintln!(
+            "Failed to load replay snapshot from {}: {}",
+            cfg.replay_snapshot_path, err
+        );
+        return;
     }
     sim.run();
 }

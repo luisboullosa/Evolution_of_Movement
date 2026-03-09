@@ -16,10 +16,12 @@ and how to generate TSV/JSONL outputs for the webviewer, see
 `scripts/generate_webviewer_outputs.ps1` in the repository root.
 
 Interactive dashboards
+
 ----------------------
 If you want to explore the environment/NN behavior without running the binary, start the Dash app at `webviewer/interactive_dash.py` (from repo root):
 
-```powershell
+```bash
+pip install dash plotly numpy
 python webviewer/interactive_dash.py --port 8050
 ```
 

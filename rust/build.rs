@@ -5,7 +5,7 @@ use std::fs;
 fn main() {
     // Try to get git commit short hash
     let mut build_id = String::new();
-    if let Ok(output) = Command::new("git").args(&["rev-parse", "--short", "HEAD"]).output() {
+    if let Ok(output) = Command::new("git").args(["rev-parse", "--short", "HEAD"]).output() {
         if output.status.success() {
             if let Ok(s) = String::from_utf8(output.stdout) {
                 build_id = s.trim().to_string();

@@ -65,7 +65,7 @@ impl Simulation {
                 // Treat `radiate` as number of independent sampling events.
                 // For each event, with probability `mutation_rate` apply a Cauchy perturbation.
                 let events = (self.config.radiate as i64).max(0) as usize;
-                let mutation_rate = self.config.mutation_rate as f64;
+                let mutation_rate = self.config.mutation_rate;
                 let cauchy = Cauchy::new(0.0, self.config.mutation_sigma).unwrap();
                 for w in nn.weights.iter_mut() {
                     for _ in 0..events {

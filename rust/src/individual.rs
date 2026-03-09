@@ -29,6 +29,7 @@ impl Individual {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn act(
         &mut self,
         left: f64,
@@ -58,14 +59,12 @@ impl Individual {
             } else {
                 self.nn.forward_multi(&stack_inputs)
             }
+        } else if self.nn.inputs <= 1 {
+            // historically, single-input nets receive the local resource
+            self.nn.forward_single_buf(center, hidden_buf, out2_buf)
         } else {
-            if self.nn.inputs <= 1 {
-                // historically, single-input nets receive the local resource
-                self.nn.forward_single_buf(center, hidden_buf, out2_buf)
-            } else {
-                // pass a slice view of the stack array; forward_multi will only read up to `self.inputs`
-                self.nn.forward_multi_buf(&stack_inputs, hidden_buf, out2_buf)
-            }
+            // pass a slice view of the stack array; forward_multi will only read up to `self.inputs`
+            self.nn.forward_multi_buf(&stack_inputs, hidden_buf, out2_buf)
         };
 
         // Decision: gather if magnitude < 0.5, otherwise move and spend
