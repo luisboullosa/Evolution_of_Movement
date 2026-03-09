@@ -18,6 +18,10 @@ import math
 from typing import List, Tuple
 
 import dash
+from matplotlib.pylab import Generator
+from matplotlib.pylab import Generator
+from dash._callback_context import CallbackContext
+from matplotlib.pylab import Generator
 import numpy as np
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, dcc, html
@@ -63,13 +67,13 @@ def preset_strategies() -> List[Tuple[str, dict]]:
 
     def empty_state():
         return {
-            "w1": [[0.0] * NN_INPUTS for _ in range(NN_NODES)],
+            "w1": [[0.0] * NN_INPUTS for _: int in range(NN_NODES)],
             "b1": [0.0] * NN_NODES,
-            "w2": [[0.0] * NN_NODES for _ in range(NN_NODES2)],
+            "w2": [[0.0] * NN_NODES for _: int in range(NN_NODES2)],
             "b2": [0.0] * NN_NODES2,
         }
 
-    def set_w(row, col, val, arr):
+    def set_w(row, col, val, arr) -> None:
         arr[row][col] = val
 
     presets: List[Tuple[str, dict]] = []
@@ -136,16 +140,16 @@ def cauchy_mutation(rng: np.random.Generator, sigma: float) -> float:
 
 def perlin_base(width: int, seed: int, resource_scale: float) -> np.ndarray:
     """Match rust/perlin.rs::generate (StdRng seeded, values in [0,1]) and scale."""
-    rng = chacha_rng(seed)
-    base = rng.random(width)
+    rng: Generator = chacha_rng(seed)
+    base: np.ndarray[Tuple[argparse.Any], np.dtype[np.float64]] = rng.random(width)
     return base * resource_scale
 
 
 def perlin_slice(width: int, seed: int, time_offset: float, time_scale: float) -> np.ndarray:
     """Match rust/perlin.rs::sample_time_slice: mix seed with time_offset, ignore scales."""
-    tseed = int(time_offset * 1e6) & 0xFFFFFFFFFFFFFFFF
-    tseed = (tseed + seed) % (2**63 - 1)
-    rng = chacha_rng(tseed)
+    tseed: int = int(time_offset * 1e6) & 0xFFFFFFFFFFFFFFFF
+    tseed: int = (tseed + seed) % (2**63 - 1)
+    rng: Generator = chacha_rng(tseed)
     return rng.random(width)
 
 
@@ -158,7 +162,7 @@ def env_frame(
     resource_scale: float,
 ) -> np.ndarray:
     # Mirror rust/environment.rs: resources = (perlin_base + slice * time_amplitude) * resource_scale
-    slice_vals = perlin_slice(base.size, seed, t, time_scale)
+    slice_vals: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = perlin_slice(base.size, seed, t, time_scale)
     return (base + slice_vals * time_amplitude) * resource_scale
 
 
@@ -170,19 +174,19 @@ def forward_multi_layer(
     b2: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Emulate rust NeuralNetwork forward_multi for 2-layer nets with flexible inputs."""
-    x = np.array(inputs, dtype=float)
+    x: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(inputs, dtype=float)
     if x.ndim == 1:
-        x = x.reshape(1, -1)
+        x: np.ndarray[Tuple[int], np.dtype[argparse.Any]] = x.reshape(1, -1)
     # pad or truncate to NN_INPUTS to keep shape stable
     if x.shape[1] < NN_INPUTS:
-        pad = np.zeros((x.shape[0], NN_INPUTS), dtype=float)
+        pad: np.ndarray[Tuple[int], np.dtype[argparse.Any]] = np.zeros((x.shape[0], NN_INPUTS), dtype=float)
         pad[:, : x.shape[1]] = x
         x = pad
     elif x.shape[1] > NN_INPUTS:
-        x = x[:, :NN_INPUTS]
+        x: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = x[:, :NN_INPUTS]
 
-    h = np.tanh(x @ w1.T + b1)
-    out2 = np.tanh(h @ w2.T + b2)
+    h: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.tanh(x @ w1.T + b1)
+    out2: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.tanh(h @ w2.T + b2)
     summed = np.sum(out2, axis=1)
     return summed, out2
 
@@ -191,7 +195,7 @@ def parse_csv_floats(text: str) -> List[float]:
     if not text.strip():
         return []
     vals = []
-    for part in text.split(","):
+    for part: str in text.split(","):
         try:
             vals.append(float(part.strip()))
         except Exception:
@@ -206,13 +210,13 @@ def carrying_capacity(
     maintenance_cost_per_node: float,
     death_risk: float,
 ) -> Tuple[float, str]:
-    mean_base = 0.5 * resource_scale
-    mean_time = 0.5 * time_amplitude
-    mean_res = (mean_base + mean_time) * resource_scale
-    maint = (NN_NODES + NN_NODES2) * maintenance_cost_per_node
+    mean_base: float = 0.5 * resource_scale
+    mean_time: float = 0.5 * time_amplitude
+    mean_res: float = (mean_base + mean_time) * resource_scale
+    maint: float = (NN_NODES + NN_NODES2) * maintenance_cost_per_node
     if maint <= 0 or mean_res <= 0:
         return math.inf, "infinite"
-    k = (mean_res * width) / maint
+    k: float = (mean_res * width) / maint
     if death_risk > 0:
         k *= max(0.1, 1.0 - min(death_risk * 0.5, 0.9))
     if k > 50_000:
@@ -471,8 +475,8 @@ def build_app() -> Dash:
         Input("smooth-window", "value"),
     )
     def recompute_base(width, seed, resource_scale, smooth_window):
-        base = perlin_base(int(width), int(seed), float(resource_scale))
-        base = smooth(base, int(smooth_window or 1))
+        base: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = perlin_base(int(width), int(seed), float(resource_scale))
+        base: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = smooth(base, int(smooth_window or 1))
         return base.tolist()
 
     # Time keeper
@@ -484,7 +488,7 @@ def build_app() -> Dash:
         State("auto-play", "value"),
         State("manual-time", "value"),
     )
-    def advance_time(_n, data, time_speed, autoplay, manual_time):
+    def advance_time(_n, data, time_speed, autoplay, manual_time) -> dict[str, float]:
         t = float(data.get("t", 0.0))
         if autoplay and "run" in autoplay:
             t += float(time_speed)
@@ -503,20 +507,20 @@ def build_app() -> Dash:
         Input("seed", "value"),
         Input("smooth-window", "value"),
     )
-    def update_env_plot(base_data, time_data, time_amplitude, time_scale, resource_scale, seed, smooth_window):
+    def update_env_plot(base_data, time_data, time_amplitude, time_scale, resource_scale, seed, smooth_window) -> go.Figure:
         if base_data is None:
             return go.Figure()
-        base = np.array(base_data, dtype=float)
-        t = float(time_data.get("t", 0.0)) if time_data else 0.0
-        slice_vals = perlin_slice(base.size, int(seed), t, float(time_scale))
-        slice_vals = smooth(slice_vals, int(smooth_window or 1))
+        base: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(base_data, dtype=float)
+        t: float = float(time_data.get("t", 0.0)) if time_data else 0.0
+        slice_vals: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = perlin_slice(base.size, int(seed), t, float(time_scale))
+        slice_vals: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = smooth(slice_vals, int(smooth_window or 1))
         frame = (base + slice_vals * float(time_amplitude)) * float(resource_scale)
         fig = go.Figure()
         fig.add_trace(go.Scatter(y=frame, mode="lines", name=f"t={t:.2f}"))
-        ymax_expected = (float(resource_scale) + float(time_amplitude)) * float(resource_scale)
+        ymax_expected: float = (float(resource_scale) + float(time_amplitude)) * float(resource_scale)
         ymin = 0.0
-        ymax = max(ymax_expected, float(frame.max()) if frame.size else 1.0)
-        pad = max(0.1, 0.05 * ymax)
+        ymax: float = max(ymax_expected, float(frame.max()) if frame.size else 1.0)
+        pad: float = max(0.1, 0.05 * ymax)
         fig.update_layout(
             autosize=False,
             height=380,
@@ -538,48 +542,48 @@ def build_app() -> Dash:
         prevent_initial_call=True,
     )
     def sync_nn(apply_clicks, mutate_clicks, strategy_idx, state):
-        ctx = dash.callback_context
+        ctx: CallbackContext = dash.callback_context
         trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
         new_state = copy.deepcopy(state) if state else copy.deepcopy(presets[0][1])
 
-        rng = np.random.default_rng()
+        rng: Generator = np.random.default_rng()
 
         if "strategy-index.value" in trigger or "apply-weights.n_clicks" in trigger:
             idx = int(strategy_idx or 0)
-            idx = max(0, min(idx, len(presets) - 1))
+            idx: int = max(0, min(idx, len(presets) - 1))
             _, preset_state = presets[idx]
             new_state = copy.deepcopy(preset_state)
 
         if "mutate.n_clicks" in trigger:
             mutated = 0
             for arr in new_state["w1"]:
-                for i in range(len(arr)):
+                for i: int in range(len(arr)):
                     if rng.random() < MUTATION_RATE:
                         arr[i] += cauchy_mutation(rng, MUTATION_SIGMA)
                         mutated += 1
-            for i in range(len(new_state["b1"])):
+            for i: int in range(len(new_state["b1"])):
                 if rng.random() < MUTATION_RATE:
                     new_state["b1"][i] += cauchy_mutation(rng, MUTATION_SIGMA)
                     mutated += 1
             for arr in new_state["w2"]:
-                for i in range(len(arr)):
+                for i: int in range(len(arr)):
                     if rng.random() < MUTATION_RATE:
                         arr[i] += cauchy_mutation(rng, MUTATION_SIGMA)
                         mutated += 1
-            for i in range(len(new_state["b2"])):
+            for i: int in range(len(new_state["b2"])):
                 if rng.random() < MUTATION_RATE:
                     new_state["b2"][i] += cauchy_mutation(rng, MUTATION_SIGMA)
                     mutated += 1
             if mutated == 0:
                 # ensure visible change: mutate one random parameter
-                targets = (
-                    [("w1", i, j) for i in range(NN_NODES) for j in range(NN_INPUTS)]
-                    + [("b1", i, None) for i in range(NN_NODES)]
-                    + [("w2", i, j) for i in range(NN_NODES2) for j in range(NN_NODES)]
-                    + [("b2", i, None) for i in range(NN_NODES2)]
+                targets: List[Tuple[str | int | None] | Tuple[int | None | Literal['b1']] | Tuple[str | int]] = (
+                    [("w1", i, j) for i: int in range(NN_NODES) for j: int in range(NN_INPUTS)]
+                    + [("b1", i, None) for i: int in range(NN_NODES)]
+                    + [("w2", i, j) for i: int in range(NN_NODES2) for j: int in range(NN_NODES)]
+                    + [("b2", i, None) for i: int in range(NN_NODES2)]
                 )
                 idx = int(rng.integers(0, len(targets)))
-                t = targets[idx]
+                t: Tuple[str | int | None] | Tuple[int | None | Literal['b1']] | Tuple[str | int] = targets[idx]
                 if t[0] == "w1":
                     new_state["w1"][t[1]][t[2]] += cauchy_mutation(rng, MUTATION_SIGMA)
                 elif t[0] == "b1":
@@ -596,15 +600,15 @@ def build_app() -> Dash:
         Output("movement-text", "children"),
         Input("nn-state", "data"),
     )
-    def update_nn_plot(state):
-        w1 = np.array(state.get("w1", [[0.0] * NN_INPUTS for _ in range(NN_NODES)]), dtype=float)
-        b1 = np.array(state.get("b1", [0.0] * NN_NODES), dtype=float)
-        w2 = np.array(state.get("w2", [[0.0] * NN_NODES for _ in range(NN_NODES2)]), dtype=float)
-        b2 = np.array(state.get("b2", [0.0] * NN_NODES2), dtype=float)
+    def update_nn_plot(state) -> Tuple[go.Figure | str]:
+        w1: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(state.get("w1", [[0.0] * NN_INPUTS for _: int in range(NN_NODES)]), dtype=float)
+        b1: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(state.get("b1", [0.0] * NN_NODES), dtype=float)
+        w2: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(state.get("w2", [[0.0] * NN_NODES for _: int in range(NN_NODES2)]), dtype=float)
+        b2: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(state.get("b2", [0.0] * NN_NODES2), dtype=float)
 
-        xs = np.linspace(-5, 10, 200)
+        xs: np.ndarray[Tuple[argparse.Any], np.dtype[np.float64]] = np.linspace(-5, 10, 200)
         fig = go.Figure()
-        chosen_idx = len(xs) // 2
+        chosen_idx: int = len(xs) // 2
         chosen_x = xs[chosen_idx]
         summaries = []
 
@@ -615,10 +619,10 @@ def build_app() -> Dash:
             right: np.ndarray | float = 0.0,
             occ: float = 0.0,
         ) -> np.ndarray:
-            center_arr = np.array(center, dtype=float)
-            left_arr = np.broadcast_to(left, center_arr.shape)
-            right_arr = np.broadcast_to(right, center_arr.shape)
-            inputs = np.zeros((center_arr.size, NN_INPUTS), dtype=float)
+            center_arr: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.array(center, dtype=float)
+            left_arr: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.broadcast_to(left, center_arr.shape)
+            right_arr: np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]] = np.broadcast_to(right, center_arr.shape)
+            inputs: np.ndarray[Tuple[int], np.dtype[argparse.Any]] = np.zeros((center_arr.size, NN_INPUTS), dtype=float)
             inputs[:, 0] = center_arr
             if NN_INPUTS > 1:
                 inputs[:, 1] = comp
@@ -630,7 +634,7 @@ def build_app() -> Dash:
                 inputs[:, 4] = occ
             return inputs
 
-        scenarios = [
+        scenarios: List[Tuple[str | np.ndarray[Tuple[argparse.Any], np.dtype[argparse.Any]]]] = [
             ("peak", make_inputs(xs, comp=0.0, left=0.0, right=0.0, occ=0.0), "#2c7be5", "solid"),
             ("slope→", make_inputs(xs, comp=0.0, left=xs * 0.5, right=xs, occ=0.0), "#7c4dff", "solid"),
             ("slope←", make_inputs(xs, comp=0.0, left=xs, right=xs * 0.5, occ=0.0), "#00b8a9", "solid"),
@@ -658,9 +662,9 @@ def build_app() -> Dash:
                         marker=dict(size=7),
                     )
                 )
-            magnitude = abs(y_chosen)
-            will_move = magnitude >= 0.5
-            direction = "right" if y_chosen > 0 else "left"
+            magnitude: float = abs(y_chosen)
+            will_move: bool = magnitude >= 0.5
+            direction: str = "right" if y_chosen > 0 else "left"
             summaries.append(f"{name}: resp={y_chosen:.3f} -> {'move '+direction if will_move else 'gather'}")
 
         fig.add_hline(y=0.5, line=dict(color="orange", dash="dot"))
@@ -676,7 +680,7 @@ def build_app() -> Dash:
             legend=dict(x=0.01, y=0.01, bgcolor="rgba(255,255,255,0.9)", orientation="h"),
         )
 
-        text = " | ".join(summaries)
+        text: str = " | ".join(summaries)
         text += "\nArchitecture: inputs=5 (center, competition, left, right, occupancy), nodes=10, nodes2=10, layers=2"
         text += f" | mutation Cauchy(sigma={MUTATION_SIGMA}, rate={MUTATION_RATE})"
         text += " | scenarios shown: peak, slope→, slope←, sink, flat (plus peak with comp=2 dotted)"
@@ -691,13 +695,13 @@ def build_app() -> Dash:
         Input("k-maint", "value"),
         Input("k-death", "value"),
     )
-    def update_k(width, resource_scale, time_amplitude, maint, death_risk):
+    def update_k(width, resource_scale, time_amplitude, maint, death_risk) -> str:
         k_val, label = carrying_capacity(
             int(width), float(resource_scale), float(time_amplitude), float(maint), float(death_risk)
         )
-        mean_base = 0.5 * float(resource_scale)
-        mean_time = 0.5 * float(time_amplitude)
-        mean_res = (mean_base + mean_time) * float(resource_scale)
+        mean_base: float = 0.5 * float(resource_scale)
+        mean_time: float = 0.5 * float(time_amplitude)
+        mean_res: float = (mean_base + mean_time) * float(resource_scale)
         return (
             f"Mean resource per site ≈ {mean_res:.3f}; maintenance per individual ≈ {(NN_NODES+NN_NODES2)*maint:.3f}. "
             f"Estimated K: {label} (raw {k_val:.1f})."
@@ -706,13 +710,13 @@ def build_app() -> Dash:
     return app
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Interactive evo-movement-sim dashboard")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8050)
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
-    app = build_app()
+    app: Dash = build_app()
     # dash>=3 replaces run_server with run
     app.run(debug=False, host=args.host, port=args.port)
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from statistics import mean, median
 
 
-def compute(path):
+def compute(path) -> None:
     p = Path(path)
     if not p.exists():
         print(json.dumps({"error": f"MISSING:{p}"}))
@@ -16,19 +16,19 @@ def compute(path):
     per_frame_props = []
     frame_count = 0
     first_frame_samples = []
-    with p.open("r", encoding="utf-8") as f:
+    with p.open("r", encoding="utf-8") as f: sys.TextIOWrapper[_WrappedBuffer]:
         for i, line in enumerate(f):
-            line = line.strip()
+            line: str = line.strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
-            except Exception as e:
+            except Exception as e: Exception:
                 print(json.dumps({"parse_error": str(e), "line_index": i}))
                 continue
             frame_count += 1
             inds = obj.get("individuals", [])
-            deltas = [abs(int(x.get("last_delta", 0))) for x in inds]
+            deltas: list[int] = [abs(int(x.get("last_delta", 0))) for x in inds]
             if not deltas:
                 per_frame_means.append(0.0)
                 per_frame_medians.append(0.0)
@@ -38,7 +38,7 @@ def compute(path):
                 per_frame_means.append(mean(deltas))
                 per_frame_medians.append(median(deltas))
                 per_frame_maxes.append(max(deltas))
-                moved = sum(1 for x in deltas if x > 0)
+                moved: int = sum(1 for x: int in deltas if x > 0)
                 per_frame_props.append(moved / len(deltas))
             if i < 6:
                 first_frame_samples.append(

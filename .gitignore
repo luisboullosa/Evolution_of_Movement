@@ -17,7 +17,17 @@ venv/
 # Generated outputs
 /output/
 output/
+**/output/
+/temp_outputs/
+temp_outputs/
+**/temp_outputs/
+/rust/temp_outputs/
+rust/temp_outputs/
 webviewer/sim*/
+webviewer/sim*/**
+rust/webviewer/sim*/
+rust/webviewer/sim*/**
+build/tests_out/
 
 # IDE / editor
 .vscode/
@@ -42,6 +52,10 @@ Thumbs.db
 *.tsv
 *.jsonl
 
+# Simulation state files
+simulation_state.json
+**/simulation_state*.json
+
 # ignore tsv/jsonl under output and webviewer sim folders
 output/**/*.tsv
 output/**/*.jsonl
@@ -51,5 +65,5 @@ webviewer/**/*.jsonl
 # ignore generated sim directories (e.g., webviewer/sim0061)
 webviewer/sim*/
 output/**/sim*/
-rust/webviewer/sim*/
-rust/src/config.rs
+tmp_push_repo/
+scripts/__pycache__/worker_pool.cpython-313.pyc

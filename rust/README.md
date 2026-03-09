@@ -15,6 +15,11 @@ and how to generate TSV/JSONL outputs for the webviewer, see
 `RUNNING_SIMULATIONS.md` in this directory and the helper script
 `scripts/generate_webviewer_outputs.ps1` in the repository root.
 
+Hex coordinates documentation
+-----------------------------
+For details on how axial hex coordinates, dish geometry, and related helper
+functions are implemented in Rust, see `HEX_COORDS.md` in this directory.
+
 Interactive dashboards
 
 ----------------------

@@ -2,19 +2,29 @@
 
 Minimal C++ simulation of evolving movement in digital individuals.
 
-Build
+## Interactive Viewer (New!)
 
------
-
-**Linux / macOS:**
+An interactive visualization system for exploring evolution in real-time:
 
 ```bash
-cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release
-cmake --build build/Release
-./build/Release/evo-movement-sim
+cd rust
+cargo run --release --bin evo_movement_interactive
 ```
 
-**Windows (PowerShell):**
+Features:
+- **Real-time visualization** with hexagonal grid display
+- **Individual selection** and neural network inspection
+- **Multiple petri dishes** for parallel experiments
+- **Save/load functionality** for preserving states
+- **Cladogram tracking** for phylogenetic analysis
+- **Light-based resources** with dynamic environments
+- **GPU support planned** for future acceleration with large populations
+
+See [rust/INTERACTIVE_VIEWER.md](rust/INTERACTIVE_VIEWER.md) for detailed documentation.
+
+## Command-Line Simulation
+
+Build (Windows, PowerShell):
 
 ```powershell
 mkdir build; cd build
@@ -143,5 +153,29 @@ You can set a burn-in period (timesteps to skip before recording frames/snapshot
 
 Running the tests
 
+<<<<<<< HEAD
 -----
 Test instructions were moved to `TESTS.md`. See `TESTS.md` for commands to build and run the project's tests.
+=======
+GPU vs CPU comparison
+----------------------
+The Rust simulator now supports a CUDA-based tensor kernel. Use the helper script
+to run a small simulation with the GPU path enabled and compare it against the
+CPU fallback:
+
+```powershell
+python scripts\compare_cuda_simulations.py --release --steps 200 --initial-population 120
+```
+
+The script builds the `evo_movement_bin_old` binary, runs it twice (forcing the
+CPU fallback via an invalid `TENSOR_KERNEL_PTX` path and then normally), writes
+final outputs under `rust/temp_outputs/cpu-fallback` and
+`rust/temp_outputs/gpu`, prints wall-clock times for both runs, and reports
+any differing files. Adjust `--config-file`, `--output-base`, or `--cuda-arch`
+to match your local setup. If CUDA isn’t already installed, set up the toolkit
+and MSVC/SDK so `nvcc` can emit the PTX kernel before rerunning the script.
+See `docs/cuda_kernel_arguments.md` for an argument-by-argument alignment table
+that explains how the CUDA kernel signature maps to the host launch helpers,
+ensuring the comparison script exercises identical buffers on both paths.
+
+>>>>>>> origin/main

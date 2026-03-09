@@ -33,25 +33,27 @@ fn print_help() {
     println!("  --replay-snapshot=PATH        Start from a previously saved population snapshot");
     println!("  --replay-env-seed=N           Override environment seed when replaying");
     println!("  --replay-randomize-start-positions / --replay-no-randomize-start-positions");
-    println!("                                 Shuffle or preserve positions when replaying a snapshot");
-    println!("  --write-individual-deltas / --no-write-individual-deltas  Write individuals.delta.jsonl");
+    println!(
+        "                                 Shuffle or preserve positions when replaying a snapshot"
+    );
+    println!(
+        "  --write-individual-deltas / --no-write-individual-deltas  Write individuals.delta.jsonl"
+    );
     println!("  --delta-full-interval=N       Full resync frame every N steps (for delta mode)");
-    println!("  --output-budget-mb=N          Max allowed output size in MiB (<=0 disables budget)");
+    println!(
+        "  --output-budget-mb=N          Max allowed output size in MiB (<=0 disables budget)"
+    );
     println!("  --output-budget-warn-fraction=F  Warn fraction of budget (0..1, default 0.8)");
     println!("  --output-budget-hard-stop     Abort if projected outputs exceed budget");
     println!("  --help, -h                    Show this help message");
 }
 
 fn parse_arg_value<T: std::str::FromStr>(arg: &str, flag: &str) -> Option<T> {
-    if arg.starts_with(flag)
-        && arg.len() > flag.len()
-        && arg.as_bytes()[flag.len()] == b'='
-    {
+    if arg.starts_with(flag) && arg.len() > flag.len() && arg.as_bytes()[flag.len()] == b'=' {
         return arg[flag.len() + 1..].parse::<T>().ok();
     }
     None
 }
-
 
 fn main() {
     let mut args = env::args().skip(1);

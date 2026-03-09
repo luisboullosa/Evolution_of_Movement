@@ -5,7 +5,7 @@ use crate::neural_network::NNType;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +42,40 @@ pub(crate) fn resolve_individuals_encoding(mode: &str) -> IndividualsEncoding {
         }
         "cbor" => IndividualsEncoding::Cbor,
         _ => IndividualsEncoding::JsonPretty,
+    }
+}
+
+struct BufferWriter<'a> {
+    buf: &'a mut Vec<u8>,
+}
+
+impl<'a> BufferWriter<'a> {
+    fn new(buf: &'a mut Vec<u8>) -> Self {
+        BufferWriter { buf }
+    }
+}
+
+impl<'a> Write for BufferWriter<'a> {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct BufferSummary {
+    frames_bytes: usize,
+    env_bytes: usize,
+    individuals_bytes: usize,
+    delta_bytes: usize,
+}
+
+impl BufferSummary {
+    fn total(&self) -> usize {
+        self.frames_bytes + self.env_bytes + self.individuals_bytes + self.delta_bytes
     }
 }
 
@@ -155,10 +189,26 @@ pub(crate) struct WebviewerWriter {
 
     nn_index_cache: HashMap<String, String>,
     nn_index_dirty: bool,
+    frames_buffer: Vec<u8>,
+    env_buffer: Vec<u8>,
+    individuals_buffer: Vec<u8>,
+    delta_buffer: Vec<u8>,
+    total_bytes_flushed: u64,
+    max_buffer_bytes: usize,
+    output_budget_bytes: Option<u64>,
+    output_budget_warn_bytes: u64,
 }
 
 impl WebviewerWriter {
     pub(crate) fn new(cfg: &Config, simdir: &str, ind_encoding: IndividualsEncoding) -> Self {
+        let budget_bytes = if cfg.output_budget_mb > 0.0 {
+            Some((cfg.output_budget_mb * 1024.0 * 1024.0) as u64)
+        } else {
+            None
+        };
+        let warn_bytes = budget_bytes
+            .map(|b| (b as f64 * cfg.output_budget_warn_fraction.clamp(0.0, 1.0)) as u64)
+            .unwrap_or(0);
         WebviewerWriter {
             cfg: cfg.clone(),
             simdir: PathBuf::from(simdir),
@@ -171,6 +221,14 @@ impl WebviewerWriter {
             frame_count: 0,
             nn_index_cache: HashMap::new(),
             nn_index_dirty: false,
+            frames_buffer: Vec::new(),
+            env_buffer: Vec::new(),
+            individuals_buffer: Vec::new(),
+            delta_buffer: Vec::new(),
+            total_bytes_flushed: 0,
+            max_buffer_bytes: 0,
+            output_budget_bytes: budget_bytes,
+            output_budget_warn_bytes: warn_bytes,
         }
     }
 
@@ -214,17 +272,19 @@ impl WebviewerWriter {
         frame: &str,
         prop_moved: f64,
     ) {
-        if let Some(f) = self.frames_file.as_mut() {
-            let mut esc = String::new();
-            for ch in frame.chars() {
-                if ch == '\n' {
-                    esc.push_str("\\n");
-                } else {
-                    esc.push(ch);
-                }
-            }
-            let _ = writeln!(f, "{}\t{}\t{}\t{}\t{}", t, pop, avg_res, esc, prop_moved);
+        if !self.wants_frames() {
+            return;
         }
+        let mut esc = String::new();
+        for ch in frame.chars() {
+            if ch == '\n' {
+                esc.push_str("\\n");
+            } else {
+                esc.push(ch);
+            }
+        }
+        let row = format!("{}\t{}\t{}\t{}\t{}\n", t, pop, avg_res, esc, prop_moved);
+        self.frames_buffer.extend_from_slice(row.as_bytes());
     }
 
     fn env_path(&self) -> PathBuf {
@@ -315,22 +375,19 @@ impl WebviewerWriter {
         if !self.cfg.write_outputs {
             return;
         }
-        self.open_env_if_needed();
-        if let Some(f) = self.env_file.as_mut() {
-            let _ = write!(f, "{{");
-            if let Some(tv) = t {
-                let _ = write!(f, "\"t\":{}, ", tv);
-            }
-            let _ = write!(f, "\"resources\": [");
-            for i in 0..env.width {
-                if i > 0 {
-                    let _ = write!(f, ", ");
-                }
-                let _ = write!(f, "{:.6}", env.resources[i]);
-            }
-            let _ = writeln!(f, "]}}");
-            let _ = f.flush();
+        let mut writer = BufferWriter::new(&mut self.env_buffer);
+        let _ = write!(writer, "{{");
+        if let Some(tv) = t {
+            let _ = write!(writer, "\"t\":{}, ", tv);
         }
+        let _ = write!(writer, "\"resources\": [");
+        for i in 0..env.width {
+            if i > 0 {
+                let _ = write!(writer, ", ");
+            }
+            let _ = write!(writer, "{:.6}", env.resources[i]);
+        }
+        let _ = writeln!(writer, "]}}");
     }
 
     pub(crate) fn dump_individuals(
@@ -346,12 +403,18 @@ impl WebviewerWriter {
         if self.cfg.write_individual_deltas {
             self.dump_individuals_delta(individuals, last_spend, last_delta, t);
         } else {
-            self.open_individuals_if_needed();
-            if let Some(mut file) = self.ind_file.take() {
-                let _ = self.write_individuals_record(&mut file, individuals, last_spend, last_delta, t);
-                let _ = file.flush();
-                self.ind_file = Some(file);
+            let mut tmp = Vec::new();
+            {
+                let mut writer = BufferWriter::new(&mut tmp);
+                let _ = self.write_individuals_record(
+                    &mut writer,
+                    individuals,
+                    last_spend,
+                    last_delta,
+                    t,
+                );
             }
+            self.individuals_buffer.append(&mut tmp);
         }
     }
 
@@ -362,14 +425,15 @@ impl WebviewerWriter {
         last_delta: &[i32],
         t: Option<i32>,
     ) {
-        self.open_delta_if_needed();
-
         let width = self.cfg.grid_width.max(1);
         let mut seen: HashMap<i32, (usize, f64, i32, f64, i32)> = HashMap::new();
         for (i, ind) in individuals.iter().enumerate() {
             let spend = last_spend.get(i).copied().unwrap_or(0.0);
             let delta = last_delta.get(i).copied().unwrap_or(0);
-            seen.insert(ind.id, (ind.position % width, ind.resources, ind.age, spend, delta));
+            seen.insert(
+                ind.id,
+                (ind.position % width, ind.resources, ind.age, spend, delta),
+            );
             if ensure_nn_index_entry(&mut self.nn_index_cache, ind) {
                 self.nn_index_dirty = true;
             }
@@ -380,28 +444,30 @@ impl WebviewerWriter {
                 && (self.frame_count % self.cfg.delta_full_interval) == 0);
 
         if need_full {
-            if let Some(mut file) = self.delta_file.take() {
-                let _ = write!(file, "{{");
-                if let Some(tv) = t {
-                    let _ = write!(file, "\"t\":{}, ", tv);
-                }
-                let _ = write!(file, "\"full\":true, \"individuals\":[");
-                let mut first = true;
-                for (id, (pos, res, age, sp, de)) in seen.iter() {
-                    if !first {
-                        let _ = write!(file, ", ");
-                    }
-                    first = false;
-                    let _ = write!(
-                        file,
-                        "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"age\":{},\"last_spend\":{:.6},\"last_delta\":{}}}",
-                        id, pos, res, age, sp, de
-                    );
-                }
-                let _ = writeln!(file, "]}}");
-                let _ = file.flush();
-                self.delta_file = Some(file);
+            let mut writer = BufferWriter::new(&mut self.delta_buffer);
+            let _ = write!(writer, "{{");
+            if let Some(tv) = t {
+                let _ = write!(writer, "\"t\":{}, ", tv);
             }
+            let _ = write!(writer, "\"full\":true, \"individuals\":[");
+            let mut first = true;
+            for (id, (pos, res, age, sp, de)) in seen.iter() {
+                if !first {
+                    let _ = write!(writer, ", ");
+                }
+                first = false;
+                let _ = write!(
+                    writer,
+                    "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"age\":{},\"last_spend\":{:.6},\"last_delta\":{}}}",
+                    id,
+                    pos,
+                    res,
+                    age,
+                    sp,
+                    de
+                );
+            }
+            let _ = writeln!(writer, "]}}");
             self.prev_snapshot = seen;
             self.frame_count += 1;
             return;
@@ -415,14 +481,29 @@ impl WebviewerWriter {
                 None => {
                     updates.push(format!(
                         "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"age\":{},\"last_spend\":{:.6},\"last_delta\":{}}}",
-                        id, pos, res, age, sp, de
+                        id,
+                        pos,
+                        res,
+                        age,
+                        sp,
+                        de
                     ));
                 }
                 Some((p_pos, p_res, p_age, p_sp, p_de)) => {
-                    if *p_pos != *pos || (*p_de != *de) || (*p_sp != *sp) || (*p_res != *res) || (*p_age != *age) {
+                    if *p_pos != *pos
+                        || (*p_de != *de)
+                        || (*p_sp != *sp)
+                        || (*p_res != *res)
+                        || (*p_age != *age)
+                    {
                         updates.push(format!(
                             "{{\"id\":{},\"pos\":{},\"resources\":{:.6},\"age\":{},\"last_spend\":{:.6},\"last_delta\":{}}}",
-                            id, pos, res, age, sp, de
+                            id,
+                            pos,
+                            res,
+                            age,
+                            sp,
+                            de
                         ));
                     }
                 }
@@ -441,32 +522,121 @@ impl WebviewerWriter {
             return;
         }
 
-        if let Some(mut file) = self.delta_file.take() {
-            let _ = write!(file, "{{");
-            if let Some(tv) = t {
-                let _ = write!(file, "\"t\":{}, ", tv);
-            }
-            let _ = write!(file, "\"updates\":[");
-            for (i, u) in updates.iter().enumerate() {
-                if i > 0 {
-                    let _ = write!(file, ",");
-                }
-                let _ = write!(file, "{}", u);
-            }
-            let _ = write!(file, "], \"remove\":[");
-            for (i, rid) in removals.iter().enumerate() {
-                if i > 0 {
-                    let _ = write!(file, ",");
-                }
-                let _ = write!(file, "{}", rid);
-            }
-            let _ = writeln!(file, "]}}");
-            let _ = file.flush();
-            self.delta_file = Some(file);
+        let mut writer = BufferWriter::new(&mut self.delta_buffer);
+        let _ = write!(writer, "{{");
+        if let Some(tv) = t {
+            let _ = write!(writer, "\"t\":{}, ", tv);
         }
+        let _ = write!(writer, "\"updates\":[");
+        for (i, u) in updates.iter().enumerate() {
+            if i > 0 {
+                let _ = write!(writer, ",");
+            }
+            let _ = write!(writer, "{}", u);
+        }
+        let _ = write!(writer, "], \"remove\":[");
+        for (i, rid) in removals.iter().enumerate() {
+            if i > 0 {
+                let _ = write!(writer, ",");
+            }
+            let _ = write!(writer, "{}", rid);
+        }
+        let _ = writeln!(writer, "]}}");
 
         self.prev_snapshot = seen;
         self.frame_count += 1;
+    }
+
+    pub(crate) fn flush_output_buffers(&mut self, step: i32) {
+        let summary = BufferSummary {
+            frames_bytes: self.frames_buffer.len(),
+            env_bytes: self.env_buffer.len(),
+            individuals_bytes: self.individuals_buffer.len(),
+            delta_bytes: self.delta_buffer.len(),
+        };
+        if summary.total() == 0 {
+            return;
+        }
+        self.log_buffer_usage(step, &summary);
+
+        if summary.frames_bytes > 0 {
+            self.open_frames_if_needed();
+            if let Some(f) = self.frames_file.as_mut() {
+                let _ = f.write_all(&self.frames_buffer);
+                let _ = f.flush();
+            }
+            self.frames_buffer.clear();
+        }
+        if summary.env_bytes > 0 {
+            self.open_env_if_needed();
+            if let Some(f) = self.env_file.as_mut() {
+                let _ = f.write_all(&self.env_buffer);
+                let _ = f.flush();
+            }
+            self.env_buffer.clear();
+        }
+        if summary.individuals_bytes > 0 {
+            self.open_individuals_if_needed();
+            if let Some(f) = self.ind_file.as_mut() {
+                let _ = f.write_all(&self.individuals_buffer);
+                let _ = f.flush();
+            }
+            self.individuals_buffer.clear();
+        }
+        if summary.delta_bytes > 0 {
+            self.open_delta_if_needed();
+            if let Some(f) = self.delta_file.as_mut() {
+                let _ = f.write_all(&self.delta_buffer);
+                let _ = f.flush();
+            }
+            self.delta_buffer.clear();
+        }
+        self.total_bytes_flushed = self
+            .total_bytes_flushed
+            .saturating_add(summary.total() as u64);
+        self.max_buffer_bytes = self.max_buffer_bytes.max(summary.total());
+    }
+
+    fn log_buffer_usage(&self, step: i32, summary: &BufferSummary) {
+        if !self.cfg.debug_buffered_output_logs {
+            return;
+        }
+        let total = summary.total();
+        if total == 0 {
+            return;
+        }
+        let label = if step >= 0 {
+            step.to_string()
+        } else {
+            "final".to_string()
+        };
+        let detail = format!(
+            "frames={} env={} indiv={} delta={}",
+            summary.frames_bytes, summary.env_bytes, summary.individuals_bytes, summary.delta_bytes
+        );
+        let total_mib = total as f64 / (1024.0 * 1024.0);
+        if let Some(budget_bytes) = self.output_budget_bytes {
+            let projected = self.total_bytes_flushed + total as u64;
+            let projected_mib = projected as f64 / (1024.0 * 1024.0);
+            let budget_mib = budget_bytes as f64 / (1024.0 * 1024.0);
+            let pct = (projected as f64 / budget_bytes as f64) * 100.0;
+            if self.output_budget_warn_bytes > 0 && projected >= self.output_budget_warn_bytes {
+                println!(
+                    "[warn] t={} buffered {:.2} MiB (projected {:.2} MiB, {:.1}% of {:.2} MiB budget); {};",
+                    label, total_mib, projected_mib, pct, budget_mib, detail
+                );
+            } else {
+                println!(
+                    "[info] t={} buffered {:.2} MiB (projected {:.2} MiB, {:.1}% of {:.2} MiB budget); {};",
+                    label, total_mib, projected_mib, pct, budget_mib, detail
+                );
+            }
+        } else {
+            println!(
+                "[info] t={} buffered {:.2} MiB ({} bytes); {};",
+                label, total_mib, total, detail
+            );
+        }
     }
 
     fn write_individuals_record<W: Write>(
@@ -591,8 +761,10 @@ impl WebviewerWriter {
         if !self.cfg.write_outputs || !self.nn_index_dirty {
             return;
         }
-        let do_flush = (self.cfg.nn_index_flush_interval > 0 && t % self.cfg.nn_index_flush_interval == 0)
-            || (self.cfg.nn_index_flush_size > 0 && self.nn_index_cache.len() >= self.cfg.nn_index_flush_size);
+        let do_flush = (self.cfg.nn_index_flush_interval > 0
+            && t % self.cfg.nn_index_flush_interval == 0)
+            || (self.cfg.nn_index_flush_size > 0
+                && self.nn_index_cache.len() >= self.cfg.nn_index_flush_size);
         if !do_flush {
             return;
         }
@@ -630,6 +802,7 @@ impl WebviewerWriter {
     }
 
     pub(crate) fn flush_all(&mut self) {
+        self.flush_output_buffers(-1);
         if let Some(mut f) = self.frames_file.take() {
             let _ = f.flush();
         }

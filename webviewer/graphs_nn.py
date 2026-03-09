@@ -23,7 +23,7 @@ def setup_nn_axis(fig, gs):
     return ax_nn
 
 
-def draw_nn_diagram(ax_nn, use_nn, output_val=None):
+def draw_nn_diagram(ax_nn, use_nn, output_val=None) -> None:
     ax_nn.clear()
     ax_nn.axis("off")
 
@@ -35,31 +35,31 @@ def draw_nn_diagram(ax_nn, use_nn, output_val=None):
     biases = use_nn.get("biases", [])
     # optional second layer weights/biases (list of rows)
     layer2 = use_nn.get("layer2_weights", None)
-    nodes2 = len(layer2) if layer2 is not None else 0
+    nodes2: int = len(layer2) if layer2 is not None else 0
     # detect multi-input: weights is list of lists (nodes x inputs)
     multi = False
     inputs_count = 1
     if len(weights) > 0 and hasattr(weights[0], "__iter__"):
         multi = True
-        n = len(weights)
-        inputs_count = len(weights[0]) if len(weights[0]) > 0 else 1
+        n: int = len(weights)
+        inputs_count: int = len(weights[0]) if len(weights[0]) > 0 else 1
     else:
-        n = max(len(weights), len(biases))
+        n: int = max(len(weights), len(biases))
 
     xin, xnode, xout = 0.15, 0.5, 0.85
     yin = 0.5
-    ys = [(i + 1) / (n + 1) for i in range(n)] if n > 0 else [0.5]
+    ys: list[float] = [(i + 1) / (n + 1) for i: int in range(n)] if n > 0 else [0.5]
 
     # draw input nodes: single or multiple
-    input_names = ["in"]
+    input_names: list[str] = ["in"]
     if multi:
         # default names for spatial + occupancy + internal resources
         # Order must match input vector used elsewhere: left, center, right, occupancy, resources
-        base_names = ["L", "C", "R", "occ", "RES"]
-        input_names = [base_names[i] if i < len(base_names) else f"in{i}" for i in range(inputs_count)]
+        base_names: list[str] = ["L", "C", "R", "occ", "RES"]
+        input_names: list[str] = [base_names[i] if i < len(base_names) else f"in{i}" for i: int in range(inputs_count)]
         # visual symbols for inputs: left arrow, center dot, right arrow, X for occupancy,
         # and 'R' for the individual's internal resources (RES)
-        symbol_map = {
+        symbol_map: dict[str, str] = {
             "L": "\u2190",
             "C": "\u2022",
             "R": "\u2192",
@@ -68,11 +68,11 @@ def draw_nn_diagram(ax_nn, use_nn, output_val=None):
         }
         # place them vertically
         xin = 0.08
-        ys_in = [(i + 1) / (inputs_count + 1) for i in range(inputs_count)]
+        ys_in: list[float] = [(i + 1) / (inputs_count + 1) for i: int in range(inputs_count)]
         for j, name in enumerate(input_names):
-            yj = ys_in[j]
+            yj: float = ys_in[j]
             ax_nn.add_patch(Circle((xin, yj), 0.04, facecolor="lightgray", edgecolor="k"))
-            sym = symbol_map.get(name, name)
+            sym: str = symbol_map.get(name, name)
             # use a slightly larger fontsize for symbols to improve visibility
             ax_nn.text(xin, yj, sym, ha="center", va="center", fontsize=12, fontweight="bold")
     else:
@@ -105,28 +105,28 @@ def draw_nn_diagram(ax_nn, use_nn, output_val=None):
         ax_nn.text(xnode, y, f"n{i}", ha="center", va="center", fontsize=9, zorder=6)
         if multi:
             # connect each input j to node i
-            ys_in = [(j + 1) / (inputs_count + 1) for j in range(inputs_count)]
-            for j in range(inputs_count):
+            ys_in: list[float] = [(j + 1) / (inputs_count + 1) for j: int in range(inputs_count)]
+            for j: int in range(inputs_count):
                 xin_j = 0.08
-                yj = ys_in[j]
+                yj: float = ys_in[j]
                 w = 0.0
                 try:
                     w = weights[i][j]
                 except Exception:
                     w = 0.0
-                color = "0.0" if w >= 0 else "0.2"
-                lw = max(0.4, min(3.0, abs(w) * 3.0))
+                color: str = "0.0" if w >= 0 else "0.2"
+                lw: float = max(0.4, min(3.0, abs(w) * 3.0))
                 ax_nn.plot([xin_j, xnode], [yj, y], color=color, linewidth=lw, alpha=0.9)
-                mx = (xin_j + xnode) / 2.0
-                my = (yj + y) / 2.0
+                mx: float = (xin_j + xnode) / 2.0
+                my: float = (yj + y) / 2.0
                 ax_nn.text(mx, my, f"{w:.2f}", fontsize=7, color=color, ha="center", va="center")
         else:
             w = weights[i] if i < len(weights) else 0.0
-            color = "0.0" if w >= 0 else "0.2"
-            lw = max(0.5, min(4.0, abs(w) * 4.0))
+            color: str = "0.0" if w >= 0 else "0.2"
+            lw: float = max(0.5, min(4.0, abs(w) * 4.0))
             ax_nn.plot([xin, xnode], [yin, y], color=color, linewidth=lw, alpha=0.9)
-            mx = (xin + xnode) / 2.0
-            my = (yin + y) / 2.0
+            mx: float = (xin + xnode) / 2.0
+            my: float = (yin + y) / 2.0
             ax_nn.text(
                 mx,
                 my,
@@ -145,7 +145,7 @@ def draw_nn_diagram(ax_nn, use_nn, output_val=None):
     if nodes2 > 0:
         # place second layer in its own column between first hidden and output
         xnode2 = 0.75
-        ys2 = [(i + 1) / (nodes2 + 1) for i in range(nodes2)]
+        ys2: list[float] = [(i + 1) / (nodes2 + 1) for i: int in range(nodes2)]
         for i2, y2 in enumerate(ys2):
             ax_nn.add_patch(Circle((xnode2, y2), 0.04, facecolor="white", edgecolor="k"))
             ax_nn.text(xnode2, y2, f"m{i2}", ha="center", va="center", fontsize=9, zorder=6)
@@ -156,22 +156,22 @@ def draw_nn_diagram(ax_nn, use_nn, output_val=None):
                     w = layer2[i2][i]
                 except Exception:
                     w = 0.0
-                color = "0.0" if w >= 0 else "0.2"
-                lw = max(0.4, min(3.0, abs(w) * 3.0))
+                color: str = "0.0" if w >= 0 else "0.2"
+                lw: float = max(0.4, min(3.0, abs(w) * 3.0))
                 ax_nn.plot([xnode, xnode2], [y, y2], color=color, linewidth=lw, alpha=0.9)
-                mx = (xnode + xnode2) / 2.0
-                my = (y + y2) / 2.0
+                mx: float = (xnode + xnode2) / 2.0
+                my: float = (y + y2) / 2.0
                 ax_nn.text(mx, my, f"{w:.2f}", fontsize=7, color=color, ha="center", va="center")
             # connect second-layer node to output
             ax_nn.plot([xnode2, xout], [y2, yin], color="0.5", linewidth=0.8, alpha=0.8)
 
     if output_val is not None:
         try:
-            sign = 1.0 if float(output_val) >= 0.0 else -1.0
+            sign: float = 1.0 if float(output_val) >= 0.0 else -1.0
         except Exception:
             sign = 1.0
 
-        dx = 0.12 * sign
+        dx: float = 0.12 * sign
         ax_nn.annotate(
             "",
             xy=(xout + dx, yin),
@@ -207,36 +207,36 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
     weights = use_nn.get("weights", [])
     biases = use_nn.get("biases", [])
     layer2 = use_nn.get("layer2_weights", None)
-    nodes2 = len(layer2) if layer2 is not None else 0
+    nodes2: int = len(layer2) if layer2 is not None else 0
     multi = False
     inputs_count = 1
     if len(weights) > 0 and hasattr(weights[0], "__iter__"):
         multi = True
-        n = len(weights)
-        inputs_count = len(weights[0])
+        n: int = len(weights)
+        inputs_count: int = len(weights[0])
     else:
-        n = max(len(weights), len(biases))
+        n: int = max(len(weights), len(biases))
 
     G = nx.DiGraph()
     # add input nodes
-    input_names = ["in"]
+    input_names: list[str] = ["in"]
     if multi:
-        input_names = [f"in{j}" for j in range(inputs_count)]
-        for name in input_names:
+        input_names: list[str] = [f"in{j}" for j: int in range(inputs_count)]
+        for name: str in input_names:
             G.add_node(name)
     else:
         G.add_node("in")
-    for i in range(n):
+    for i: int in range(n):
         G.add_node(f"n{i}")
     # second-layer nodes
     if nodes2 > 0:
-        for j in range(nodes2):
+        for j: int in range(nodes2):
             G.add_node(f"m{j}")
     G.add_node("out")
 
     if multi:
-        for i in range(n):
-            for j in range(inputs_count):
+        for i: int in range(n):
+            for j: int in range(inputs_count):
                 w = 0.0
                 try:
                     w = weights[i][j]
@@ -247,24 +247,24 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
         for i, w in enumerate(weights):
             G.add_edge("in", f"n{i}", weight=w)
     if nodes2 > 0:
-        for i in range(n):
-            for j in range(nodes2):
+        for i: int in range(n):
+            for j: int in range(nodes2):
                 w = 0.0
                 try:
                     w = layer2[j][i]
                 except Exception:
                     w = 0.0
                 G.add_edge(f"n{i}", f"m{j}", weight=w)
-        for j in range(nodes2):
+        for j: int in range(nodes2):
             G.add_edge(f"m{j}", "out", weight=1.0)
     else:
-        for i in range(n):
+        for i: int in range(n):
             G.add_edge(f"n{i}", "out", weight=1.0)
 
-    pos = {"out": (0.95, 0.5)}
+    pos: dict[str, tuple[float, float]] = {"out": (0.95, 0.5)}
     if multi:
         # place inputs on the left stacked vertically
-        ys_in = [(j + 1) / (inputs_count + 1) for j in range(inputs_count)]
+        ys_in: list[float] = [(j + 1) / (inputs_count + 1) for j: int in range(inputs_count)]
         for j, name in enumerate(input_names):
             pos[name] = (0.05, ys_in[j])
     else:
@@ -273,22 +273,22 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
     x_first = 0.5
     x_second = 0.75
     # first-layer nodes
-    first_nodes = [f"n{i}" for i in range(n)]
+    first_nodes: list[str] = [f"n{i}" for i: int in range(n)]
     if len(first_nodes) > 0:
-        ys_first = [(i + 1) / (len(first_nodes) + 1) for i in range(len(first_nodes))]
+        ys_first: list[float] = [(i + 1) / (len(first_nodes) + 1) for i: int in range(len(first_nodes))]
         for name, y in zip(first_nodes, ys_first):
             pos[name] = (x_first, y)
     # second-layer nodes (if any)
     if nodes2 > 0:
-        second_nodes = [f"m{j}" for j in range(nodes2)]
-        ys_second = [(i + 1) / (len(second_nodes) + 1) for i in range(len(second_nodes))]
+        second_nodes: list[str] = [f"m{j}" for j: int in range(nodes2)]
+        ys_second: list[float] = [(i + 1) / (len(second_nodes) + 1) for i: int in range(len(second_nodes))]
         for name, y in zip(second_nodes, ys_second):
             pos[name] = (x_second, y)
 
     nx.draw_networkx_nodes(G, pos, ax=ax_nn, node_size=900, node_color="lightgray")
     # draw node labels; for input nodes use symbols similar to the simple diagram
     for nname, npos in pos.items():
-        label = nname
+        label: str = nname
         if multi and nname.startswith("in"):
             # map in0..in3 -> L, C, R, occ symbol
             try:
@@ -297,8 +297,8 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
                 idx = None
             if idx is not None:
                 # Map input indices to symbols: 0=L,1=C,2=right neighbor arrow,3=occupancy X,4=internal resources 'R'
-                mapping = {0: "\u2190", 1: "\u2022", 2: "\u2192", 3: "\u2716", 4: "R"}
-                label = mapping.get(idx, nname)
+                mapping: dict[int, str] = {0: "\u2190", 1: "\u2022", 2: "\u2192", 3: "\u2716", 4: "R"}
+                label: str = mapping.get(idx, nname)
         elif not multi and nname == "in":
             label = "\u2022"
         ax_nn.text(
@@ -316,11 +316,11 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
     mx = my = None
     for u, v, data in edges:
         w = data.get("weight", 0.0)
-        color = "blue" if w >= 0 else "red"
-        lw = max(0.5, min(4.0, abs(w) * 4.0))
+        color: str = "blue" if w >= 0 else "red"
+        lw: float = max(0.5, min(4.0, abs(w) * 4.0))
         nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], ax=ax_nn, edge_color=color, width=lw, alpha=0.8)
-        mx = (pos[u][0] + pos[v][0]) / 2.0
-        my = (pos[u][1] + pos[v][1]) / 2.0
+        mx: float = (pos[u][0] + pos[v][0]) / 2.0
+        my: float = (pos[u][1] + pos[v][1]) / 2.0
 
     if mx is not None and my is not None:
         ax_nn.text(
@@ -335,12 +335,12 @@ def draw_nn_graph(ax_nn, use_nn, output_val=None):
 
     if output_val is not None:
         try:
-            sign = 1.0 if float(output_val) >= 0.0 else -1.0
+            sign: float = 1.0 if float(output_val) >= 0.0 else -1.0
         except Exception:
             sign = 1.0
 
-        dx = 0.12 * sign
-        out_pos = pos.get("out", (0.95, 0.5))
+        dx: float = 0.12 * sign
+        out_pos: tuple[float, float] = pos.get("out", (0.95, 0.5))
         ax_nn.annotate(
             "",
             xy=(out_pos[0] + dx, out_pos[1]),
@@ -394,7 +394,7 @@ def draw_info(
             pass
     if output_vec is not None:
         try:
-            out_str = ", ".join([f"{v:.3f}" for v in np.asarray(output_vec).tolist()])
+            out_str: str = ", ".join([f"{v:.3f}" for v in np.asarray(output_vec).tolist()])
             info_lines.append(f"NN output: [{out_str}]")
         except Exception:
             pass
@@ -437,7 +437,7 @@ def draw_info(
             pass
     if current_time is not None:
         info_lines.append(f"current t: {current_time}")
-    footer = ""
+    footer: str = ""
     if spend is not None:
         footer += f"spend={spend:.3f} "
     if delta is not None:
@@ -448,7 +448,7 @@ def draw_info(
             ax_info.clear()
             ax_info.axis("off")
             if len(info_lines) > 0:
-                text = "\n".join(info_lines)
+                text: str = "\n".join(info_lines)
                 if footer:
                     text += "\n" + footer
                 ax_info.text(
@@ -463,7 +463,7 @@ def draw_info(
         else:
             # fallback to ax_nn
             if len(info_lines) > 0:
-                text = "\n".join(info_lines)
+                text: str = "\n".join(info_lines)
                 if footer:
                     text += "\n" + footer
                 ax_nn.text(
@@ -503,33 +503,33 @@ def compute_nn_response_for(x, use_nn, input_builder=None):
             xs = list(x)
             # build input matrix (rows=len(xs), cols=inputs_count)
             # determine inputs_count from weights if possible
-            inputs_count = len(weights[0]) if (len(weights) > 0 and hasattr(weights[0], "__iter__")) else None
+            inputs_count: int | None = len(weights[0]) if (len(weights) > 0 and hasattr(weights[0], "__iter__")) else None
             input_rows = []
             for xi in xs:
                 vec = input_builder(float(xi))
                 # ensure numeric sequence
                 try:
-                    row = [float(v) for v in vec]
+                    row: list[float] = [float(v) for v in vec]
                 except Exception:
-                    row = [float(vec)]
+                    row: list[float] = [float(vec)]
                 input_rows.append(row)
             # pad/truncate rows to a common length
-            max_cols = max(len(r) for r in input_rows) if input_rows else 0
-            mat = np.zeros((len(input_rows), max_cols), dtype=float)
+            max_cols: int = max(len(r) for r in input_rows) if input_rows else 0
+            mat: np.ndarray[tuple[int, int], np.dtype[np.Any]] = np.zeros((len(input_rows), max_cols), dtype=float)
             for i, r in enumerate(input_rows):
                 for j, v in enumerate(r[:max_cols]):
                     mat[i, j] = v
             # Now compute outputs via matrix multiplication if weights are nested
             if len(weights) > 0 and hasattr(weights[0], "__iter__"):
-                W = np.array([[float(wij) for wij in wn] + [0.0] * (mat.shape[1] - len(wn)) for wn in weights])
+                W: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.array([[float(wij) for wij in wn] + [0.0] * (mat.shape[1] - len(wn)) for wn in weights])
                 # W shape: (n_nodes, inputs); mat shape: (n_x, inputs)
                 dot = mat.dot(W.T)  # shape (n_x, n_nodes)
-                b = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
+                b: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
                 z = np.tanh(dot + b.reshape((1, -1)))
                 s = np.sum(z, axis=1)
                 return s
             # fallback: compute per-row via compute_output_vector
-            out = [float(compute_output_vector(use_nn, row)[0]) for row in mat]
+            out: list[float] = [float(compute_output_vector(use_nn, row)[0]) for row in mat]
             return np.array(out)
         # scalar
         return float(compute_output_vector(use_nn, input_builder(float(x)))[0])
@@ -546,14 +546,14 @@ def compute_nn_response_for(x, use_nn, input_builder=None):
     if len(weights) > 0 and hasattr(weights[0], "__iter__"):
         # If x is iterable, build input matrix assuming scalar center-only input (first column)
         if hasattr(x, "__iter__") and not isinstance(x, (str, bytes)):
-            xs = np.asarray(list(x), dtype=float)
+            xs: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.asarray(list(x), dtype=float)
             n_x = xs.shape[0]
-            inputs_count = len(weights[0])
-            mat = np.zeros((n_x, inputs_count), dtype=float)
+            inputs_count: int = len(weights[0])
+            mat: np.ndarray[tuple[int, int], np.dtype[np.Any]] = np.zeros((n_x, inputs_count), dtype=float)
             mat[:, 0] = xs
-            W = np.array([[float(wij) for wij in wn] for wn in weights])
+            W: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.array([[float(wij) for wij in wn] for wn in weights])
             dot = mat.dot(W.T)
-            b = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
+            b: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = np.array([float(bb) for bb in biases] + [0.0] * (dot.shape[1] - len(biases)))[: dot.shape[1]]
             z = np.tanh(dot + b.reshape((1, -1)))
             s = np.sum(z, axis=1)
             return s
@@ -561,7 +561,7 @@ def compute_nn_response_for(x, use_nn, input_builder=None):
         return float(compute_output_vector(use_nn, float(x))[0])
 
 
-def compute_output_vector(use_nn, input_val):
+def compute_output_vector(use_nn, input_val) -> np.ndarray[tuple[Any, ...], np.dtype[np.Any]]:
     """Return the final output vector for the network given an input.
 
     Supports two layouts of `use_nn`:
@@ -591,7 +591,7 @@ def compute_output_vector(use_nn, input_val):
         # compute first layer (support nested or flat weights)
         # ensure input_val is a sequence
         if not hasattr(input_val, "__iter__"):
-            input_vec = [float(input_val)]
+            input_vec: list[float] = [float(input_val)]
         else:
             input_vec = list(input_val)
         # first-layer activations
@@ -605,7 +605,7 @@ def compute_output_vector(use_nn, input_val):
                 b = biases[i] if i < len(biases) else 0.0
                 layer1.append(np.tanh(dot + float(b)))
         else:
-            in0 = float(input_vec[0]) if len(input_vec) > 0 else 0.0
+            in0: float = float(input_vec[0]) if len(input_vec) > 0 else 0.0
             for w, b in zip(weights, biases):
                 layer1.append(np.tanh(float(w) * in0 + float(b)))
         # compute second layer outputs
@@ -624,7 +624,7 @@ def compute_output_vector(use_nn, input_val):
         # Ensure input_val is a sequence
         if not hasattr(input_val, "__iter__"):
             # scalar -> treat as center-only vector
-            input_vec = [float(input_val)]
+            input_vec: list[float] = [float(input_val)]
         else:
             input_vec = list(input_val)
         total = 0.0
@@ -641,14 +641,14 @@ def compute_output_vector(use_nn, input_val):
 
     # legacy single-input case: weights is a list of scalars per node
     # accept scalar or vector input_val; use first element if vector
-    in0 = float(input_val[0]) if hasattr(input_val, "__iter__") else float(input_val)
+    in0: float = float(input_val[0]) if hasattr(input_val, "__iter__") else float(input_val)
     total = 0.0
     for w, b in zip(weights, biases):
         total += np.tanh(float(w) * in0 + float(b))
     return np.array([total])
 
 
-def forward_single_with_nn(input_val, use_nn):
+def forward_single_with_nn(input_val, use_nn) -> tuple[Any, Any] | tuple[Any, float]:
     """Compute a scalar directional output and magnitude from a network.
 
     Returns (direction, magnitude) where direction is tanh(total) and
@@ -657,17 +657,17 @@ def forward_single_with_nn(input_val, use_nn):
     # Use compute_output_vector to handle scalar or vector inputs uniformly
     if use_nn is None:
         try:
-            in0 = float(input_val[0]) if hasattr(input_val, "__iter__") else float(input_val)
+            in0: float = float(input_val[0]) if hasattr(input_val, "__iter__") else float(input_val)
         except Exception:
             in0 = float(input_val)
         s = np.tanh(in0)
         return np.tanh(s), abs(s)
 
-    out = compute_output_vector(use_nn, input_val)
+    out: np.ndarray[tuple[Any, ...], np.dtype[np.Any]] = compute_output_vector(use_nn, input_val)
     try:
         total = float(np.asarray(out).flatten()[0])
     except Exception:
         total = 0.0
     direction = np.tanh(total)
-    magnitude = abs(total)
+    magnitude: float = abs(total)
     return direction, magnitude

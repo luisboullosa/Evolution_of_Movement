@@ -71,6 +71,17 @@ pub struct NeuralNetwork {
 }
 
 impl NeuralNetwork {
+    #[inline]
+    fn decode_outputs_from_layer(layer: &[f64]) -> (f64, f64) {
+        let move_signal = layer.iter().sum::<f64>();
+        let direction_signal = if layer.len() > 1 {
+            layer[1]
+        } else {
+            layer.get(0).copied().unwrap_or(0.0)
+        };
+        (move_signal, direction_signal)
+    }
+
     pub fn new(nodes: usize, inputs: usize, layers: i32, nodes2: usize) -> Self {
         let n = nodes;
         NeuralNetwork {
@@ -116,11 +127,9 @@ impl NeuralNetwork {
                 }
                 *slot = Self::activate(acc);
             }
-            let sum: f64 = out2.iter().sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&out2)
         } else {
-            let sum: f64 = hidden.iter().sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&hidden)
         }
     }
 
@@ -145,13 +154,11 @@ impl NeuralNetwork {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
                     acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                *o = Self::activate(acc);
+                out2_buf[j] = Self::activate(acc);
             }
-            let sum: f64 = out2_buf.iter().take(self.nodes2).sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&out2_buf[..self.nodes2])
         } else {
-            let sum: f64 = hidden_buf.iter().take(nodes).sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&hidden_buf[..nodes])
         }
     }
 
@@ -177,11 +184,9 @@ impl NeuralNetwork {
                 }
                 *slot = Self::activate(acc);
             }
-            let sum: f64 = out2.iter().sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&out2)
         } else {
-            let sum: f64 = hidden.iter().sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&hidden)
         }
     }
 
@@ -211,13 +216,11 @@ impl NeuralNetwork {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
                     acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                *o = Self::activate(acc);
+                out2_buf[j] = Self::activate(acc);
             }
-            let sum: f64 = out2_buf.iter().take(nodes2).sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&out2_buf[..nodes2])
         } else {
-            let sum: f64 = hidden_buf.iter().take(nodes).sum();
-            (sum, 0.0)
+            Self::decode_outputs_from_layer(&hidden_buf[..nodes])
         }
     }
 
