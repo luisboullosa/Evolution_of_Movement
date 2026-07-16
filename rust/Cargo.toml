@@ -4,23 +4,29 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[features]
+default = ["cuda", "gui"]
+cuda = ["dep:cust", "dep:wgpu", "dep:bytemuck", "dep:pollster"]
+gui = ["dep:eframe", "dep:egui", "dep:egui_extras"]
+playground = []
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
 rand_distr = "0.4"
 serde_cbor = "0.11"
-cust = "0.3.2"
+cust = { version = "0.3.2", optional = true }
 
 # GUI and visualization
-eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"] }
-egui = "0.27"
-egui_extras = "0.27"
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"], optional = true }
+egui = { version = "0.27", optional = true }
+egui_extras = { version = "0.27", optional = true }
 
 # GPU compute
-wgpu = "0.19"
-bytemuck = { version = "1.14", features = ["derive"] }
-pollster = "0.3"
+wgpu = { version = "0.19", optional = true }
+bytemuck = { version = "1.14", features = ["derive"], optional = true }
+pollster = { version = "0.3", optional = true }
 
 [build-dependencies]
 chrono = "0.4"
@@ -32,6 +38,34 @@ path = "src/bin/evo_movement_rust.rs"
 [[bin]]
 name = "evo_movement_interactive"
 path = "src/bin/interactive.rs"
+
+[[bin]]
+name = "evo_movement_lab"
+path = "src/bin/lab.rs"
+
+[[bin]]
+name = "evo_movement_perceptron"
+path = "src/bin/evo_movement_perceptron.rs"
+
+[[bin]]
+name = "evo_movement_mlp"
+path = "src/bin/evo_movement_mlp.rs"
+
+[[bin]]
+name = "evo_movement_spatial"
+path = "src/bin/evo_movement_spatial.rs"
+
+[[bin]]
+name = "evo_movement_goo"
+path = "src/bin/evo_movement_goo.rs"
+
+[[bin]]
+name = "evo_snapshot_import"
+path = "src/bin/import_snapshots.rs"
+
+[[bin]]
+name = "evo_fitness_landscape"
+path = "src/bin/evo_fitness_landscape.rs"
 
 [package.metadata]
 build_script = true
