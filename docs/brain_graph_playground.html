@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brain graph playground — all architectures</title>
+  <style>
+    :root {
+      --bg: #0f1218; --panel: #161a22; --panel-border: #465064;
+      --text: #e8eaef; --muted: #9aa3b5; --input-bg: #1c2230;
+      --input-border: #3a4558; --btn: #2a3344; --btn-hover: #354058;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.45; }
+    header { padding: 1.25rem 1.5rem 0.75rem; border-bottom: 1px solid #252b38; }
+    header h1 { margin: 0 0 0.35rem; font-size: 1.35rem; }
+    header p { margin: 0; color: var(--muted); font-size: 0.92rem; max-width: 90ch; }
+    #wasm-status { margin-top: 0.5rem; font-size: 0.85rem; }
+    #wasm-status.ok { color: #8ec89a; }
+    #wasm-status.err { color: #f0a0a0; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem 1.5rem 2rem; }
+    @media (max-width: 1200px) { main { grid-template-columns: 1fr; } }
+    .arch-panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; display: flex; flex-direction: column; min-height: 580px; }
+    .arch-header { padding: 0.85rem 1rem 0.5rem; border-bottom: 1px solid #2a3140; }
+    .arch-header h2 { margin: 0; font-size: 1.05rem; }
+    .arch-meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.2rem; }
+    .controls { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; padding: 0.65rem 1rem; border-bottom: 1px solid #2a3140; font-size: 0.85rem; }
+    .controls label { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); }
+    .controls input[type="number"] { width: 4.5rem; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text); border-radius: 4px; padding: 0.2rem 0.35rem; }
+    .controls input[type="checkbox"] { accent-color: #6496ff; }
+    button { background: var(--btn); border: 1px solid var(--input-border); color: var(--text); border-radius: 5px; padding: 0.3rem 0.65rem; cursor: pointer; font-size: 0.85rem; }
+    button:hover { background: var(--btn-hover); }
+    button.primary { border-color: #4a6aa8; color: #c8d8ff; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .canvas-wrap { padding: 0.5rem 0.75rem; }
+    canvas { display: block; width: 100%; height: 300px; border-radius: 6px; background: #161a22; }
+    canvas.clickable { cursor: pointer; }
+    .legend { padding: 0 1rem 0.35rem; font-size: 0.78rem; color: #aab2c2; }
+    .json-section { flex: 1; display: flex; flex-direction: column; padding: 0 1rem 1rem; min-height: 120px; }
+    .json-section label { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    textarea { flex: 1; min-height: 100px; resize: vertical; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.75rem; background: var(--input-bg); border: 1px solid var(--input-border); color: #d8deea; border-radius: 5px; padding: 0.5rem; }
+    textarea.invalid { border-color: #b85a5a; }
+    .error { color: #f0a0a0; font-size: 0.78rem; min-height: 1rem; margin-top: 0.25rem; }
+    .swatch { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 50%; vertical-align: middle; margin-right: 0.15rem; border: 1px solid #000; }
+    code { font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Brain graph playground</h1>
+    <p>
+      All four evolved architectures, rendered via Rust WASM (<code>brain_diagram.rs</code> — same path as <code>nn_viz.rs</code>).
+      <strong>GoO</strong> is inspired by Graph-of-Thoughts: it supports <em>branching</em> (multiple Gen children) and <em>merging</em> (Agg / Best),
+      but not yet self-loop refinement or backtracking like the LLM GoT paper figure. Until recently, mutations always chained
+      <code>n-1 → n</code>, which made graphs look linear — that is fixed now.
+    </p>
+    <div id="wasm-status">Loading WASM…</div>
+  </header>
+
+  <main id="panels"></main>
+
+  <script type="module">
+    import init, {
+      random_perceptron_json, random_mlp_json, random_spatial_json, random_goo_json,
+      demo_goo_branching_json, diagram_json, validate_brain_json,
+      goo_cycle_op_json, goo_add_node_json,
+    } from "./brain_playground_wasm/brain_playground_wasm.js";
+
+    const CANVAS_H = 300;
+    let wasmReady = false;
+    const panels = [];
+
+    function parseJson(t) { return JSON.parse(t); }
+    function rgba(c) { return `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`; }
+    function rgb(c) { return `rgb(${c.r},${c.g},${c.b})`; }
+
+    function textAlign(align, valign) {
+      const k = `${align || "left"}-${valign || "top"}`;
+      return ({ "center-middle": ["center","middle"], "center-top": ["center","top"], "right-middle": ["right","middle"] }[k]) || ["left","top"];
+    }
+
+    function renderDiagram(canvas, ctx, diagram, hitStore) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(CANVAS_H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const w = rect.width, h = CANVAS_H;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = rgb(diagram.panel_bg);
+      ctx.beginPath(); ctx.roundRect(0, 0, w, h, 6); ctx.fill();
+      ctx.strokeStyle = rgb(diagram.panel_border); ctx.lineWidth = 1.2; ctx.stroke();
+      for (const e of diagram.edges) {
+        ctx.strokeStyle = rgba(e.color); ctx.lineWidth = e.width;
+        ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      }
+      if (hitStore) hitStore.length = 0;
+      for (const n of diagram.nodes) {
+        ctx.fillStyle = rgb(n.fill);
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+        if (n.label) {
+          ctx.fillStyle = rgb(n.label_color);
+          ctx.font = `${n.label_size}px sans-serif`;
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(n.label, n.x, n.y);
+        }
+        if (n.side_label) {
+          ctx.fillStyle = "#c8cdd7"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+          ctx.fillText(n.side_label, n.x - 14, n.y);
+        }
+        if (hitStore) hitStore.push({ id: n.id, x: n.x, y: n.y, r: n.r });
+      }
+      for (const t of diagram.texts) {
+        const [ha, va] = textAlign(t.align, t.valign);
+        ctx.fillStyle = rgb(t.color); ctx.font = `${t.size}px sans-serif`;
+        ctx.textAlign = ha;
+        ctx.textBaseline = va === "middle" ? "middle" : (va === "bottom" ? "bottom" : "top");
+        ctx.fillText(t.text, t.x, t.y);
+      }
+    }
+
+    function brainMeta(json) {
+      const b = parseJson(json);
+      if (b.kind === "perceptron" && b.inner?.Perceptron) {
+        const p = b.inner.Perceptron;
+        return `${p.inputs} inputs · ${p.nodes} hidden`;
+      }
+      if (b.kind === "mlp" && b.inner?.Mlp) {
+        const m = b.inner.Mlp;
+        return `${m.inputs}→${m.nodes}${m.layers === 2 ? `→${m.nodes2}` : ""} · L${m.layers}`;
+      }
+      if (b.kind === "spatial_graph" && b.inner?.SpatialGraph) {
+        const s = b.inner.SpatialGraph;
+        return `${s.landmark_count} landmarks · ${s.edges?.length ?? 0} edges`;
+      }
+      if (b.kind === "goo_graph" && b.inner?.GooGraph) {
+        const g = b.inner.GooGraph;
+        const merges = g.nodes.filter(n => n.parents?.length >= 2).length;
+        const branches = g.nodes.filter(n => n.op === "generate").length;
+        return `${g.nodes.length} nodes · ${merges} merges · ${branches} gen`;
+      }
+      return b.kind || "?";
+    }
+
+    class ArchPanel {
+      constructor(cfg) {
+        this.cfg = cfg;
+        this.brainJson = "";
+        this.hits = [];
+        const el = document.createElement("section");
+        el.className = "arch-panel";
+        el.innerHTML = `
+          <div class="arch-header"><h2>${cfg.title}</h2><div class="arch-meta" data-meta>—</div></div>
+          <div class="controls" data-controls></div>
+          <div class="canvas-wrap"><canvas data-canvas class="${cfg.clickable ? "clickable" : ""}"></canvas></div>
+          <div class="legend">${cfg.legend}</div>
+          <div class="json-section">
+            <label>BrainGenome JSON</label>
+            <textarea spellcheck="false" data-json></textarea>
+            <div class="error" data-error></div>
+          </div>`;
+        document.getElementById("panels").appendChild(el);
+        this.root = el;
+        this.canvas = el.querySelector("[data-canvas]");
+        this.ctx = this.canvas.getContext("2d");
+        this.jsonTa = el.querySelector("[data-json]");
+        this.errorEl = el.querySelector("[data-error]");
+        this.metaEl = el.querySelector("[data-meta]");
+        const ctrl = el.querySelector("[data-controls]");
+        for (const c of cfg.controls) ctrl.appendChild(c.el);
+        cfg.onWire?.(this);
+      }
+      refresh() {
+        this.jsonTa.value = this.brainJson;
+        this.jsonTa.classList.remove("invalid");
+        this.errorEl.textContent = "";
+        this.metaEl.textContent = brainMeta(this.brainJson);
+        const raw = diagram_json(this.brainJson, this.canvas.getBoundingClientRect().width, CANVAS_H);
+        const d = parseJson(raw);
+        if (d.error) throw new Error(d.error);
+        renderDiagram(this.canvas, this.ctx, d, this.cfg.clickable ? this.hits : null);
+      }
+      setBrain(json, pretty = true) {
+        this.brainJson = pretty ? JSON.stringify(parseJson(json), null, 2) : json;
+        this.refresh();
+      }
+      applyJson() {
+        try {
+          const v = parseJson(validate_brain_json(this.jsonTa.value));
+          if (v.error) throw new Error(v.error);
+          this.brainJson = this.jsonTa.value;
+          this.refresh();
+        } catch (e) {
+          this.jsonTa.classList.add("invalid");
+          this.errorEl.textContent = e.message;
+        }
+      }
+      setEnabled(on) {
+        this.root.querySelectorAll("button").forEach(b => b.disabled = !on);
+      }
+    }
+
+    function btn(label, cls, fn) {
+      const el = document.createElement("button");
+      el.type = "button"; el.textContent = label;
+      if (cls) el.className = cls;
+      el.addEventListener("click", fn);
+      return { el };
+    }
+    function numInput(id, val, min, max) {
+      const el = document.createElement("input");
+      el.type = "number"; el.id = id; el.value = val;
+      if (min != null) el.min = min;
+      if (max != null) el.max = max;
+      return el;
+    }
+    function lbl(text, input) {
+      const el = document.createElement("label");
+      el.append(text, " ", input);
+      return { el };
+    }
+
+    async function boot() {
+      const status = document.getElementById("wasm-status");
+      try {
+        await init();
+        wasmReady = true;
+        status.textContent = "Rust WASM loaded";
+        status.className = "ok";
+
+        const pSeed = numInput("p-seed", 42, 0);
+        const pIn = numInput("p-in", 8, 1, 8);
+        const pHid = numInput("p-hid", 4, 1, 12);
+        const pPanel = new ArchPanel({
+          title: "Perceptron brain",
+          legend: "Single hidden layer · weight color = sign",
+          controls: [
+            lbl("Seed", pSeed), lbl("Hidden", pHid),
+            btn("Randomize", "primary", () => pPanel.setBrain(random_perceptron_json(+pSeed.value, +pIn.value, +pHid.value))),
+            btn("Apply JSON", null, () => pPanel.applyJson()),
+          ],
+        });
+        pPanel.setBrain(random_perceptron_json(42, 8, 4));
+        panels.push(pPanel);
+
+        const mSeed = numInput("m-seed", 7, 0);
+        const mHid = numInput("m-hid", 5, 1, 12);
+        const m2 = document.createElement("input");
+        m2.type = "checkbox"; m2.checked = true;
+        const mPanel = new ArchPanel({
+          title: "MLP brain",
+          legend: "1–2 hidden layers · thicker edges = stronger weights",
+          controls: [
+            lbl("Seed", mSeed), lbl("Hidden", mHid), lbl("2 layers", m2),
+            btn("Randomize", "primary", () => mPanel.setBrain(random_mlp_json(+mSeed.value, +mHid.value, m2.checked))),
+            btn("Apply JSON", null, () => mPanel.applyJson()),
+          ],
+        });
+        mPanel.setBrain(random_mlp_json(7, 5, true));
+        panels.push(mPanel);
+
+        const sSeed = numInput("s-seed", 3, 0);
+        const sLm = numInput("s-lm", 5, 2, 12);
+        const sEd = numInput("s-ed", 8, 0, 24);
+        const sPanel = new ArchPanel({
+          title: "Spatial graph brain",
+          legend: "Landmarks on a ring · message-passing edges",
+          controls: [
+            lbl("Seed", sSeed), lbl("Landmarks", sLm), lbl("Edges", sEd),
+            btn("Randomize", "primary", () => sPanel.setBrain(random_spatial_json(+sSeed.value, +sLm.value, +sEd.value))),
+            btn("Apply JSON", null, () => sPanel.applyJson()),
+          ],
+        });
+        sPanel.setBrain(random_spatial_json(3, 5, 8));
+        panels.push(sPanel);
+
+        const gSeed = numInput("g-seed", 42, 0);
+        const gN = numInput("g-n", 8, 1, 16);
+        const gPanel = new ArchPanel({
+          title: "GoO graph brain",
+          clickable: true,
+          legend: `<span class="swatch" style="background:#6496ff"></span>Gen <span class="swatch" style="background:#78c88c"></span>Agg <span class="swatch" style="background:#dcb450"></span>Score <span class="swatch" style="background:#dc78a0"></span>Best · click node to cycle op`,
+          controls: [
+            lbl("Seed", gSeed), lbl("Nodes", gN),
+            btn("Randomize", "primary", () => gPanel.setBrain(random_goo_json(+gSeed.value, +gN.value))),
+            btn("GoT demo", null, () => gPanel.setBrain(demo_goo_branching_json())),
+            btn("Apply", null, () => gPanel.applyJson()),
+            btn("+Gen", null, () => gooMutate(gPanel, b => goo_add_node_json(b, "generate"))),
+            btn("+Agg", null, () => gooMutate(gPanel, b => goo_add_node_json(b, "aggregate"))),
+            btn("+Score", null, () => gooMutate(gPanel, b => goo_add_node_json(b, "score"))),
+            btn("+Best", null, () => gooMutate(gPanel, b => goo_add_node_json(b, "keep_best"))),
+          ],
+          onWire(panel) {
+            panel.canvas.addEventListener("click", (ev) => {
+              if (!wasmReady) return;
+              const r = panel.canvas.getBoundingClientRect();
+              const x = ev.clientX - r.left, y = ev.clientY - r.top;
+              for (const hit of panel.hits) {
+                if ((x - hit.x) ** 2 + (y - hit.y) ** 2 <= hit.r ** 2) {
+                  gooMutate(panel, b => goo_cycle_op_json(b, parseInt(hit.id, 10)));
+                  return;
+                }
+              }
+            });
+          },
+        });
+        gPanel.setBrain(demo_goo_branching_json());
+        panels.push(gPanel);
+
+        panels.forEach(p => p.setEnabled(true));
+      } catch (err) {
+        status.textContent = `WASM failed: ${err}. Run scripts/build_brain_playground_wasm.ps1`;
+        status.className = "err";
+      }
+    }
+
+    function gooMutate(panel, fn) {
+      try {
+        const v = parseJson(fn(panel.brainJson));
+        if (v.error) throw new Error(v.error);
+        panel.setBrain(JSON.stringify(v));
+      } catch (e) {
+        panel.jsonTa.classList.add("invalid");
+        panel.errorEl.textContent = e.message;
+      }
+    }
+
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { if (wasmReady) panels.forEach(p => p.refresh()); }, 80);
+    });
+
+    boot();
+  </script>
+</body>
+</html>

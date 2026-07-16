@@ -86,19 +86,19 @@ fn ensure_nn_index_entry(cache: &mut HashMap<String, String>, ind: &Individual) 
         Entry::Vacant(e) => {
             let mut js = String::new();
             js.push('{');
-            let ntype = match ind.nn.nn_type {
+            let ntype = match ind.nn().nn_type {
                 NNType::SingleInput => "single",
                 _ => "multi",
             };
             js.push_str(&format!("\n      \"type\": \"{}\",\n", ntype));
             js.push_str(&format!(
                 "      \"inputs\": {},\n      \"nodes\": {},\n      \"layers\": {},\n      \"nodes2\": {}\n",
-                ind.nn.inputs, ind.nn.nodes, ind.nn.layers, ind.nn.nodes2
+                ind.nn().inputs, ind.nn().nodes, ind.nn().layers, ind.nn().nodes2
             ));
             js.push_str("      ,\"weights\": ");
-            if let NNType::SingleInput = ind.nn.nn_type {
+            if let NNType::SingleInput = ind.nn().nn_type {
                 js.push('[');
-                for (wi, w) in ind.nn.weights.iter().enumerate() {
+                for (wi, w) in ind.nn().weights.iter().enumerate() {
                     if wi > 0 {
                         js.push_str(", ");
                     }
@@ -107,23 +107,23 @@ fn ensure_nn_index_entry(cache: &mut HashMap<String, String>, ind: &Individual) 
                 js.push_str("]\n");
             } else {
                 js.push('[');
-                for ni in 0..ind.nn.nodes {
+                for ni in 0..ind.nn().nodes {
                     if ni > 0 {
                         js.push_str(", ");
                     }
                     js.push('[');
                     for j in 0..ind
-                        .nn
+                        .nn()
                         .inputs
-                        .min(ind.nn.weights_multi.len().saturating_div(ind.nn.nodes))
+                        .min(ind.nn().weights_multi.len().saturating_div(ind.nn().nodes))
                     {
                         if j > 0 {
                             js.push_str(", ");
                         }
-                        let idx = ni.saturating_mul(ind.nn.inputs).saturating_add(j);
+                        let idx = ni.saturating_mul(ind.nn().inputs).saturating_add(j);
                         js.push_str(&format!(
                             "{:.6}",
-                            ind.nn.weights_multi.get(idx).copied().unwrap_or(0.0)
+                            ind.nn().weights_multi.get(idx).copied().unwrap_or(0.0)
                         ));
                     }
                     js.push(']');
@@ -131,35 +131,35 @@ fn ensure_nn_index_entry(cache: &mut HashMap<String, String>, ind: &Individual) 
                 js.push_str("]\n");
             }
             js.push_str(",      \"biases\": [");
-            for (bi, b) in ind.nn.biases.iter().enumerate() {
+            for (bi, b) in ind.nn().biases.iter().enumerate() {
                 if bi > 0 {
                     js.push_str(", ");
                 }
                 js.push_str(&format!("{:.6}", b));
             }
             js.push_str("]\n");
-            if ind.nn.layers == 2 {
+            if ind.nn().layers == 2 {
                 js.push_str(",      \"layer2_weights\": [");
-                for ni in 0..ind.nn.nodes2 {
+                for ni in 0..ind.nn().nodes2 {
                     if ni > 0 {
                         js.push_str(", ");
                     }
                     js.push('[');
-                    for j in 0..ind.nn.nodes {
+                    for j in 0..ind.nn().nodes {
                         if j > 0 {
                             js.push_str(", ");
                         }
-                        let idx = ni.saturating_mul(ind.nn.nodes).saturating_add(j);
+                        let idx = ni.saturating_mul(ind.nn().nodes).saturating_add(j);
                         js.push_str(&format!(
                             "{:.6}",
-                            ind.nn.weights2.get(idx).copied().unwrap_or(0.0)
+                            ind.nn().weights2.get(idx).copied().unwrap_or(0.0)
                         ));
                     }
                     js.push(']');
                 }
                 js.push_str("]\n");
                 js.push_str(",      \"layer2_biases\": [");
-                for (bi, b) in ind.nn.biases2.iter().enumerate() {
+                for (bi, b) in ind.nn().biases2.iter().enumerate() {
                     if bi > 0 {
                         js.push_str(", ");
                     }

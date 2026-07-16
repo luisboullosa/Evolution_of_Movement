@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Fitness Landscape Explorer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1219;
+      --panel: #171c27;
+      --panel2: #1e2533;
+      --border: #2d3648;
+      --text: #e8ecf4;
+      --muted: #9aa6bd;
+      --accent: #6ea8fe;
+      --accent2: #7ee787;
+      --warn: #f0b429;
+      --danger: #ff7b72;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2740 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 28px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 18, 25, 0.85);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { margin: 0 0 6px; font-size: 1.45rem; font-weight: 600; }
+    header p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    label { font-size: 0.85rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+    select, button {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .metric-toggle { display: flex; gap: 6px; }
+    .metric-toggle button.active {
+      background: #243049;
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .help-tip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #2a3347;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: help;
+      margin-left: 6px;
+      position: relative;
+    }
+    .help-tip:hover::after, .help-tip:focus::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 24px;
+      top: -4px;
+      width: min(340px, 70vw);
+      padding: 10px 12px;
+      background: #111722;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-weight: 400;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      z-index: 20;
+      white-space: pre-line;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .help-tip.wide:hover::after, .help-tip.wide:focus::after {
+      width: min(400px, 80vw);
+    }
+    main { padding: 18px 28px 40px; }
+    .arch-section {
+      margin-bottom: 36px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: rgba(23, 28, 39, 0.7);
+    }
+    .arch-header {
+      padding: 14px 18px;
+      background: linear-gradient(90deg, #1c2435, #171c27);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .arch-header h2 { margin: 0; font-size: 1.15rem; }
+    .arch-header span { color: var(--muted); font-size: 0.85rem; }
+    .arch-body {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(320px, 420px);
+      gap: 0;
+    }
+    @media (max-width: 960px) {
+      .arch-body { grid-template-columns: 1fr; }
+    }
+    .heatmap-wrap { padding: 16px; border-right: 1px solid var(--border); }
+    .side-panel {
+      padding: 16px;
+      background: #141925;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 360px;
+    }
+    table.heatmap {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 12px;
+    }
+    table.heatmap th, table.heatmap td {
+      border: 1px solid #2a3347;
+      padding: 7px 6px;
+      text-align: center;
+    }
+    table.heatmap th { background: #1f2738; color: var(--muted); font-weight: 500; }
+    table.heatmap td { cursor: pointer; transition: outline 0.1s; }
+    table.heatmap td.selected { outline: 2px solid var(--accent2); outline-offset: -2px; }
+    table.heatmap td:hover { filter: brightness(1.08); }
+    .panel-card {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .panel-card h3 {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      color: #d7deec;
+    }
+    .cell-meta { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+    .chart-box { height: 220px; position: relative; }
+    #brain-canvas {
+      width: 100%;
+      height: 200px;
+      border-radius: 8px;
+      background: #121722;
+      border: 1px solid var(--border);
+    }
+    .legend-bar {
+      height: 10px;
+      border-radius: 999px;
+      margin: 8px 0 4px;
+      background: linear-gradient(90deg, #2b6cb0, #68d391, #f6e05e, #fc8181);
+    }
+    .legend-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .empty-hint { color: var(--muted); font-size: 0.9rem; padding: 24px 8px; text-align: center; }
+    .convergence-note {
+      margin-top: 6px;
+      font-size: 0.8rem;
+      color: var(--warn);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Fitness Landscape Explorer</h1>
+    <p id="meta-line">Loading…</p>
+  </header>
+  <div class="toolbar">
+    <label>Architecture
+      <select id="arch-filter"><option value="all">All</option></select>
+    </label>
+    <label>Founder weights
+      <select id="founder-filter"></select>
+    </label>
+    <div>
+      <span style="font-size:0.85rem;color:var(--muted)">Heatmap metric</span>
+      <div class="metric-toggle" id="metric-toggle">
+        <button type="button" data-metric="fitness" class="active">
+          Fitness
+          <span class="help-tip wide" tabindex="0" id="fitness-help" data-tip="">?</span>
+        </button>
+        <button type="button" data-metric="pop_ratio">Pop ratio</button>
+        <button type="button" data-metric="complexity">
+          Mean complexity
+          <span class="help-tip" tabindex="0" id="complexity-help" data-tip="">?</span>
+        </button>
+      </div>
+    </div>
+    <button type="button" id="compare-seeds-btn" title="Overlay neutral vs random trajectories for selected cell">Compare seed modes</button>
+  </div>
+  <main id="root"></main>
+  <script id="landscape-data" type="application/json">__LANDSCAPE_JSON__</script>
+  <script>
+  const DATA = JSON.parse(document.getElementById('landscape-data').textContent);
+  const charts = new Map();
+  let selected = null;
+  let compareSeeds = false;
+  let metric = 'fitness';
+
+  const metricMatrixKey = {
+    fitness: 'fitness_matrix',
+    pop_ratio: 'pop_ratio_matrix',
+    complexity: 'complexity_matrix',
+  };
+
+  const ARCH_DISPLAY = {
+    'Perceptron': 'Perceptron',
+    'Multilayer perceptron (MLP)': 'Multilayer perceptron (MLP)',
+    'MLP': 'Multilayer perceptron (MLP)',
+    'Spatial macromolecule blob': 'Spatial macromolecule blob',
+    'Spatial graph (SG)': 'Spatial graph (SG)',
+    'Spatial Graph': 'Spatial graph (SG)',
+    'Graph of operations (GoO)': 'Graph of operations (GoO)',
+    'GoO': 'Graph of operations (GoO)',
+  };
+
+  function archDisplayName(raw) {
+    return DATA.architecture_labels?.[raw] || ARCH_DISPLAY[raw] || raw;
+  }
+
+  /** Human-readable sweep axis labels (backward-compat with cap=). */
+  function formatAxisLabel(label) {
+    if (!label) return label;
+    return label
+      .replace(/^cap=/, 'max brain nodes=')
+      .replace(/^max_brain_nodes=/, 'max brain nodes=')
+      .replace(/^landmarks=/, 'landmarks=')
+      .replace(/^layers=/, 'founder layers=')
+      .replace(/^generate_nodes=/, 'generate nodes=')
+      .replace(/^nodes=/, 'hidden nodes=')
+      .replace(/^L1=/, 'layer 1 nodes=')
+      .replace(/^L2=/, 'layer 2 nodes=');
+  }
+
+  function axisTooltip(label) {
+    if (label.startsWith('max brain nodes=') || label.startsWith('max_brain_nodes=') || label.startsWith('cap=')) {
+      return 'Structural size ceiling (max_brain_nodes): evolution cannot grow the brain beyond this complexity.';
+    }
+    if (label.startsWith('landmarks=')) return 'Founder landmark count in the spatial graph.';
+    if (label.startsWith('founder layers=') || label.startsWith('layers=')) {
+      return 'Founder layer count in the spatial macromolecule blob.';
+    }
+    if (label.startsWith('generate nodes=') || label.startsWith('generate_nodes=')) {
+      return 'Number of Generate nodes seeded in the GoO graph at founder.';
+    }
+    return '';
+  }
+
+  function colorScale(v, min, max) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '#2a3142';
+    if (max <= min) return '#4c78a8';
+    const t = Math.max(0, Math.min(1, (v - min) / (max - min)));
+    const r = Math.round(43 + t * 212);
+    const g = Math.round(108 + (t < 0.5 ? t * 80 : (1 - t) * 40));
+    const b = Math.round(168 + (1 - t) * 40);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function matrixRange(matrix) {
+    const vals = matrix.flat().filter(v => v !== null && v !== undefined);
+    if (!vals.length) return [0, 1];
+    return [Math.min(...vals), Math.max(...vals)];
+  }
+
+  function cellKey(arch, x, y, founder) {
+    return `${arch}|${x}|${y}|${founder}`;
+  }
+
+  function findCell(arch, x, y, founder) {
+    return DATA.cells.find(c =>
+      c.architecture === arch && c.x_label === x && c.y_label === y && c.founder_mode === founder
+    );
+  }
+
+  function findDiagram(arch, x, y) {
+    return DATA.cell_diagrams.find(d =>
+      d.architecture === arch && d.x_label === x && d.y_label === y
+    );
+  }
+
+  function runsForCell(arch, x, y, founder) {
+    return DATA.runs.filter(r =>
+      r.architecture === arch && r.x_label === x && r.y_label === y && r.founder_mode === founder
+    );
+  }
+
+  function renderBrainDiagram(canvas, diagram) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.clientWidth || 360;
+    const h = canvas.clientHeight || 200;
+    canvas.width = w * devicePixelRatio;
+    canvas.height = h * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!diagram) {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('Select a cell to view brain topology', 14, 28);
+      return;
+    }
+    const sx = w / diagram.width;
+    const sy = h / diagram.height;
+    const s = Math.min(sx, sy);
+    const ox = (w - diagram.width * s) / 2;
+    const oy = (h - diagram.height * s) / 2;
+    const bg = diagram.panel_bg || { r: 18, g: 22, b: 30 };
+    ctx.fillStyle = `rgb(${bg.r},${bg.g},${bg.b})`;
+    ctx.fillRect(0, 0, w, h);
+    for (const e of diagram.edges || []) {
+      const c = e.color || { r: 120, g: 140, b: 180, a: 180 };
+      ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${(c.a ?? 200) / 255})`;
+      ctx.lineWidth = Math.max(0.5, (e.width || 1) * s);
+      ctx.beginPath();
+      ctx.moveTo(ox + e.x1 * s, oy + e.y1 * s);
+      ctx.lineTo(ox + e.x2 * s, oy + e.y2 * s);
+      ctx.stroke();
+    }
+    for (const n of diagram.nodes || []) {
+      const fill = n.fill || { r: 100, g: 150, b: 255 };
+      ctx.fillStyle = `rgb(${fill.r},${fill.g},${fill.b})`;
+      ctx.beginPath();
+      ctx.arc(ox + n.x * s, oy + n.y * s, (n.r || 8) * s, 0, Math.PI * 2);
+      ctx.fill();
+      if (n.label) {
+        ctx.fillStyle = `rgb(${(n.label_color||{r:230,g:235,b:245}).r},${(n.label_color||{}).g||235},${(n.label_color||{}).b||245})`;
+        ctx.font = `${Math.max(9, (n.label_size || 11) * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, ox + n.x * s, oy + n.y * s + 3 * s);
+      }
+    }
+    for (const t of diagram.texts || []) {
+      const c = t.color || { r: 200, g: 205, b: 215 };
+      ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
+      ctx.font = `${Math.max(9, (t.size || 11) * s)}px sans-serif`;
+      ctx.textAlign = t.align === 'center' ? 'center' : (t.align === 'right' ? 'right' : 'left');
+      ctx.fillText(t.text, ox + t.x * s, oy + t.y * s);
+    }
+  }
+
+  function trajectoryConverged(traj) {
+    if (!traj || traj.length < 4) return false;
+    const tail = traj.slice(-3);
+    const first = tail[0].fitness;
+    const last = tail[tail.length - 1].fitness;
+    if (first === 0 && last === 0) return false;
+    return Math.abs(last - first) / Math.max(0.001, Math.abs(first)) < 0.03;
+  }
+
+  function updateSidePanel(arch, x, y, founder) {
+    const cell = findCell(arch, x, y, founder);
+    const panel = document.getElementById(`side-${arch}`);
+    if (!panel) return;
+    const meta = panel.querySelector('.cell-meta');
+    const chartCanvas = panel.querySelector('canvas.trajectory-chart');
+    const brainCanvas = panel.querySelector('canvas.brain-canvas');
+    const conv = panel.querySelector('.convergence-note');
+
+    if (!cell) {
+      meta.textContent = 'No data for this cell.';
+      return;
+    }
+    meta.innerHTML = `
+      <strong>${x}</strong> × <strong>${y}</strong> · founder: <strong>${founder}</strong><br/>
+      fitness μ=${cell.fitness_mean.toFixed(3)} ± ${cell.fitness_std.toFixed(3)} ·
+      pop μ=${cell.pop_ratio_mean.toFixed(3)} · complexity μ=${cell.complexity_mean.toFixed(2)}<br/>
+      ${cell.replicates} replicate(s) · ${DATA.steps.toLocaleString()} steps max
+    `;
+
+    const chartId = `chart-${arch}`;
+    if (charts.has(chartId)) charts.get(chartId).destroy();
+
+    const datasets = [];
+    if (compareSeeds && DATA.founder_modes.length > 1) {
+      for (const fm of DATA.founder_modes) {
+        const c = findCell(arch, x, y, fm);
+        if (!c || !c.trajectory_mean?.length) continue;
+        const color = fm === 'neutral' ? '#6ea8fe' : (fm === 'random_uniform' ? '#7ee787' : '#f0b429');
+        datasets.push({
+          label: fm,
+          data: c.trajectory_mean.map(p => ({ x: p.step, y: p[metric === 'complexity' ? 'avg_complexity' : metric === 'pop_ratio' ? 'pop_ratio' : 'fitness'] })),
+          borderColor: color,
+          backgroundColor: color + '33',
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+        });
+      }
+    } else {
+      const yKey = metric === 'complexity' ? 'avg_complexity' : metric === 'pop_ratio' ? 'pop_ratio' : 'fitness';
+      datasets.push({
+        label: 'mean trajectory',
+        data: (cell.trajectory_mean || []).map(p => ({ x: p.step, y: p[yKey] })),
+        borderColor: '#6ea8fe',
+        backgroundColor: 'rgba(110,168,254,0.15)',
+        tension: 0.2,
+        pointRadius: 1,
+        borderWidth: 2,
+      });
+      for (const run of runsForCell(arch, x, y, founder)) {
+        datasets.push({
+          label: `seed ${run.seed}`,
+          data: (run.trajectory || []).map(p => ({ x: p.step, y: p[yKey] })),
+          borderColor: 'rgba(200,210,230,0.35)',
+          borderDash: [4, 4],
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 1,
+        });
+      }
+    }
+
+    charts.set(chartId, new Chart(chartCanvas, {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        scales: {
+          x: {
+            type: 'linear',
+            title: { display: true, text: 'Step', color: '#9aa6bd' },
+            ticks: { color: '#9aa6bd' },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+          },
+          y: {
+            title: {
+              display: true,
+              text: metric === 'fitness' ? 'Fitness score' : metric === 'pop_ratio' ? 'Population ratio' : 'Mean complexity',
+              color: '#9aa6bd',
+            },
+            ticks: { color: '#9aa6bd' },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+          },
+        },
+        plugins: {
+          legend: { labels: { color: '#c5d0e6', boxWidth: 12 } },
+        },
+      },
+    }));
+
+    const diag = findDiagram(arch, x, y);
+    renderBrainDiagram(brainCanvas, diag?.diagram);
+    const converged = trajectoryConverged(cell.trajectory_mean);
+    conv.textContent = converged
+      ? 'Trajectory looks plateaued in the last samples — 30k steps may be enough for this cell.'
+      : 'Trajectory still moving at end of run — consider longer sweeps for this cell.';
+    conv.style.display = cell.trajectory_mean?.length ? 'block' : 'none';
+  }
+
+  function renderHeatmapSection(hm) {
+    const founder = document.getElementById('founder-filter').value;
+    const matrix = hm[metricMatrixKey[metric]];
+    const [min, max] = matrixRange(matrix);
+    const section = document.createElement('section');
+    section.className = 'arch-section';
+    section.dataset.arch = hm.architecture;
+
+    const sel = selected && selected.arch === hm.architecture ? selected : null;
+    section.innerHTML = `
+      <div class="arch-header">
+        <h2>${archDisplayName(hm.architecture)}</h2>
+        <span>${hm.x_labels.length}×${hm.y_labels.length} grid · founder: ${founder}</span>
+      </div>
+      <div class="arch-body">
+        <div class="heatmap-wrap">
+          <div class="legend-bar"></div>
+          <div class="legend-labels"><span>${min.toFixed(3)}</span><span>${max.toFixed(3)}</span></div>
+          <table class="heatmap"></table>
+        </div>
+        <div class="side-panel" id="side-${hm.architecture}">
+          <div class="panel-card">
+            <h3>Selected cell</h3>
+            <div class="cell-meta empty-hint">Click a heatmap cell to inspect fitness over time and brain topology.</div>
+            <div class="convergence-note"></div>
+          </div>
+          <div class="panel-card chart-box">
+            <h3>Fitness through time</h3>
+            <canvas class="trajectory-chart"></canvas>
+          </div>
+          <div class="panel-card">
+            <h3>Brain topology</h3>
+            <canvas class="brain-canvas" width="360" height="200"></canvas>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const table = section.querySelector('table.heatmap');
+    const header = document.createElement('tr');
+    const corner = document.createElement('th');
+    corner.textContent = 'Y \\ X';
+    corner.title = 'Rows: Y-axis sweep parameter · Columns: X-axis sweep parameter';
+    header.appendChild(corner);
+    hm.x_labels.forEach(x => {
+      const th = document.createElement('th');
+      th.textContent = formatAxisLabel(x);
+      th.title = axisTooltip(formatAxisLabel(x));
+      header.appendChild(th);
+    });
+    table.appendChild(header);
+
+    hm.y_labels.forEach((y, yi) => {
+      const tr = document.createElement('tr');
+      const yh = document.createElement('th');
+      yh.textContent = formatAxisLabel(y);
+      yh.title = axisTooltip(formatAxisLabel(y));
+      tr.appendChild(yh);
+      hm.x_labels.forEach((x, xi) => {
+        const td = document.createElement('td');
+        const v = matrix[yi][xi];
+        td.style.background = colorScale(v, min, max);
+        td.textContent = v === null || v === undefined ? '—' : v.toFixed(3);
+        td.dataset.x = x;
+        td.dataset.y = y;
+        if (sel && sel.x === x && sel.y === y) td.classList.add('selected');
+        td.addEventListener('click', () => {
+          selected = { arch: hm.architecture, x, y, founder };
+          section.querySelectorAll('td').forEach(c => c.classList.remove('selected'));
+          td.classList.add('selected');
+          updateSidePanel(hm.architecture, x, y, founder);
+        });
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+
+    if (sel) {
+      setTimeout(() => updateSidePanel(hm.architecture, sel.x, sel.y, founder), 0);
+    }
+    return section;
+  }
+
+  function renderAll() {
+    const root = document.getElementById('root');
+    root.innerHTML = '';
+    const archFilter = document.getElementById('arch-filter').value;
+    const founder = document.getElementById('founder-filter').value;
+    const heatmaps = DATA.heatmaps.filter(h =>
+      h.founder_mode === founder && (archFilter === 'all' || h.architecture === archFilter)
+    );
+    if (!heatmaps.length) {
+      root.innerHTML = '<p class="empty-hint">No heatmaps for this founder mode.</p>';
+      return;
+    }
+    heatmaps.forEach(hm => root.appendChild(renderHeatmapSection(hm)));
+  }
+
+  function init() {
+    const help = DATA.complexity_help;
+    document.getElementById('complexity-help').dataset.tip = help?.tooltip || 'Population-mean brain complexity.';
+    const fhelp = DATA.fitness_help;
+    const fitnessTip = fhelp
+      ? `${fhelp.tooltip}\n\n${fhelp.formula}`
+      : 'fitness = pop_ratio × (0.55 + 0.25×resource_term + 0.20×complexity_term) × cap_penalty';
+    document.getElementById('fitness-help').dataset.tip = fitnessTip;
+    document.getElementById('meta-line').textContent =
+      `build ${DATA.build_id} · ${DATA.steps.toLocaleString()} steps/run · ${DATA.replicates} replicates · modes: ${DATA.founder_modes.join(', ')}`;
+
+    const archSel = document.getElementById('arch-filter');
+    const arches = [...new Set(DATA.heatmaps.map(h => h.architecture))].sort();
+    arches.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a;
+      o.textContent = archDisplayName(a);
+      archSel.appendChild(o);
+    });
+
+    const founderSel = document.getElementById('founder-filter');
+    DATA.founder_modes.forEach(f => {
+      const o = document.createElement('option');
+      o.value = f; o.textContent = f;
+      founderSel.appendChild(o);
+    });
+
+    document.getElementById('metric-toggle').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-metric]');
+      if (!btn) return;
+      metric = btn.dataset.metric;
+      document.querySelectorAll('#metric-toggle button').forEach(b => b.classList.toggle('active', b === btn));
+      renderAll();
+    });
+    founderSel.addEventListener('change', renderAll);
+    archSel.addEventListener('change', renderAll);
+    document.getElementById('compare-seeds-btn').addEventListener('click', () => {
+      compareSeeds = !compareSeeds;
+      document.getElementById('compare-seeds-btn').textContent = compareSeeds
+        ? 'Showing seed comparison'
+        : 'Compare seed modes';
+      if (selected) updateSidePanel(selected.arch, selected.x, selected.y, selected.founder);
+    });
+
+    renderAll();
+  }
+
+  init();
+  </script>
+</body>
+</html>

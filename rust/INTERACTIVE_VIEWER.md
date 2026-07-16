@@ -60,6 +60,27 @@ cd rust
 cargo run --release --bin evo_movement_interactive
 ```
 
+### Lab Simulator (secondary)
+
+A focused hex-dish bench for controlled experiments (mutations, reproduction, environment knobs) without the full arena / snapshot workflow:
+
+```bash
+cd rust
+cargo run --release --bin evo_movement_lab
+```
+
+Defaults: **radius-10** hex dish, **5** individuals (architecture selectable). The left panel has seven indexed, collapsible sections:
+
+1. **Dish & population** — radius, seed count/architecture, reset/seed  
+2. **Insert individuals** — add more with configurable count, architecture, placement radius  
+3. **Time** — step ×1 / ×100, env speed multiplier, optional auto-reproduce on step  
+4. **Mutations** — parametric rate/sigma plus one button per structural mutation type (targets selected individual, or all if none selected)  
+5. **Reproduction** — resource threshold, cost, manual reproduce  
+6. **Environment** — Perlin time/spatial scales, octaves, seed  
+7. **Metabolism** — basal cost, per-node maintenance, movement cost, death risk  
+
+Click hexes to select individuals; brain diagram appears in the right panel.
+
 ### Controls
 
 **Menu Bar:**
