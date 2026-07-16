@@ -1,4 +1,10 @@
 use crate::perlin::Perlin;
+use crate::hex_dish::HexDishLayout;
+
+#[inline]
+fn scaled_resource(raw: f64, resource_scale: f64, contrast: f64) -> f64 {
+    Perlin::shape_resource_contrast(raw, contrast) * resource_scale
+}
 
 pub struct Environment {
     pub width: usize,
@@ -17,13 +23,13 @@ impl Environment {
         }
     }
 
-    pub fn init_perlin(&mut self, seed: u64, resource_scale: f64) {
+    pub fn init_perlin(&mut self, seed: u64, resource_scale: f64, contrast: f64) {
         self.perlin_base = Perlin::generate(self.width, seed);
-        // apply resource scale to the perlin base and initialize resources
-        for (_i, v) in self.perlin_base.iter_mut().enumerate().take(self.width) {
-            *v = *v * resource_scale;
-        }
-        self.resources = self.perlin_base.clone();
+        self.resources = self
+            .perlin_base
+            .iter()
+            .map(|&raw| scaled_resource(raw, resource_scale, contrast))
+            .collect();
     }
 
     pub fn set_perlin_base(&mut self, base: &[f64]) {
@@ -36,6 +42,66 @@ impl Environment {
         self.resources.get(pos % self.width).copied().unwrap_or(0.0)
     }
 
+    pub fn init_perlin_hex_dish(
+        &mut self,
+        dish: &HexDishLayout,
+        seed: u64,
+        resource_scale: f64,
+        spatial_scale: f64,
+        time_scale: f64,
+        contrast: f64,
+    ) {
+        let n = dish.cell_count();
+        self.width = n;
+        self.perlin_base = Vec::with_capacity(n);
+        for coord in &dish.active_coords {
+            let v = Perlin::sample_2d_time(
+                coord.q as f64,
+                coord.r as f64,
+                0.0,
+                seed,
+                spatial_scale,
+                time_scale,
+            );
+            self.perlin_base.push(v);
+        }
+        self.resources = self
+            .perlin_base
+            .iter()
+            .map(|&raw| scaled_resource(raw, resource_scale, contrast))
+            .collect();
+    }
+
+    pub fn step_hex_dish(
+        &mut self,
+        dish: &HexDishLayout,
+        seed: u64,
+        time_speed: f64,
+        time_amplitude: f64,
+        spatial_scale: f64,
+        time_scale: f64,
+        resource_scale: f64,
+        contrast: f64,
+    ) {
+        self.perlin_time += time_speed;
+        for (idx, coord) in dish.active_coords.iter().enumerate() {
+            let temporal = Perlin::sample_2d_time(
+                coord.q as f64,
+                coord.r as f64,
+                self.perlin_time,
+                seed,
+                spatial_scale,
+                time_scale,
+            );
+            let base_raw = self.perlin_base.get(idx).copied().unwrap_or(0.0);
+            let combined_raw =
+                (base_raw + temporal * time_amplitude).clamp(0.0, 1.0 + time_amplitude);
+            if let Some(slot) = self.resources.get_mut(idx) {
+                *slot = scaled_resource(combined_raw, resource_scale, contrast);
+            }
+        }
+    }
+
     pub fn step(
         &mut self,
         seed: u64,
@@ -44,6 +110,7 @@ impl Environment {
         spatial_scale: f64,
         time_scale: f64,
         resource_scale: f64,
+        contrast: f64,
     ) {
         // Always advance Perlin temporal evolution slice
         self.perlin_time += time_speed;
@@ -55,8 +122,9 @@ impl Environment {
             time_scale,
         );
         for (i, v) in slice.iter().enumerate().take(self.width) {
-            // apply temporal variation and then scale resources by resource_scale
-            self.resources[i] = (self.perlin_base[i] + v * time_amplitude) * resource_scale;
+            let combined_raw =
+                (self.perlin_base[i] + v * time_amplitude).clamp(0.0, 1.0 + time_amplitude);
+            self.resources[i] = scaled_resource(combined_raw, resource_scale, contrast);
         }
     }
 }

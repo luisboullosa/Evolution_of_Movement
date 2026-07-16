@@ -1,18 +1,46 @@
+use crate::architecture_lineage::{ArchitectureLineageEvent, write_lineage_jsonl};
+use crate::cladogram::Cladogram;
 use crate::config::Config;
 use crate::environment::Environment;
+use crate::hex_dish::HexDishLayout;
+use crate::hex_simulation::{grid_cell_count, step_individuals_cpu};
 use crate::individual::Individual;
+use crate::population_dynamics::{
+    apply_metabolism_and_cull, clamp_initial_population, record_births_in_cladogram,
+    record_births_in_lineage, run_reproduction_phase,
+};
+use crate::step_engine::apply_decisions_sequential;
+use crate::run_record::{persist_run_record, RunRecordContext};
 use crate::snapshot::{PopulationSnapshot, SnapshotError};
-use crate::tensor::{run_tensor_kernel, PopulationTensor, RowRngManager};
+use crate::snapshot_registry;
+use crate::tensor::{run_brain_forward, GpuForwardState, PopulationBrainTensor, RowRngManager};
 use crate::webviewer_writer::{resolve_individuals_encoding, IndividualsEncoding, WebviewerWriter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rand_distr::{Cauchy, Distribution};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
+use std::sync::Arc;
 use std::time::Instant;
+
+/// How often to redraw the progress bar (~50 updates max; respects `report_interval`).
+fn progress_update_interval(steps: i32, report_interval: i32) -> i32 {
+    let steps = steps.max(1);
+    let min_interval = (steps / 50).max(1);
+    let interval = if report_interval > 0 {
+        report_interval.max(min_interval)
+    } else {
+        min_interval
+    };
+    interval.min(steps)
+}
+
+fn should_emit_progress(t: i32, steps: i32, interval: i32) -> bool {
+    t == 0 || t + 1 >= steps || t % interval == 0
+}
 
 pub struct Simulation {
     pub env: Environment,
     pub individuals: Vec<Individual>,
+    pub hex_dish: Option<Arc<HexDishLayout>>,
     pub rng: StdRng,
     pub next_id: i32,
     pub last_spend: Vec<f64>,
@@ -21,118 +49,118 @@ pub struct Simulation {
     pub config: Config,
     pub nn_hidden_buf: Vec<f64>,
     pub nn_out2_buf: Vec<f64>,
-    pub tensor: PopulationTensor,
+    pub tensor: PopulationBrainTensor,
     pub row_rng: RowRngManager,
+    pub gpu_state: GpuForwardState,
     pub step_count: i32,
+    /// Brain forward passes executed on GPU during this run (for run_record).
+    pub gpu_steps_executed: u64,
+    /// Brain forward passes executed on CPU during this run (for run_record).
+    pub cpu_brain_steps_executed: u64,
     ind_encoding: IndividualsEncoding,
+    pub cladogram: Option<Cladogram>,
+    architecture_lineage: Vec<ArchitectureLineageEvent>,
 }
 
 impl Simulation {
     pub fn new(cfg: &Config) -> Self {
-        let mut env = Environment::new(cfg.grid_width);
-        env.init_perlin(cfg.seed as u64, cfg.resource_scale);
-        let ind_encoding = Self::resolve_individuals_encoding(&cfg.individuals_encoding);
+        let config = cfg.clone();
+        let hex_dish = if config.hex_dish_radius > 0 {
+            Some(Arc::new(HexDishLayout::from_radius_options(
+                config.hex_dish_radius,
+                config.hex_dish_torus,
+            )))
+        } else {
+            None
+        };
+        let cell_count = grid_cell_count(&config);
+        let mut env = Environment::new(cell_count);
+        if let Some(ref dish) = hex_dish {
+            env.init_perlin_hex_dish(
+                dish,
+                config.seed as u64,
+                config.resource_scale,
+                config.env_perlin_spatial_scale,
+                config.env_perlin_time_scale,
+                config.resource_contrast,
+            );
+        } else {
+            env.init_perlin(
+                config.seed as u64,
+                config.resource_scale,
+                config.resource_contrast,
+            );
+        }
+        let ind_encoding = Self::resolve_individuals_encoding(&config.individuals_encoding);
+        let max_buf = config.max_brain_nodes.max(config.nn_nodes).max(config.nn_nodes2) as usize;
+        let tensor = PopulationBrainTensor::new(&config);
+        let row_rng = RowRngManager::new(config.seed as u64);
         Simulation {
             env,
+            hex_dish,
             individuals: Vec::new(),
-            rng: StdRng::seed_from_u64(cfg.seed as u64),
+            rng: StdRng::seed_from_u64(config.seed as u64),
             next_id: 1,
             last_spend: Vec::new(),
             last_delta: Vec::new(),
             last_movers: 0,
-            config: cfg.clone(),
-            nn_hidden_buf: vec![0.0; cfg.nn_nodes.max(0) as usize],
-            nn_out2_buf: vec![0.0; cfg.nn_nodes2.max(0) as usize],
-            tensor: PopulationTensor::new(cfg),
-            row_rng: RowRngManager::new(cfg.seed as u64),
+            config,
+            nn_hidden_buf: vec![0.0; max_buf.max(32)],
+            nn_out2_buf: vec![0.0; max_buf.max(32)],
+            tensor,
+            row_rng,
+            gpu_state: GpuForwardState::new(),
             step_count: 0,
+            gpu_steps_executed: 0,
+            cpu_brain_steps_executed: 0,
             ind_encoding,
+            cladogram: if cfg.export_cladogram {
+                Some(Cladogram::new())
+            } else {
+                None
+            },
+            architecture_lineage: Vec::new(),
         }
     }
 
-    pub fn init_population(&mut self, n: usize) {
-        use rand::Rng;
-        let pdist = rand::distributions::Uniform::new(
-            0usize,
-            if self.env.width == 0 {
-                1
-            } else {
-                self.env.width
-            },
-        );
-        let wrand = rand::distributions::Uniform::new(-1.0f64, 1.0f64);
-        for _ in 0..n {
-            let mut nn = crate::neural_network::NeuralNetwork::new(
-                self.config.nn_nodes.max(0) as usize,
-                self.config.nn_inputs.max(0) as usize,
-                self.config.nn_layers,
-                self.config.nn_nodes2.max(0) as usize,
-            );
-            if self.config.radiate > 0 {
-                // Treat `radiate` as number of independent sampling events.
-                // For each event, with probability `mutation_rate` apply a Cauchy perturbation.
-                let events = (self.config.radiate as i64).max(0) as usize;
-                let mutation_rate = self.config.mutation_rate as f64;
-                let cauchy = Cauchy::new(0.0, self.config.mutation_sigma).unwrap();
-                for w in nn.weights.iter_mut() {
-                    for _ in 0..events {
-                        if self.rng.gen::<f64>() < mutation_rate {
-                            *w += cauchy.sample(&mut self.rng);
-                        }
-                    }
-                }
-                for w in nn.weights_multi.iter_mut() {
-                    for _ in 0..events {
-                        if self.rng.gen::<f64>() < mutation_rate {
-                            *w += cauchy.sample(&mut self.rng);
-                        }
-                    }
-                }
-                for b in nn.biases.iter_mut() {
-                    for _ in 0..events {
-                        if self.rng.gen::<f64>() < mutation_rate {
-                            *b += cauchy.sample(&mut self.rng);
-                        }
-                    }
-                }
-                for w in nn.weights2.iter_mut() {
-                    for _ in 0..events {
-                        if self.rng.gen::<f64>() < mutation_rate {
-                            *w += cauchy.sample(&mut self.rng);
-                        }
-                    }
-                }
-                for b in nn.biases2.iter_mut() {
-                    for _ in 0..events {
-                        if self.rng.gen::<f64>() < mutation_rate {
-                            *b += cauchy.sample(&mut self.rng);
-                        }
-                    }
-                }
-            } else {
-                for w in nn.weights.iter_mut() {
-                    *w = wrand.sample(&mut self.rng);
-                }
-                for w in nn.weights_multi.iter_mut() {
-                    *w = wrand.sample(&mut self.rng);
-                }
-                for b in nn.biases.iter_mut() {
-                    *b = wrand.sample(&mut self.rng);
-                }
-                for w in nn.weights2.iter_mut() {
-                    *w = wrand.sample(&mut self.rng);
-                }
-                for b in nn.biases2.iter_mut() {
-                    *b = wrand.sample(&mut self.rng);
-                }
-            }
+    fn use_gpu_step(&self) -> bool {
+        self.config.use_gpu_step && self.tensor.population_is_gpu_compatible()
+    }
 
+    pub fn init_population(&mut self, n: usize) {
+        self.init_population_with_founder_mode(n, None);
+    }
+
+    pub fn init_population_with_founder_mode(
+        &mut self,
+        n: usize,
+        founder_mode: Option<crate::brain::FounderWeightMode>,
+    ) {
+        use rand_distr::{Distribution, Uniform};
+        let requested = n;
+        let n = clamp_initial_population(n, self.config.max_population);
+        if n < requested {
+            eprintln!(
+                "[warn] clamping initial population from {requested} to {n} (max_population={})",
+                self.config.max_population
+            );
+        }
+        let cell_count = grid_cell_count(&self.config);
+        let pdist = Uniform::new(0usize, cell_count.max(1));
+        for _ in 0..n {
             let pos = if self.config.randomize_start_positions {
                 pdist.sample(&mut self.rng)
             } else {
-                self.config.start_pos.min(self.env.width.saturating_sub(1))
+                self.config.start_pos.min(cell_count.saturating_sub(1))
             };
-            let mut ind = Individual::new(nn, pos, self.next_id);
+            let mut ind = if let Some(mode) = founder_mode {
+                Individual::new_founder_with_mode(&self.config, pos, self.next_id, &mut self.rng, mode)
+            } else {
+                Individual::new_founder(&self.config, pos, self.next_id, &mut self.rng)
+            };
+            if let Some(ref mut clado) = self.cladogram {
+                clado.add_founder(ind.id, ind.lineage_color);
+            }
             self.next_id += 1;
             ind.resources = 10.0;
             self.individuals.push(ind);
@@ -142,103 +170,123 @@ impl Simulation {
 
     pub fn step_with_existing_resources(&mut self) {
         self.step_count = self.step_count.saturating_add(1);
-        self.tensor.sync_from_individuals(&self.individuals);
-        self.row_rng
-            .prepare(self.tensor.active_count(), self.step_count);
-        let width = self.env.width.max(1);
-
-        let mut occupancy = vec![0i32; width];
-        for ind in &self.individuals {
-            let pos = ind.position % width;
-            occupancy[pos] = occupancy[pos].saturating_add(1);
+        if let Some(ref mut clado) = self.cladogram {
+            clado.advance_time();
         }
 
-        self.last_spend.resize(self.individuals.len(), 0.0);
-        self.last_delta.resize(self.individuals.len(), 0);
-        self.last_movers = 0;
+        if self.use_gpu_step() {
+            let cell_count = grid_cell_count(&self.config);
+            let mut occupancy = vec![0i32; cell_count];
+            for ind in &self.individuals {
+                let pos = ind.position % cell_count;
+                occupancy[pos] = occupancy[pos].saturating_add(1);
+            }
 
-        run_tensor_kernel(
-            &mut self.tensor,
-            &self.env.resources,
-            &occupancy,
-            &self.config,
-            &self.row_rng,
-            &mut self.nn_hidden_buf,
-            &mut self.nn_out2_buf,
-            &mut self.last_spend,
-            &mut self.last_delta,
-            &mut self.last_movers,
-        );
-        self.tensor.apply_to_individuals(&mut self.individuals);
+            self.tensor
+                .sync_from_individuals(&self.individuals, &self.config);
+            let (decisions, gpu_ran) = run_brain_forward(
+                &mut self.tensor,
+                &mut self.individuals,
+                &self.env.resources,
+                &occupancy,
+                &self.config,
+                &mut self.nn_hidden_buf,
+                &mut self.nn_out2_buf,
+                &mut self.gpu_state,
+                self.hex_dish.as_deref(),
+            );
+            let outcome = apply_decisions_sequential(
+                &mut self.individuals,
+                &decisions,
+                &self.config,
+                &mut self.env,
+                self.hex_dish.as_deref(),
+            );
+            if gpu_ran {
+                self.gpu_steps_executed = self.gpu_steps_executed.saturating_add(1);
+                self.tensor
+                    .apply_spatial_runtime_to_individuals(&mut self.individuals);
+            } else {
+                self.cpu_brain_steps_executed = self.cpu_brain_steps_executed.saturating_add(1);
+            }
+            self.last_spend = outcome.last_spend;
+            self.last_delta = outcome.last_delta;
+            self.last_movers = outcome.last_movers;
+        } else {
+            self.cpu_brain_steps_executed = self.cpu_brain_steps_executed.saturating_add(1);
+            let outcome = step_individuals_cpu(
+                &mut self.individuals,
+                &mut self.env,
+                &self.config,
+                &mut self.nn_hidden_buf,
+                &mut self.nn_out2_buf,
+                &mut self.rng,
+                self.hex_dish.as_deref(),
+            );
+            self.last_spend = outcome.last_spend;
+            self.last_delta = outcome.last_delta;
+            self.last_movers = outcome.last_movers;
+        }
 
         for ind in &mut self.individuals {
             ind.age += 1;
         }
 
-        let before = self.individuals.len();
-        for i in 0..before {
-            if i >= self.individuals.len() {
-                break;
-            }
-            let res = self.individuals[i].resources;
-            if res > self.config.reproduction_threshold {
-                if self.config.max_population > 0
-                    && (self.individuals.len() as i32) >= self.config.max_population
-                {
-                    break;
-                }
-                let child_opt = {
-                    let ind_mut = &mut self.individuals[i];
-                    ind_mut.reproduce(
-                        &mut self.rng,
-                        &mut self.next_id,
-                        self.config.reproduction_threshold,
-                        self.config.reproduction_cost,
-                        self.config.mutation_rate,
-                        self.config.mutation_sigma,
-                    )
-                };
-                if let Some(child) = child_opt {
-                    self.individuals.push(child);
-                }
+        let births = run_reproduction_phase(
+            &mut self.individuals,
+            &self.config,
+            &mut self.rng,
+            &mut self.next_id,
+            |_| {},
+        );
+        if let Some(ref mut clado) = self.cladogram {
+            record_births_in_cladogram(clado, &births);
+        }
+        record_births_in_lineage(&mut self.architecture_lineage, self.step_count, &births);
+
+        let dead_ids = apply_metabolism_and_cull(&mut self.individuals, &self.config, &mut self.rng);
+        if let Some(ref mut clado) = self.cladogram {
+            for id in dead_ids {
+                clado.mark_death(id);
             }
         }
-
-        for ind in &mut self.individuals {
-            let total_nodes = ind.nn.nodes + ind.nn.nodes2;
-            ind.resources -= (total_nodes as f64) * self.config.maintenance_cost_per_node;
+        if self.use_gpu_step() {
+            self.tensor
+                .sync_from_individuals(&self.individuals, &self.config);
         }
-
-        use rand::distributions::{Distribution, Uniform};
-        let ud = Uniform::new(0.0f64, 1.0f64);
-        self.individuals.retain(|ind| {
-            if ind.resources <= 0.0 {
-                return false;
-            }
-            if self.config.death_risk > 0.0 && ind.age > 0 {
-                let p = 1.0 - (-(self.config.death_risk * (ind.age as f64))).exp();
-                if ud.sample(&mut self.rng) < p {
-                    return false;
-                }
-            }
-            true
-        });
-        self.tensor.sync_from_individuals(&self.individuals);
     }
 
     pub fn step(&mut self) {
-        self.env.step(
-            self.config.seed as u64,
-            self.config.env_time_speed,
-            self.config.env_time_amplitude,
-            self.config.env_perlin_spatial_scale,
-            self.config.env_perlin_time_scale,
-            self.config.resource_scale,
-        );
+        if let Some(ref dish) = self.hex_dish {
+            self.env.step_hex_dish(
+                dish,
+                self.config.seed as u64,
+                self.config.env_time_speed,
+                self.config.env_time_amplitude,
+                self.config.env_perlin_spatial_scale,
+                self.config.env_perlin_time_scale,
+                self.config.resource_scale,
+                self.config.resource_contrast,
+            );
+        } else {
+            self.env.step(
+                self.config.seed as u64,
+                self.config.env_time_speed,
+                self.config.env_time_amplitude,
+                self.config.env_perlin_spatial_scale,
+                self.config.env_perlin_time_scale,
+                self.config.resource_scale,
+                self.config.resource_contrast,
+            );
+        }
         self.step_with_existing_resources();
     }
 
     pub fn run(&mut self) {
+        self.run_with_context(&RunRecordContext::default());
+    }
+
+    pub fn run_with_context(&mut self, ctx: &RunRecordContext) {
         use std::fs;
         use std::io::{self, Write};
 
@@ -267,6 +315,8 @@ impl Simulation {
         } else {
             1
         };
+        let progress_interval = progress_update_interval(steps, report_interval);
+        let progress_tty = std::io::stdout().is_terminal();
         let write_frames = self.config.write_frames;
         let wants_frames = write_frames && self.config.write_outputs;
         let estimated_bytes = self.estimate_output_bytes(wants_frames);
@@ -402,7 +452,7 @@ impl Simulation {
                 break;
             }
 
-            if self.config.show_progress {
+            if self.config.show_progress && should_emit_progress(t, steps, progress_interval) {
                 let bar_width = 40usize;
                 let frac = (t + 1) as f64 / steps as f64;
                 let pos = (bar_width as f64 * frac) as usize;
@@ -447,8 +497,13 @@ impl Simulation {
                     self.individuals.len(),
                     prop_now
                 ));
-                ss.push('\r');
-                print!("{}", ss);
+
+                if progress_tty {
+                    ss.push('\r');
+                    print!("{}", ss);
+                } else {
+                    println!("[progress] {}", ss.trim());
+                }
                 let _ = io::stdout().flush();
             }
 
@@ -533,7 +588,7 @@ impl Simulation {
         }
 
         if self.config.write_snapshot {
-            self.persist_population_snapshot(&simdir, final_step_index);
+            self.persist_population_snapshot(&simdir, final_step_index, ctx);
 
             // After successfully writing the snapshot, copy the helper PowerShell
             // script into the simulation directory so that downstream processing
@@ -554,11 +609,10 @@ impl Simulation {
         }
 
         // Write build id into the simulation directory for run compatibility tracking
-        let build_id = option_env!("BUILD_ID").unwrap_or("unknown_build");
         if !simdir.is_empty() {
             let mut bid_path = std::path::Path::new(&simdir).to_path_buf();
             bid_path.push("build_id.txt");
-            let _ = std::fs::write(&bid_path, build_id);
+            let _ = std::fs::write(&bid_path, crate::build_info::VERSION_LABEL);
         }
 
         let final_pop = self.individuals.len();
@@ -588,21 +642,36 @@ impl Simulation {
         );
         if let Ok(s) = serde_json::to_string(&summary_map) {
             // include build id in the JSON summary so external drivers can record it
-            if let Some(bid) = option_env!("BUILD_ID") {
-                let mut v: serde_json::Value =
-                    serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
-                if let serde_json::Value::Object(ref mut map) = v {
-                    map.insert("build_id".to_string(), serde_json::Value::from(bid));
-                }
-                if let Ok(s2) = serde_json::to_string(&v) {
-                    println!("{}", s2);
-                } else {
-                    println!("{}", s);
-                }
+            let mut v: serde_json::Value =
+                serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
+            if let serde_json::Value::Object(ref mut map) = v {
+                map.insert(
+                    "version".to_string(),
+                    serde_json::Value::from(crate::build_info::CRATE_VERSION),
+                );
+                map.insert(
+                    "build_id".to_string(),
+                    serde_json::Value::from(crate::build_info::BUILD_ID),
+                );
+            }
+            if let Ok(s2) = serde_json::to_string(&v) {
+                println!("{}", s2);
             } else {
                 println!("{}", s);
             }
         }
+
+        let steps_completed = final_step_index + 1;
+        persist_run_record(
+            self,
+            ctx,
+            &simdir,
+            steps,
+            steps_completed,
+            start_time.elapsed().as_secs_f64(),
+            final_pop,
+            prop_moved,
+        );
     }
 
     fn write_config_artifacts(&self, simdir: &str, config_json: &str) {
@@ -668,7 +737,12 @@ impl Simulation {
         }
     }
 
-    fn persist_population_snapshot(&self, simdir: &str, timestep: i32) {
+    fn persist_population_snapshot(
+        &self,
+        simdir: &str,
+        timestep: i32,
+        ctx: &RunRecordContext,
+    ) {
         if !self.config.write_snapshot {
             return;
         }
@@ -678,12 +752,27 @@ impl Simulation {
             );
             return;
         }
+        let env_height = if self.config.hex_dish_radius > 0 {
+            self.hex_dish
+                .as_ref()
+                .map(|d| d.bounding_size as u32)
+                .unwrap_or(0)
+        } else {
+            self.config.grid_height.max(self.config.grid_width) as u32
+        };
+        let hex_dish_radius = if self.config.hex_dish_radius > 0 {
+            self.config.hex_dish_radius.max(0) as u32
+        } else {
+            0
+        };
         let snapshot = PopulationSnapshot::capture(
             &self.env,
             &self.individuals,
             self.next_id,
             self.config.seed as u64,
             timestep,
+            env_height,
+            hex_dish_radius,
         );
         let mut path = std::path::PathBuf::from(simdir);
         let fname = if self.config.snapshot_filename.is_empty() {
@@ -711,6 +800,29 @@ impl Simulation {
                     );
                 }
             }
+        } else if path.is_file() {
+            snapshot_registry::register_headless_snapshot(
+                &snapshot,
+                &path,
+                simdir,
+                &self.config,
+                ctx,
+                self.individuals.len(),
+                None,
+            );
+        }
+
+        if self.config.export_cladogram {
+            if let Some(ref clado) = self.cladogram {
+                let clado_path = std::path::Path::new(simdir).join("cladogram.json");
+                if let Err(e) = clado.write_json(&clado_path) {
+                    eprintln!("[warn] failed to write cladogram: {}", e);
+                }
+            }
+            let lineage_path = std::path::Path::new(simdir).join("architecture_lineage.jsonl");
+            if let Err(e) = write_lineage_jsonl(&self.architecture_lineage, &lineage_path) {
+                eprintln!("[warn] failed to write architecture lineage: {}", e);
+            }
         }
     }
 
@@ -732,7 +844,11 @@ impl Simulation {
             // so we can test the same population under a different landscape.
             let seed = self.config.replay_env_seed as u64;
             self.env = Environment::new(width);
-            self.env.init_perlin(seed, self.config.resource_scale);
+            self.env.init_perlin(
+                seed,
+                self.config.resource_scale,
+                self.config.resource_contrast,
+            );
             self.env.perlin_time = snapshot.env_perlin_time;
         } else {
             // Otherwise, restore the exact environment from the snapshot.
@@ -749,7 +865,8 @@ impl Simulation {
 
         // Optionally randomize positions on replay to test robustness under reshuffling.
         if self.config.replay_randomize_start_positions {
-            let dist = rand::distributions::Uniform::new(0usize, width.max(1));
+            use rand::distributions::{Distribution, Uniform};
+            let dist = Uniform::new(0usize, width.max(1));
             for ind in &mut self.individuals {
                 ind.position = dist.sample(&mut self.rng);
             }
@@ -913,7 +1030,7 @@ impl Simulation {
         if self.config.output_budget_mb <= 0.0 {
             if estimated_bytes > 0 {
                 println!(
-                    "[info] projected outputs ≈{:.2} MiB (no budget configured)",
+                    "[info] projected outputs ~{:.2} MiB (no budget configured)",
                     est_mb
                 );
             }
@@ -1022,8 +1139,9 @@ impl Simulation {
             let ind = &self.individuals[i];
             s.push_str(&format!("  {}\n", ind.debug_summary()));
             s.push_str(&format!(
-                "    weights_preview={:?}\n",
-                ind.nn.weights_preview(5)
+                "    brain={:?} complexity={}\n",
+                ind.brain.kind(),
+                ind.complexity()
             ));
         }
         s
@@ -1032,5 +1150,25 @@ impl Simulation {
     /// Print the debug snapshot to stdout.
     pub fn print_debug_snapshot(&self, sample_count: usize) {
         println!("{}", self.debug_snapshot(sample_count));
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::{progress_update_interval, should_emit_progress};
+
+    #[test]
+    fn progress_interval_throttles_long_runs() {
+        assert_eq!(progress_update_interval(100_000, 2000), 2000);
+        assert_eq!(progress_update_interval(100_000, 1), 2000);
+    }
+
+    #[test]
+    fn progress_emits_at_start_and_end() {
+        let interval = 2000;
+        assert!(should_emit_progress(0, 100_000, interval));
+        assert!(should_emit_progress(99_999, 100_000, interval));
+        assert!(!should_emit_progress(1, 100_000, interval));
+        assert!(should_emit_progress(2000, 100_000, interval));
     }
 }

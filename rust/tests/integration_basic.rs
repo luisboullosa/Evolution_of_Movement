@@ -7,12 +7,17 @@ fn integration_simulation_basic() {
     let mut cfg = Config::default();
     cfg.grid_width = 6;
     cfg.nn_nodes = 2;
-    cfg.nn_inputs = 1;
+    cfg.nn_inputs = 8;
     cfg.nn_layers = 1;
     cfg.nn_nodes2 = 0;
     cfg.randomize_start_positions = true;
     cfg.radiate = 0;
     cfg.seed = 13;
+    cfg.movement_cost_factor = 0.0;
+    cfg.maintenance_cost_per_node = 0.0;
+    cfg.basal_metabolic_cost = 0.0;
+    cfg.death_risk = 0.0;
+    cfg.env_time_speed = 0.0;
     let mut sim = Simulation::new(&cfg);
     sim.init_population(4);
     // run a few steps to exercise core loop
@@ -39,7 +44,7 @@ fn integration_resource_consumption_and_reproduction() {
     let mut cfg = Config::default();
     cfg.grid_width = 1;
     cfg.nn_nodes = 1;
-    cfg.nn_inputs = 1;
+    cfg.nn_inputs = 8;
     cfg.nn_layers = 1;
     cfg.nn_nodes2 = 0;
     cfg.randomize_start_positions = false;
@@ -50,6 +55,7 @@ fn integration_resource_consumption_and_reproduction() {
     cfg.reproduction_threshold = 10.5;
     cfg.reproduction_cost = 1.0;
     cfg.maintenance_cost_per_node = 0.0;
+    cfg.basal_metabolic_cost = 0.0;
     cfg.movement_cost_factor = 0.0;
     cfg.death_risk = 0.0;
     cfg.env_time_speed = 0.0;
@@ -63,8 +69,14 @@ fn integration_resource_consumption_and_reproduction() {
 
     let parent = sim.individuals.get_mut(0).expect("expected initial individual");
     parent.resources = 10.0;
-    parent.nn.weights[0] = 0.0;
-    parent.nn.biases[0] = 0.0;
+    if let evo_movement_rust::brain::BrainInner::Perceptron(ref mut p) = parent.brain.inner {
+        for w in p.weights.iter_mut() {
+            *w = 0.0;
+        }
+        for b in p.biases.iter_mut() {
+            *b = 0.0;
+        }
+    }
 
     sim.step();
 

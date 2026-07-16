@@ -1,8 +1,10 @@
 /// Cladogram tracking and genetic distance calculation
+use crate::brain::BrainGenome;
 use crate::neural_network::NeuralNetwork;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LineageNode {
     pub id: i32,
     pub parent_id: Option<i32>,
@@ -15,7 +17,7 @@ pub struct LineageNode {
     pub genetic_distance_to_parent: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cladogram {
     pub nodes: HashMap<i32, LineageNode>,
     pub current_time: i32,
@@ -73,6 +75,11 @@ impl Cladogram {
 
     pub fn advance_time(&mut self) {
         self.current_time += 1;
+    }
+
+    /// Calculate genetic distance between two brain genomes
+    pub fn genetic_distance_brain(a: &BrainGenome, b: &BrainGenome) -> f64 {
+        a.genetic_distance(b)
     }
 
     /// Calculate genetic distance between two individuals based on neural network weights
@@ -171,6 +178,11 @@ impl Cladogram {
         }
 
         total
+    }
+
+    pub fn write_json<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)
     }
 }
 

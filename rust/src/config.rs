@@ -3,6 +3,103 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchitecturePolicy {
+    PerceptronOnly,
+    EvolveMlp,
+    EvolveSpatialGraph,
+    EvolveGoo,
+}
+
+impl ArchitecturePolicy {
+    pub fn label(self) -> &'static str {
+        match self {
+            ArchitecturePolicy::PerceptronOnly => "Perceptron",
+            ArchitecturePolicy::EvolveMlp => "Multilayer perceptron (MLP)",
+            ArchitecturePolicy::EvolveSpatialGraph => "Spatial graph (SG)",
+            ArchitecturePolicy::EvolveGoo => "Graph of operations (GoO)",
+        }
+    }
+
+    pub fn label_short(self) -> &'static str {
+        match self {
+            ArchitecturePolicy::PerceptronOnly => "Perceptron",
+            ArchitecturePolicy::EvolveMlp => "MLP",
+            ArchitecturePolicy::EvolveSpatialGraph => "Spatial graph",
+            ArchitecturePolicy::EvolveGoo => "GoO",
+        }
+    }
+
+    pub fn config_key(self) -> &'static str {
+        match self {
+            ArchitecturePolicy::PerceptronOnly => "perceptron_only",
+            ArchitecturePolicy::EvolveMlp => "evolve_mlp",
+            ArchitecturePolicy::EvolveSpatialGraph => "evolve_spatial_graph",
+            ArchitecturePolicy::EvolveGoo => "evolve_goo",
+        }
+    }
+}
+
+impl Default for ArchitecturePolicy {
+    fn default() -> Self {
+        ArchitecturePolicy::PerceptronOnly
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GridTopology {
+    Ring1d,
+    Hex2d,
+}
+
+/// Locomotion speed preset: minimum steps between hex moves when the brain signals move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MovementSpeed {
+    /// One hex per timestep when moving.
+    Fast,
+    /// One hex per five timesteps when moving.
+    Medium,
+    /// One hex per twenty-five timesteps when moving.
+    Slow,
+}
+
+/// Ecology tuning profile applied when `movement_speed` is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EcologyProfile {
+    #[default]
+    Standard,
+    /// Smaller caps, lower node maintenance; tuned for ~80% of `max_population` at equilibrium.
+    Plateau80,
+}
+
+impl MovementSpeed {
+    pub fn movement_interval(self) -> u32 {
+        match self {
+            MovementSpeed::Fast => 1,
+            MovementSpeed::Medium => 5,
+            MovementSpeed::Slow => 25,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MovementSpeed::Fast => "fast",
+            MovementSpeed::Medium => "medium",
+            MovementSpeed::Slow => "slow",
+        }
+    }
+}
+
+impl Default for GridTopology {
+    fn default() -> Self {
+        GridTopology::Ring1d
+    }
+}
+
 /// Configuration structure for the simulator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -31,6 +128,10 @@ pub struct Config {
     /// Spatial scale for Perlin noise (smaller -> smoother features).
     pub env_perlin_spatial_scale: f64,
 
+    /// Stretch Perlin samples away from 0.5 before scaling (1 = off, >1 = sharper patches).
+    #[serde(default = "default_resource_contrast")]
+    pub resource_contrast: f64,
+
     /// Time scale applied to Perlin evaluation.
     pub env_perlin_time_scale: f64,
 
@@ -56,6 +157,29 @@ pub struct Config {
     pub nn_nodes2: i32,
     pub nn_inputs: i32,
     pub nn_use_occupancy: bool,
+
+    // --- evolvable brain architecture ---
+    pub architecture_policy: ArchitecturePolicy,
+    pub architecture_mutation_rate: f64,
+    /// When true, growth mutations copy a parent node/layer/edge weights plus noise.
+    #[serde(default)]
+    pub structural_duplication: bool,
+    pub max_brain_nodes: i32,
+    /// Spatial architecture: `hex_edge` (default blob), `cardinal_4`, or `legacy_graph` (landmark graph).
+    #[serde(default = "default_spatial_blob_layout")]
+    pub spatial_blob_layout: String,
+    /// When true, founders keep zero weights until mutation (radiate still applies bursts).
+    pub neutral_founder_weights: bool,
+    pub grid_topology: GridTopology,
+    pub grid_height: usize,
+    /// Axial radius for hexagonal dish (0 = rectangular/toroidal hex grid).
+    pub hex_dish_radius: i32,
+    /// When true with `hex_dish_radius > 0`, edge hex moves wrap through the dish bounding box.
+    #[serde(default)]
+    pub hex_dish_torus: bool,
+    pub replicates: u32,
+    pub export_cladogram: bool,
+    pub use_gpu_step: bool,
 
     // --- run control ---
     pub steps: i32,
@@ -97,9 +221,28 @@ pub struct Config {
     /// Maintenance cost per occupied node (resource drain per node).
     pub maintenance_cost_per_node: f64,
 
+    /// When true, ecology presets do not overwrite `maintenance_cost_per_node`.
+    #[serde(default)]
+    pub lock_maintenance_cost: bool,
+
+    /// Flat per-step basal metabolic cost (independent of brain size).
+    pub basal_metabolic_cost: f64,
+
     pub mutation_rate: f64,
     pub mutation_sigma: f64,
     pub movement_cost_factor: f64,
+
+    /// Minimum steps between hex moves when `move_signal > 0`. Overridden when
+    /// `movement_speed` is set in JSON. Default 1 (one hex per step).
+    pub movement_interval: u32,
+
+    /// Optional preset that sets `movement_interval` and ecology knobs via `ecology_presets`.
+    #[serde(default)]
+    pub movement_speed: Option<MovementSpeed>,
+
+    /// Which ecology preset to apply with `movement_speed` (default: standard batch tuning).
+    #[serde(default)]
+    pub ecology_profile: EcologyProfile,
 
     pub radiate: i32,
 
@@ -126,6 +269,14 @@ pub struct Config {
     pub nn_index_flush_size: usize,
 }
 
+fn default_resource_contrast() -> f64 {
+    1.0
+}
+
+fn default_spatial_blob_layout() -> String {
+    "hex_edge".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -136,6 +287,7 @@ impl Default for Config {
             env_time_speed: 0.015,
             env_time_amplitude: 1.0,
             env_perlin_spatial_scale: 0.05,
+            resource_contrast: 1.0,
             env_perlin_time_scale: 0.05,
             perlin_octaves: 5,
             perlin_persistence: 0.5,
@@ -148,8 +300,21 @@ impl Default for Config {
             nn_nodes: 10,
             nn_layers: 2,
             nn_nodes2: 10,
-            nn_inputs: 5,
+            nn_inputs: 8,
             nn_use_occupancy: true,
+            architecture_policy: ArchitecturePolicy::PerceptronOnly,
+            architecture_mutation_rate: 0.005,
+            structural_duplication: false,
+            max_brain_nodes: 32,
+            spatial_blob_layout: default_spatial_blob_layout(),
+            neutral_founder_weights: true,
+            grid_topology: GridTopology::Ring1d,
+            grid_height: 0,
+            hex_dish_radius: 0,
+            hex_dish_torus: false,
+            replicates: 1,
+            export_cladogram: false,
+            use_gpu_step: false,
             steps: 1000,
             report_interval: 1,
             burn_in: 0,
@@ -172,10 +337,15 @@ impl Default for Config {
             reproduction_threshold: 20.0,
             reproduction_cost: 5.0,
             death_risk: 1e-8,
-            maintenance_cost_per_node: 0.0015,
+            maintenance_cost_per_node: 0.025,
+            lock_maintenance_cost: false,
+            basal_metabolic_cost: 0.05,
             mutation_rate: 0.01,
             mutation_sigma: 0.1,
             movement_cost_factor: 2.0,
+            movement_interval: 1,
+            movement_speed: None,
+            ecology_profile: EcologyProfile::default(),
             radiate: 0,
             vis_cols: 120,
             vis_height: 12,
@@ -201,8 +371,10 @@ impl Config {
     /// Load configuration from a JSON file.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
         let contents = fs::read_to_string(path.as_ref())?;
-        serde_json::from_str(&contents)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        let mut cfg: Config = serde_json::from_str(&contents)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        cfg.finalize();
+        Ok(cfg)
     }
 
     /// Try to load configuration from a JSON file, returning None on error.
@@ -217,6 +389,35 @@ impl Config {
         fs::write(path, json)
     }
 
+    /// Resolve `movement_speed` preset and clamp movement interval.
+    pub fn finalize(&mut self) {
+        if let Some(speed) = self.movement_speed {
+            match self.ecology_profile {
+                EcologyProfile::Plateau80 => {
+                    crate::ecology_presets::apply_plateau80_movement_speed(self, speed);
+                }
+                EcologyProfile::Standard => {
+                    crate::ecology_presets::apply_movement_speed(self, speed);
+                }
+            }
+        } else {
+            crate::ecology_presets::apply_architecture_ecology_offset(self);
+        }
+        if self.movement_interval == 0 {
+            self.movement_interval = 1;
+        }
+        if matches!(
+            self.architecture_policy,
+            ArchitecturePolicy::PerceptronOnly
+        ) {
+            self.nn_inputs = crate::brain::PERCEPTRON_SENSOR_DIM as i32;
+        }
+    }
+
+    pub fn uses_legacy_spatial_graph(&self) -> bool {
+        self.spatial_blob_layout.eq_ignore_ascii_case("legacy_graph")
+    }
+
     /// Validate configuration parameters.
     pub fn validate(&self) {
         if self.grid_width == 0 {
@@ -227,6 +428,12 @@ impl Config {
         }
         if self.initial_population < 0 {
             eprintln!("Warning: initial_population is negative");
+        }
+        if self.max_population > 0 && self.initial_population > self.max_population {
+            eprintln!(
+                "Warning: initial_population ({}) exceeds max_population ({}); founders will be clamped",
+                self.initial_population, self.max_population
+            );
         }
     }
 }
