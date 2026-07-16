@@ -1,0 +1,21 @@
+{
+  "_comment": "Reference only — copy fields into per-architecture ecology configs. movement_speed triggers ecology_presets on load.",
+  "grid_topology": "hex2d",
+  "hex_dish_radius": 58,
+  "hex_dish_torus": true,
+  "neutral_founder_weights": true,
+  "nn_nodes": 1,
+  "nn_layers": 1,
+  "nn_inputs": 8,
+  "mutation_rate": 0.01,
+  "mutation_sigma": 0.1,
+  "steps": 100000,
+  "report_interval": 2000,
+  "use_gpu_step": true,
+  "export_cladogram": false,
+  "write_snapshot": true,
+  "write_config": true,
+  "write_outputs": false,
+  "show_progress": true,
+  "snapshot_filename": "snapshot.cbor"
+}
