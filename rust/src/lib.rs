@@ -12,7 +12,6 @@ pub mod build_info;
 pub mod cladogram;
 #[cfg(not(feature = "playground"))]
 pub mod hex_simulation;
-#[cfg(not(feature = "playground"))]
 pub mod ecology_presets;
 #[cfg(not(feature = "playground"))]
 pub mod environment;

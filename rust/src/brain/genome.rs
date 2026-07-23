@@ -3,7 +3,7 @@ use super::mlp::MlpBrain;
 use super::perceptron::PerceptronBrain;
 use super::spatial_blob::{SpatialBlobBrain, SpatialBlobLayout};
 use super::spatial_graph::SpatialGraphBrain;
-use crate::config::{ArchitecturePolicy, Config};
+use crate::config::{ArchitecturePolicy, Config, MovementOutputMode};
 use serde::{Deserialize, Serialize};
 
 pub const SENSOR_DIM: usize = 8;
@@ -61,6 +61,7 @@ pub struct ForwardContext<'a> {
     pub hidden_buf: &'a mut [f64],
     pub out2_buf: &'a mut [f64],
     pub spatial_runtime: Option<&'a mut SpatialRuntime>,
+    pub movement_output_mode: MovementOutputMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -136,6 +137,15 @@ impl BrainGenome {
         }
     }
 
+    /// Budget checked before structural mutations (`max_brain_nodes` ceiling).
+    /// Spatial blob uses layer count so deep founders are not blocked by weight-param counts.
+    pub fn structural_budget(&self) -> usize {
+        match &self.inner {
+            BrainInner::SpatialBlob(b) => b.layer_count,
+            _ => self.complexity(),
+        }
+    }
+
     pub fn max_buffer_nodes(&self) -> usize {
         match &self.inner {
             BrainInner::Perceptron(b) => b.nodes,
@@ -154,10 +164,20 @@ impl BrainGenome {
                 let runtime = ctx
                     .spatial_runtime
                     .expect("spatial runtime required for SpatialGraph brain");
-                b.forward(&ctx.sensors, ctx.position, runtime, ctx.hidden_buf)
+                b.forward(
+                    &ctx.sensors,
+                    ctx.position,
+                    runtime,
+                    ctx.hidden_buf,
+                    ctx.movement_output_mode,
+                )
             }
-            BrainInner::SpatialBlob(b) => b.forward(&ctx.sensors, ctx.hidden_buf),
-            BrainInner::GooGraph(b) => b.forward(&ctx.sensors, ctx.hidden_buf),
+            BrainInner::SpatialBlob(b) => {
+                b.forward(&ctx.sensors, ctx.hidden_buf, ctx.movement_output_mode)
+            }
+            BrainInner::GooGraph(b) => {
+                b.forward(&ctx.sensors, ctx.hidden_buf, ctx.movement_output_mode)
+            }
         }
     }
 

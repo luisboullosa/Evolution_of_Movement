@@ -1,0 +1,4 @@
+{
+  "movement_output_mode": "separate_readout",
+  "output_run_dir": "output/output_mode_sweep/spatial_separate_readout"
+}

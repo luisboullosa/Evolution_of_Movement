@@ -1,5 +1,7 @@
 use super::genome::{BrainOutput, SENSOR_DIM, THOUGHT_DIM};
+use super::movement_output::{hidden_sum_output, split_channels_output};
 use super::perceptron::{l2_slices, perturb_param};
+use crate::config::MovementOutputMode;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -116,7 +118,12 @@ impl GooGraphBrain {
         order
     }
 
-    pub fn forward(&self, sensors: &[f64; SENSOR_DIM], _hidden_buf: &mut [f64]) -> BrainOutput {
+    pub fn forward(
+        &self,
+        sensors: &[f64; SENSOR_DIM],
+        _hidden_buf: &mut [f64],
+        output_mode: MovementOutputMode,
+    ) -> BrainOutput {
         let dim = self.thought_dim;
         let base = Self::init_thought(sensors);
         let mut values: HashMap<usize, Vec<f64>> = HashMap::new();
@@ -187,11 +194,9 @@ impl GooGraphBrain {
 
         let last_id = self.nodes.last().map(|n| n.id).unwrap_or(0);
         let final_thought = values.get(&last_id).cloned().unwrap_or(base);
-        let move_signal = final_thought.iter().sum::<f64>();
-        let direction_signal = final_thought.get(1).copied().unwrap_or(final_thought[0]);
-        BrainOutput {
-            move_signal,
-            direction_signal,
+        match output_mode {
+            MovementOutputMode::SplitChannels => split_channels_output(&final_thought),
+            _ => hidden_sum_output(&final_thought),
         }
     }
 
@@ -304,5 +309,64 @@ impl GooGraphBrain {
             };
             let _ = rng;
         }
+    }
+
+    /// Grow the graph to `target_nodes` using the same structural ops as reproduction mutations.
+    pub fn grow_to_size(&mut self, rng: &mut impl Rng, target_nodes: usize) {
+        while self.nodes.len() < target_nodes.max(1) {
+            let n = self.nodes.len();
+            match rng.gen_range(0..5) {
+                0 => {
+                    let parent_id = if n > 0 {
+                        Some(rng.gen_range(0..n))
+                    } else {
+                        None
+                    };
+                    self.add_generate_node(rng, parent_id);
+                }
+                1 if n >= 2 => {
+                    let parents = Self::sample_parent_ids(rng, n, 2);
+                    if parents.len() >= 2 {
+                        self.add_aggregate_node(rng, parents);
+                    }
+                }
+                2 if n >= 1 => {
+                    self.add_score_node(rng.gen_range(0..n));
+                }
+                3 if n >= 2 => {
+                    let parent_count = rng.gen_range(2..=n.min(4));
+                    let parents = Self::sample_parent_ids(rng, n, parent_count);
+                    if parents.len() >= 2 {
+                        self.add_keep_best_node(parents);
+                    }
+                }
+                _ => {
+                    if n > 0 {
+                        self.change_op_type(rng.gen_range(0..n), rng);
+                    } else {
+                        self.add_generate_node(rng, None);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn grow_to_size_can_produce_mixed_ops() {
+        let mut goo = GooGraphBrain::new_initial();
+        let mut rng = StdRng::seed_from_u64(99);
+        goo.grow_to_size(&mut rng, 8);
+        let ops: Vec<GooOp> = goo.nodes.iter().map(|n| n.op).collect();
+        assert!(
+            ops.iter().any(|o| *o != GooOp::Generate),
+            "expected non-Generate ops, got {ops:?}"
+        );
     }
 }

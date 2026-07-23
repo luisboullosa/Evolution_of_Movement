@@ -100,6 +100,50 @@ impl Default for GridTopology {
     }
 }
 
+/// How brain activations map to gather/move magnitude and hex direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MovementOutputMode {
+    /// Spatial/graph: dedicated readout weights with tanh on both outputs (legacy default).
+    SeparateReadout,
+    /// Spatial/graph: dedicated readout weights without output tanh (avoids double tanh in step_engine).
+    LinearReadout,
+    /// Perceptron-style: move = sum(activations/thought), direction = activations[1] or [0].
+    HiddenSum,
+    /// Spatial: centered vector sum of node activations; uniform nodes → no move.
+    HexCompass,
+    /// GoO: move = thought[0], direction = thought[1] (not sum of all dims).
+    SplitChannels,
+}
+
+impl MovementOutputMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            MovementOutputMode::SeparateReadout => "separate_readout",
+            MovementOutputMode::LinearReadout => "linear_readout",
+            MovementOutputMode::HiddenSum => "hidden_sum",
+            MovementOutputMode::HexCompass => "hex_compass",
+            MovementOutputMode::SplitChannels => "split_channels",
+        }
+    }
+
+    pub fn spatial_sweep_modes() -> &'static [MovementOutputMode] {
+        &[
+            MovementOutputMode::SeparateReadout,
+            MovementOutputMode::LinearReadout,
+            MovementOutputMode::HiddenSum,
+            MovementOutputMode::HexCompass,
+        ]
+    }
+
+    pub fn goo_sweep_modes() -> &'static [MovementOutputMode] {
+        &[
+            MovementOutputMode::HiddenSum,
+            MovementOutputMode::SplitChannels,
+        ]
+    }
+}
+
 /// Configuration structure for the simulator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -244,6 +288,11 @@ pub struct Config {
     #[serde(default)]
     pub ecology_profile: EcologyProfile,
 
+    /// Override how brain outputs link to movement magnitude and direction.
+    /// When omitted, architecture-specific defaults apply (spatial: separate_readout, GoO: hidden_sum).
+    #[serde(default)]
+    pub movement_output_mode: Option<MovementOutputMode>,
+
     pub radiate: i32,
 
     // --- visualization ---
@@ -346,6 +395,7 @@ impl Default for Config {
             movement_interval: 1,
             movement_speed: None,
             ecology_profile: EcologyProfile::default(),
+            movement_output_mode: None,
             radiate: 0,
             vis_cols: 120,
             vis_height: 12,
@@ -406,11 +456,38 @@ impl Config {
         if self.movement_interval == 0 {
             self.movement_interval = 1;
         }
+        if self.use_gpu_step && !self.gpu_supports_movement_output_mode() {
+            eprintln!(
+                "Warning: disabling use_gpu_step — GPU forward only supports default movement_output_mode for this architecture"
+            );
+            self.use_gpu_step = false;
+        }
         if matches!(
             self.architecture_policy,
             ArchitecturePolicy::PerceptronOnly
         ) {
             self.nn_inputs = crate::brain::PERCEPTRON_SENSOR_DIM as i32;
+        }
+    }
+
+    pub fn resolved_movement_output_mode(&self) -> MovementOutputMode {
+        self.movement_output_mode.unwrap_or_else(|| {
+            crate::brain::default_movement_output_mode(
+                self.architecture_policy,
+                self.uses_legacy_spatial_graph(),
+            )
+        })
+    }
+
+    fn gpu_supports_movement_output_mode(&self) -> bool {
+        let mode = self.resolved_movement_output_mode();
+        match self.architecture_policy {
+            ArchitecturePolicy::EvolveGoo => mode == MovementOutputMode::HiddenSum,
+            ArchitecturePolicy::EvolveSpatialGraph if self.uses_legacy_spatial_graph() => {
+                mode == MovementOutputMode::SeparateReadout
+            }
+            ArchitecturePolicy::EvolveSpatialGraph => false,
+            _ => true,
         }
     }
 

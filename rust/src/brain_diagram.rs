@@ -820,10 +820,17 @@ pub fn spatial_blob_diagram(brain: &SpatialBlobBrain, width: f32, height: f32) -
         },
     ];
     let mut nodes = Vec::new();
+    let mut edges = Vec::new();
     let cx = width * 0.5;
     let cy = height * 0.55;
-    let layer_gap = 28.0f32;
-    let base_r = (width.min(height) * 0.16).max(36.0);
+    let plot_r = (width.min(height) * 0.42).max(48.0);
+    let node_r = 9.0f32;
+    let base_r = node_r + 6.0;
+    let layer_gap = if brain.layer_count <= 1 {
+        0.0
+    } else {
+        ((plot_r - base_r) / (brain.layer_count - 1) as f32).clamp(8.0, 28.0)
+    };
 
     for layer in 0..brain.layer_count {
         let r = base_r + layer as f32 * layer_gap;
@@ -845,7 +852,7 @@ pub fn spatial_blob_diagram(brain: &SpatialBlobBrain, width: f32, height: f32) -
                 id: format!("L{layer}_{i}"),
                 x,
                 y,
-                r: 9.0,
+                r: node_r,
                 fill: if layer == 0 {
                     rgb(100, 170, 255)
                 } else {
@@ -856,6 +863,19 @@ pub fn spatial_blob_diagram(brain: &SpatialBlobBrain, width: f32, height: f32) -
                 label_size: 9.0,
                 side_label: None,
             });
+            if layer > 0 {
+                let prev_r = base_r + (layer - 1) as f32 * layer_gap;
+                let prev_x = cx + prev_r * angle.cos();
+                let prev_y = cy + prev_r * angle.sin();
+                edges.push(DiagramEdge {
+                    x1: prev_x,
+                    y1: prev_y,
+                    x2: x,
+                    y2: y,
+                    color: rgba(120, 150, 170, 140),
+                    width: 0.8,
+                });
+            }
         }
     }
 
@@ -880,7 +900,7 @@ pub fn spatial_blob_diagram(brain: &SpatialBlobBrain, width: f32, height: f32) -
         panel_bg,
         panel_border,
         nodes,
-        edges: Vec::new(),
+        edges,
         texts,
     }
 }

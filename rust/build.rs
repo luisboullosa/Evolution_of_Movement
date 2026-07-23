@@ -62,4 +62,5 @@ fn main() {
         fs::write(&tensor_path_out, path_code)
             .expect("failed to write tensor kernel path helper");
     }
+    println!("cargo:rerun-if-changed=assets/fitness_landscape_viewer.html");
 }

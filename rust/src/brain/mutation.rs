@@ -135,7 +135,7 @@ pub fn reproduce_brain(
     }
 
     let max_nodes = cfg.max_brain_nodes.max(1) as usize;
-    if child.complexity() >= max_nodes {
+    if child.structural_budget() >= max_nodes {
         return (child, StructuralMutation::ParametricOnly);
     }
 

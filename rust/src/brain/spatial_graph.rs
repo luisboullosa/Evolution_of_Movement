@@ -1,6 +1,8 @@
 use super::genome::{BrainOutput, EMBED_DIM, SENSOR_DIM};
 use super::genome::SpatialRuntime;
+use super::movement_output::{hidden_sum_output, hex_compass_output, readout_output, sector_mask_centroid_degrees};
 use super::perceptron::{l2_slices, perturb_param};
+use crate::config::MovementOutputMode;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +154,7 @@ impl SpatialGraphBrain {
         position: usize,
         runtime: &mut SpatialRuntime,
         hidden_buf: &mut [f64],
+        output_mode: MovementOutputMode,
     ) -> BrainOutput {
         let sectors: Vec<u8> = if self.landmark_sectors.len() >= self.landmark_count {
             self.landmark_sectors[..self.landmark_count].to_vec()
@@ -210,6 +213,24 @@ impl SpatialGraphBrain {
             }
         }
 
+        if output_mode == MovementOutputMode::HiddenSum {
+            return hidden_sum_output(&activations);
+        }
+
+        if output_mode == MovementOutputMode::HexCompass {
+            let sectors: Vec<u8> = if self.landmark_sectors.len() >= self.landmark_count {
+                self.landmark_sectors[..self.landmark_count].to_vec()
+            } else {
+                vec![all_sectors_mask(); self.landmark_count]
+            };
+            let angles: Vec<f64> = sectors
+                .iter()
+                .take(activations.len())
+                .map(|&mask| sector_mask_centroid_degrees(mask, SPATIAL_SECTOR_COUNT))
+                .collect();
+            return hex_compass_output(&activations, &angles);
+        }
+
         let mut features = activations;
         for s in 0..SPATIAL_SECTOR_COUNT.min(SENSOR_DIM) {
             features.push(sensors[s]);
@@ -218,13 +239,13 @@ impl SpatialGraphBrain {
             features.push(0.0);
         }
 
-        let mut move_signal = self.readout_biases.first().copied().unwrap_or(0.0);
-        let mut direction_signal = self.readout_biases.get(1).copied().unwrap_or(0.0);
+        let mut move_raw = self.readout_biases.first().copied().unwrap_or(0.0);
+        let mut direction_raw = self.readout_biases.get(1).copied().unwrap_or(0.0);
         let feat_len = self.landmark_count + SENSOR_DIM;
         for (i, &f) in features.iter().take(feat_len).enumerate() {
             let wi = i * 2;
-            move_signal += self.readout_weights.get(wi).copied().unwrap_or(0.0) * f;
-            direction_signal += self
+            move_raw += self.readout_weights.get(wi).copied().unwrap_or(0.0) * f;
+            direction_raw += self
                 .readout_weights
                 .get(wi + 1)
                 .copied()
@@ -232,10 +253,7 @@ impl SpatialGraphBrain {
                 * f;
         }
 
-        BrainOutput {
-            move_signal: move_signal.tanh(),
-            direction_signal: direction_signal.tanh(),
-        }
+        readout_output(move_raw, direction_raw, output_mode)
     }
 
     pub fn flatten_params(&self) -> Vec<f64> {

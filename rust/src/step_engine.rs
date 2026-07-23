@@ -1,6 +1,6 @@
 //! Shared simulation step semantics for CPU and GPU paths.
 use crate::brain::{BrainKind, BrainOutput, ForwardContext, SENSOR_DIM};
-use crate::config::{Config, GridTopology};
+use crate::config::{Config, GridTopology, MovementOutputMode};
 use crate::environment::Environment;
 use crate::hex_dish::HexDishLayout;
 use crate::hex_simulation::{
@@ -126,6 +126,7 @@ pub fn forward_decision(
     center_resource: f64,
     local_population: i32,
     movement_cost_factor: f64,
+    movement_output_mode: MovementOutputMode,
     hidden_buf: &mut [f64],
     out2_buf: &mut [f64],
 ) -> DecisionRow {
@@ -143,6 +144,7 @@ pub fn forward_decision(
         hidden_buf,
         out2_buf,
         spatial_runtime: ind.spatial_runtime.as_mut(),
+        movement_output_mode,
     };
     let output = ind.brain.forward(ctx);
 
@@ -345,6 +347,7 @@ pub fn step_individuals_cpu(
             center,
             local_pop,
             cfg.movement_cost_factor,
+            cfg.resolved_movement_output_mode(),
             hidden_buf,
             out2_buf,
         ));
@@ -411,7 +414,16 @@ mod tests {
         let edges = [1.0, 1.0, 2.0, 1.0, 1.0, 1.0];
         let mut hb = [0.0; 4];
         let mut ob = [0.0; 4];
-        let d = forward_decision(&mut ind, edges, 2.0, 1, 0.5, &mut hb, &mut ob);
+        let d = forward_decision(
+            &mut ind,
+            edges,
+            2.0,
+            1,
+            0.5,
+            MovementOutputMode::HiddenSum,
+            &mut hb,
+            &mut ob,
+        );
         assert!(!d.move_one_step || d.move_signal > 0.0);
     }
 

@@ -1,7 +1,8 @@
 use evo_movement_rust::brain_playground::{
-    brain_to_diagram_json, brain_to_json, demo_goo_branching_brain, goo_add_structural_node,
-    goo_cycle_node_op, parse_brain_json, random_goo_brain, random_mlp_brain,
-    random_perceptron_brain, random_spatial_brain,
+    brain_to_diagram_json, brain_to_json, demo_goo_branching_brain,
+    forward_probe_json as forward_probe_impl, goo_add_structural_node, goo_cycle_node_op,
+    parse_brain_json, random_goo_brain, random_mlp_brain, random_perceptron_brain,
+    random_spatial_brain,
 };
 use wasm_bindgen::prelude::*;
 
@@ -81,4 +82,27 @@ pub fn goo_add_node_json(brain_json: &str, op: &str) -> String {
         goo_add_structural_node(&mut brain, op)?;
         brain_to_json(&brain).map(|json| serde_json::from_str::<serde_json::Value>(&json).unwrap())
     }))
+}
+
+#[wasm_bindgen]
+pub fn forward_probe_json(
+    brain_json: &str,
+    edge_json: &str,
+    center_resource: f64,
+    local_population: i32,
+    individual_resources: f64,
+    position: u32,
+    movement_output_mode: &str,
+    movement_cost_factor: f64,
+) -> String {
+    forward_probe_impl(
+        brain_json,
+        edge_json,
+        center_resource,
+        local_population,
+        individual_resources,
+        position,
+        movement_output_mode,
+        movement_cost_factor,
+    )
 }

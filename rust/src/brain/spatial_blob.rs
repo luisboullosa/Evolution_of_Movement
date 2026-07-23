@@ -1,8 +1,13 @@
 //! Intracellular "macromolecule blob" spatial brain: layered nodes tuned to hex edges
 //! or cardinal (N/S/E/W) pools of neighbor resources.
 use super::genome::{BrainOutput, SENSOR_DIM};
+use super::movement_output::{
+    hidden_sum_output, hex_compass_output, readout_output, CARDINAL_ANGLES_DEG,
+    HEX_SECTOR_ANGLES_DEG,
+};
 use super::perceptron::{l2_slices, perturb_param};
 use super::spatial_graph::SPATIAL_SECTOR_COUNT;
+use crate::config::MovementOutputMode;
 use rand::Rng;
 use rand::distributions::Distribution;
 use serde::{Deserialize, Serialize};
@@ -242,6 +247,7 @@ impl SpatialBlobBrain {
         &self,
         sensors: &[f64; SENSOR_DIM],
         hidden_buf: &mut [f64],
+        output_mode: MovementOutputMode,
     ) -> BrainOutput {
         let layer0 = self.layer0_inputs(sensors);
         let mut activations = self.activate_layer(0, &[], &layer0);
@@ -255,12 +261,24 @@ impl SpatialBlobBrain {
             }
         }
 
-        let mut move_signal = self.readout_biases.first().copied().unwrap_or(0.0);
-        let mut direction_signal = self.readout_biases.get(1).copied().unwrap_or(0.0);
+        if output_mode == MovementOutputMode::HiddenSum {
+            return hidden_sum_output(&activations);
+        }
+
+        if output_mode == MovementOutputMode::HexCompass {
+            let angles = match self.layout {
+                SpatialBlobLayout::HexEdge => &HEX_SECTOR_ANGLES_DEG[..],
+                SpatialBlobLayout::Cardinal4 => &CARDINAL_ANGLES_DEG[..],
+            };
+            return hex_compass_output(&activations, angles);
+        }
+
+        let mut move_raw = self.readout_biases.first().copied().unwrap_or(0.0);
+        let mut direction_raw = self.readout_biases.get(1).copied().unwrap_or(0.0);
         for (i, &a) in activations.iter().enumerate() {
             let wi = i * 2;
-            move_signal += self.readout_weights.get(wi).copied().unwrap_or(0.0) * a;
-            direction_signal += self
+            move_raw += self.readout_weights.get(wi).copied().unwrap_or(0.0) * a;
+            direction_raw += self
                 .readout_weights
                 .get(wi + 1)
                 .copied()
@@ -268,10 +286,7 @@ impl SpatialBlobBrain {
                 * a;
         }
 
-        BrainOutput {
-            move_signal: move_signal.tanh(),
-            direction_signal: direction_signal.tanh(),
-        }
+        readout_output(move_raw, direction_raw, output_mode)
     }
 
     pub fn add_layer(&mut self, rng: &mut impl Rng, duplicate: bool, sigma: f64) {
@@ -290,16 +305,25 @@ impl SpatialBlobBrain {
             }
             let block = new_idx - 1;
             let w_base = block * nodes * nodes;
-            let mut new_block = vec![0.0; nodes * nodes];
-            for i in 0..nodes * nodes {
-                new_block[i] = perturb_param(
-                    self.layer_recurrent_weights
-                        .get(w_base + i)
-                        .copied()
-                        .unwrap_or(0.0),
-                    rng,
-                    sigma,
-                );
+            let block_len = nodes * nodes;
+            let mut new_block = vec![0.0; block_len];
+            if w_base + block_len <= self.layer_recurrent_weights.len() {
+                for i in 0..block_len {
+                    new_block[i] = perturb_param(
+                        self.layer_recurrent_weights[w_base + i],
+                        rng,
+                        sigma,
+                    );
+                }
+            } else {
+                // First recurrent block: mirror layer-0 input wiring (no prior block to copy).
+                for i in 0..nodes {
+                    for j in 0..nodes {
+                        let in_idx = i * SPATIAL_SECTOR_COUNT + (j % SPATIAL_SECTOR_COUNT);
+                        let w = self.layer0_input_weights.get(in_idx).copied().unwrap_or(0.0);
+                        new_block[i * nodes + j] = perturb_param(w, rng, sigma);
+                    }
+                }
             }
             self.layer_recurrent_weights.extend(new_block);
         } else {
@@ -336,6 +360,7 @@ impl SpatialBlobBrain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MovementOutputMode;
 
     #[test]
     fn cardinal_pools_match_compass_recipe() {
@@ -354,7 +379,7 @@ mod tests {
         brain.init_founder_weights(&mut rand::thread_rng());
         let sensors = [1.0, 0.5, 0.2, 0.1, 0.0, 0.3, 2.0, 10.0];
         let mut hidden = [0.0; 8];
-        let out = brain.forward(&sensors, &mut hidden);
+        let out = brain.forward(&sensors, &mut hidden, MovementOutputMode::SeparateReadout);
         assert!(out.move_signal.is_finite());
         assert!(out.direction_signal.is_finite());
     }

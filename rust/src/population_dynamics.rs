@@ -6,7 +6,6 @@ use crate::cladogram::Cladogram;
 use crate::config::Config;
 use crate::individual::Individual;
 use rand::rngs::StdRng;
-use rand::Rng;
 
 /// True when no more births are allowed this step.
 pub fn pop_cap_reached(population_len: usize, max_population: i32) -> bool {

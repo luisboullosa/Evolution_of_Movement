@@ -131,6 +131,7 @@ fn assert_interactive_load_path(snapshot: &PopulationSnapshot, label: &str) {
             [1.0; 6],
             0,
             0.1,
+            evo_movement_rust::config::MovementOutputMode::HiddenSum,
             &mut rand::thread_rng(),
             &mut [0.0; 64],
             &mut [0.0; 64],

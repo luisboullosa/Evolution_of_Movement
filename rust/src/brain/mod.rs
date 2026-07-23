@@ -3,12 +3,14 @@ pub mod goo_graph;
 #[cfg(not(feature = "playground"))]
 pub mod gpu_pack;
 pub mod mlp;
+pub mod movement_output;
 pub mod mutation;
 pub mod perceptron;
 pub mod spatial_blob;
 pub mod spatial_graph;
 
 pub use genome::{BrainGenome, BrainInner, BrainKind, BrainOutput, ForwardContext, SpatialRuntime, PERCEPTRON_SENSOR_DIM, SENSOR_DIM, EMBED_DIM, THOUGHT_DIM};
+pub use movement_output::default_movement_output_mode;
 pub use goo_graph::{GooGraphBrain, GooOp};
 pub use mlp::MlpBrain;
 pub use mutation::{
@@ -22,6 +24,7 @@ pub use spatial_graph::SpatialGraphBrain;
 #[cfg(test)]
 mod brain_tests {
     use super::genome::{BrainGenome, BrainInner, BrainKind, ForwardContext, SENSOR_DIM};
+    use crate::config::MovementOutputMode;
     use super::goo_graph::GooGraphBrain;
     use super::spatial_graph::SpatialGraphBrain;
 
@@ -40,6 +43,7 @@ mod brain_tests {
             hidden_buf: &mut h1,
             out2_buf: &mut h2,
             spatial_runtime: None,
+            movement_output_mode: MovementOutputMode::HiddenSum,
         });
         let o2 = brain.forward(ForwardContext {
             sensors,
@@ -47,6 +51,7 @@ mod brain_tests {
             hidden_buf: &mut h1,
             out2_buf: &mut h2,
             spatial_runtime: None,
+            movement_output_mode: MovementOutputMode::HiddenSum,
         });
         assert!((o1.move_signal - o2.move_signal).abs() < 1e-12);
     }
@@ -68,6 +73,7 @@ mod brain_tests {
             hidden_buf: &mut hb,
             out2_buf: &mut ob,
             spatial_runtime: Some(&mut runtime),
+            movement_output_mode: MovementOutputMode::SeparateReadout,
         });
         assert!(!runtime.node_embeddings.is_empty());
     }

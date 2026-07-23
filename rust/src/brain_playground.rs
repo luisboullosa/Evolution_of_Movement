@@ -8,13 +8,11 @@ use crate::brain::mutation::init_founder_weights;
 
 use crate::brain::spatial_graph::SpatialGraphBrain;
 
-use crate::brain::{BrainGenome, BrainInner, BrainKind, GooOp};
+use crate::brain::{BrainGenome, BrainInner, BrainKind, BrainOutput, ForwardContext, GooOp, SENSOR_DIM};
 
 use crate::brain_diagram::{diagram_from_brain, BrainDiagram};
 
-use crate::config::Config;
-
-use crate::config::ArchitecturePolicy;
+use crate::config::{ArchitecturePolicy, Config, MovementOutputMode};
 
 use rand::rngs::StdRng;
 
@@ -149,83 +147,9 @@ pub fn random_spatial_brain(seed: u32, landmarks: usize, edges: usize) -> BrainG
 
 
 fn grow_goo_graph(rng: &mut StdRng, target_nodes: usize) -> GooGraphBrain {
-
     let mut goo = GooGraphBrain::new_initial();
-
-    while goo.nodes.len() < target_nodes.max(1) {
-
-        let n = goo.nodes.len();
-
-        match rng.gen_range(0..5) {
-
-            0 => {
-
-                let parent_id = if n > 0 {
-
-                    Some(rng.gen_range(0..n))
-
-                } else {
-
-                    None
-
-                };
-
-                goo.add_generate_node(rng, parent_id);
-
-            }
-
-            1 if n >= 2 => {
-
-                let parents = GooGraphBrain::sample_parent_ids(rng, n, 2);
-
-                if parents.len() >= 2 {
-
-                    goo.add_aggregate_node(rng, parents);
-
-                }
-
-            }
-
-            2 if n >= 1 => {
-
-                goo.add_score_node(rng.gen_range(0..n));
-
-            }
-
-            3 if n >= 2 => {
-
-                let parent_count = rng.gen_range(2..=n.min(4));
-
-                let parents = GooGraphBrain::sample_parent_ids(rng, n, parent_count);
-
-                if parents.len() >= 2 {
-
-                    goo.add_keep_best_node(parents);
-
-                }
-
-            }
-
-            _ => {
-
-                if n > 0 {
-
-                    goo.change_op_type(rng.gen_range(0..n), rng);
-
-                } else {
-
-                    goo.add_generate_node(rng, None);
-
-                }
-
-            }
-
-        }
-
-    }
-
+    goo.grow_to_size(rng, target_nodes);
     goo
-
 }
 
 
@@ -414,6 +338,167 @@ pub fn goo_add_structural_node(brain: &mut BrainGenome, op: &str) -> Result<(), 
 
     Ok(())
 
+}
+
+
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProbeDecision {
+    pub move_one_step: bool,
+    pub move_signal: f64,
+    pub direction_degrees: f64,
+    pub movement_spend: f64,
+    pub gathered: f64,
+}
+
+fn parse_movement_output_mode(s: &str) -> Result<MovementOutputMode, String> {
+    match s {
+        "separate_readout" | "separate" => Ok(MovementOutputMode::SeparateReadout),
+        "linear_readout" | "linear" => Ok(MovementOutputMode::LinearReadout),
+        "hidden_sum" | "hidden" | "sum" => Ok(MovementOutputMode::HiddenSum),
+        "hex_compass" | "compass" => Ok(MovementOutputMode::HexCompass),
+        "split_channels" | "split" => Ok(MovementOutputMode::SplitChannels),
+        other => Err(format!("unknown movement_output_mode: {other}")),
+    }
+}
+
+#[inline]
+fn direction_signal_to_degrees(signal: f64) -> f64 {
+    let normalized = ((signal.tanh() + 1.0) * 0.5).clamp(0.0, 1.0);
+    normalized * 360.0
+}
+
+fn probe_decision_from_output(
+    output: BrainOutput,
+    center: f64,
+    local_population: i32,
+    individual_resources: f64,
+    movement_cost_factor: f64,
+) -> ProbeDecision {
+    let direction_degrees = direction_signal_to_degrees(output.direction_signal);
+    if output.move_signal <= 0.0 {
+        let denom = (local_population.max(1)) as f64;
+        return ProbeDecision {
+            move_one_step: false,
+            move_signal: output.move_signal,
+            direction_degrees,
+            movement_spend: 0.0,
+            gathered: center / denom,
+        };
+    }
+    let spend = output.move_signal.abs() * movement_cost_factor;
+    let movement_spend = if spend.is_nan() {
+        0.0
+    } else {
+        spend.min(individual_resources)
+    };
+    ProbeDecision {
+        move_one_step: true,
+        move_signal: output.move_signal,
+        direction_degrees,
+        movement_spend,
+        gathered: 0.0,
+    }
+}
+
+fn build_probe_sensors(
+    kind: BrainKind,
+    edge_resources: [f64; 6],
+    center_resource: f64,
+    local_population: i32,
+    individual_resources: f64,
+) -> [f64; SENSOR_DIM] {
+    match kind {
+        BrainKind::Perceptron => {
+            let mut s = [0.0f64; SENSOR_DIM];
+            s[0] = center_resource;
+            s[1] = local_population as f64;
+            s[2] = individual_resources;
+            s
+        }
+        _ => {
+            let mut s = [0.0f64; SENSOR_DIM];
+            s[..6].copy_from_slice(&edge_resources);
+            s[6] = local_population as f64;
+            s[7] = individual_resources;
+            s
+        }
+    }
+}
+
+/// Run one brain forward pass for the landscape hex probe (no env mutation).
+pub fn forward_probe(
+    brain_json: &str,
+    edge_resources: [f64; 6],
+    center_resource: f64,
+    local_population: i32,
+    individual_resources: f64,
+    position: usize,
+    movement_output_mode: &str,
+    movement_cost_factor: f64,
+) -> Result<ProbeDecision, String> {
+    let brain = parse_brain_json(brain_json)?;
+    let mode = parse_movement_output_mode(movement_output_mode)?;
+    let sensors = build_probe_sensors(
+        brain.kind(),
+        edge_resources,
+        center_resource,
+        local_population,
+        individual_resources,
+    );
+    let max_buf = brain.max_buffer_nodes().max(32);
+    let mut hidden_buf = vec![0.0; max_buf];
+    let mut out2_buf = vec![0.0; max_buf];
+    let mut spatial_runtime = brain.init_spatial_runtime();
+    let ctx = ForwardContext {
+        sensors,
+        position,
+        hidden_buf: &mut hidden_buf,
+        out2_buf: &mut out2_buf,
+        spatial_runtime: spatial_runtime.as_mut(),
+        movement_output_mode: mode,
+    };
+    let output = brain.forward(ctx);
+    Ok(probe_decision_from_output(
+        output,
+        center_resource,
+        local_population,
+        individual_resources,
+        movement_cost_factor,
+    ))
+}
+
+pub fn forward_probe_json(
+    brain_json: &str,
+    edge_json: &str,
+    center_resource: f64,
+    local_population: i32,
+    individual_resources: f64,
+    position: u32,
+    movement_output_mode: &str,
+    movement_cost_factor: f64,
+) -> String {
+    let edge: [f64; 6] = match serde_json::from_str(edge_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return serde_json::json!({ "error": format!("edge_resources: {e}") }).to_string();
+        }
+    };
+    match forward_probe(
+        brain_json,
+        edge,
+        center_resource,
+        local_population,
+        individual_resources,
+        position as usize,
+        movement_output_mode,
+        movement_cost_factor,
+    ) {
+        Ok(d) => serde_json::to_string(&d).unwrap_or_else(|e| {
+            serde_json::json!({ "error": e.to_string() }).to_string()
+        }),
+        Err(err) => serde_json::json!({ "error": err }).to_string(),
+    }
 }
 
 

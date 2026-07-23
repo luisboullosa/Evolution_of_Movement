@@ -522,6 +522,7 @@ fn run_brain_forward_cpu(
             center,
             local_pop,
             config.movement_cost_factor,
+            config.resolved_movement_output_mode(),
             hidden_buf,
             out2_buf,
         ));

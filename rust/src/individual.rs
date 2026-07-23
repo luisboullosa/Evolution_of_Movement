@@ -2,7 +2,7 @@ use crate::brain::{
     init_founder_weights, reproduce_brain, BrainGenome, ForwardContext, SpatialRuntime,
     StructuralMutation,
 };
-use crate::config::Config;
+use crate::config::{Config, MovementOutputMode};
 use crate::neural_network::NeuralNetwork;
 use rand::Rng;
 
@@ -133,6 +133,7 @@ impl Individual {
         edge_resources: [f64; 6],
         local_population: i32,
         movement_cost_factor: f64,
+        movement_output_mode: MovementOutputMode,
         _rng: &mut impl Rng,
         hidden_buf: &mut [f64],
         out2_buf: &mut [f64],
@@ -154,6 +155,7 @@ impl Individual {
             hidden_buf,
             out2_buf,
             spatial_runtime: self.spatial_runtime.as_mut(),
+            movement_output_mode,
         };
         let output = self.brain.forward(ctx);
 
@@ -202,6 +204,7 @@ impl Individual {
             [left, left, center, right, right, center],
             local_population,
             movement_cost_factor,
+            MovementOutputMode::HiddenSum,
             _rng,
             hidden_buf,
             out2_buf,
@@ -309,6 +312,7 @@ mod tests {
             [0.0, 0.0, 2.0, 0.0, 0.0, 0.0],
             2,
             0.5,
+            MovementOutputMode::HiddenSum,
             &mut rng,
             &mut hidden,
             &mut out2,

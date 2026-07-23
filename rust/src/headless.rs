@@ -1,6 +1,6 @@
 //! Headless batch simulation CLI (shared by architecture-specific binaries).
 use crate::build_info;
-use crate::config::{ArchitecturePolicy, Config, GridTopology, MovementSpeed};
+use crate::config::{ArchitecturePolicy, Config, GridTopology, MovementOutputMode, MovementSpeed};
 use crate::run_record::RunRecordContext;
 use crate::simulation::Simulation;
 use std::env;
@@ -41,6 +41,7 @@ fn print_help() {
     println!("  --basal-metabolic-cost=N      Per-step basal metabolic drain (double)");
     println!("  --movement-interval=N         Min steps between hex moves when moving (int)");
     println!("  --movement-speed=SPEED        fast|medium|slow — interval + ecology preset");
+    println!("  --movement-output-mode=MODE   separate_readout|linear_readout|hidden_sum|hex_compass|split_channels");
     println!("  --show-progress / --no-progress  Show progress (updates every report_interval, ~50 max)");
     println!("  --print-frames / --no-print-frames  Print ASCII frames to stdout");
     println!("  --replay-snapshot=PATH        Initialize from snapshot CBOR at PATH (instead of new population)");
@@ -84,6 +85,17 @@ fn parse_architecture_policy(s: &str) -> ArchitecturePolicy {
         "evolve_spatial_graph" | "spatial" => ArchitecturePolicy::EvolveSpatialGraph,
         "evolve_goo" | "goo" => ArchitecturePolicy::EvolveGoo,
         _ => ArchitecturePolicy::PerceptronOnly,
+    }
+}
+
+fn parse_movement_output_mode(s: &str) -> Option<MovementOutputMode> {
+    match s.to_lowercase().as_str() {
+        "separate_readout" | "separate" => Some(MovementOutputMode::SeparateReadout),
+        "linear_readout" | "linear" => Some(MovementOutputMode::LinearReadout),
+        "hidden_sum" | "hidden" | "sum" => Some(MovementOutputMode::HiddenSum),
+        "hex_compass" | "compass" => Some(MovementOutputMode::HexCompass),
+        "split_channels" | "split" => Some(MovementOutputMode::SplitChannels),
+        _ => None,
     }
 }
 
@@ -247,6 +259,22 @@ pub fn run(default_policy: Option<ArchitecturePolicy>) {
                 }
             };
             cfg.movement_speed = Some(speed);
+            continue;
+        }
+
+        if a.starts_with("--movement-output-mode") {
+            let mode_str = if let Some(v) = parse_arg_value::<String>(&a, "--movement-output-mode") {
+                v
+            } else if let Some(p) = it.next() {
+                p
+            } else {
+                continue;
+            };
+            if let Some(mode) = parse_movement_output_mode(&mode_str) {
+                cfg.movement_output_mode = Some(mode);
+            } else {
+                eprintln!("Unknown movement output mode: {}", mode_str);
+            }
             continue;
         }
 

@@ -119,7 +119,7 @@
     .arch-header span { color: var(--muted); font-size: 0.85rem; }
     .arch-body {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) minmax(320px, 420px);
+      grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
       gap: 0;
     }
     @media (max-width: 960px) {
@@ -148,6 +148,12 @@
     table.heatmap td { cursor: pointer; transition: outline 0.1s; }
     table.heatmap td.selected { outline: 2px solid var(--accent2); outline-offset: -2px; }
     table.heatmap td:hover { filter: brightness(1.08); }
+    table.heatmap td.pending {
+      color: #8b95a8;
+      font-size: 0.72rem;
+      font-style: italic;
+      letter-spacing: 0.02em;
+    }
     .panel-card {
       background: var(--panel2);
       border: 1px solid var(--border);
@@ -161,7 +167,8 @@
     }
     .cell-meta { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
     .chart-box { height: 220px; position: relative; }
-    #brain-canvas {
+    canvas.brain-canvas {
+      display: block;
       width: 100%;
       height: 200px;
       border-radius: 8px;
@@ -186,6 +193,51 @@
       font-size: 0.8rem;
       color: var(--warn);
     }
+    .hex-probe-card { display: flex; flex-direction: column; gap: 10px; }
+    canvas.hex-probe-canvas {
+      display: block;
+      width: 100%;
+      height: 240px;
+      border-radius: 8px;
+      background: #0d1118;
+      border: 1px solid var(--border);
+      cursor: crosshair;
+    }
+    .probe-controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .probe-controls label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .probe-controls input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .probe-controls select {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 0.78rem;
+    }
+    .probe-decision {
+      font-size: 0.8rem;
+      line-height: 1.45;
+      color: #c5d0e6;
+      padding: 8px 10px;
+      background: #121722;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .probe-decision .gather { color: var(--accent2); }
+    .probe-decision .move { color: var(--accent); }
+    .probe-response-box { height: 160px; position: relative; }
+    .probe-wasm-note { font-size: 0.75rem; color: var(--warn); }
+    .probe-stats { font-size: 0.78rem; }
   </style>
 </head>
 <body>
@@ -215,15 +267,28 @@
       </div>
     </div>
     <button type="button" id="compare-seeds-btn" title="Overlay neutral vs random trajectories for selected cell">Compare seed modes</button>
+    <button type="button" id="live-btn" class="active" title="Poll fitness_landscape.sqlite for new runs while sweep is active">Live updates</button>
+    <button type="button" id="load-db-btn" title="Load fitness_landscape.sqlite (for file:// or custom paths)">Load database…</button>
+    <input type="file" id="db-file-input" accept=".sqlite,.db,.sqlite3" hidden/>
   </div>
   <main id="root"></main>
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
   <script id="landscape-data" type="application/json">__LANDSCAPE_JSON__</script>
   <script>
-  const DATA = JSON.parse(document.getElementById('landscape-data').textContent);
+  let DATA = null;
   const charts = new Map();
   let selected = null;
   let compareSeeds = false;
   let metric = 'fitness';
+  let liveEnabled = true;
+  let livePollTimer = null;
+  let lastUpdatedAtMs = 0;
+  let dbUrl = 'fitness_landscape.sqlite';
+  let viewerBooted = false;
+  let wasmProbe = null;
+  let wasmProbeError = '';
+  const hexProbes = new Map();
+  const HEX_PROBE_RADIUS = 5; // diameter 10 (axial disk)
 
   const metricMatrixKey = {
     fitness: 'fitness_matrix',
@@ -246,6 +311,41 @@
     return DATA.architecture_labels?.[raw] || ARCH_DISPLAY[raw] || raw;
   }
 
+  /** Numeric-aware sort for sweep axis labels (nodes=1, nodes=2, … not nodes=1, nodes=12, nodes=2). */
+  function compareAxisLabels(a, b) {
+    const parse = (label) => {
+      const eq = label.indexOf('=');
+      if (eq >= 0) {
+        const prefix = label.slice(0, eq);
+        const n = Number(label.slice(eq + 1));
+        if (Number.isFinite(n)) return { prefix, n, raw: label };
+      }
+      return { prefix: label, n: null, raw: label };
+    };
+    const ka = parse(a);
+    const kb = parse(b);
+    if (ka.prefix !== kb.prefix) return ka.prefix.localeCompare(kb.prefix);
+    if (ka.n !== null && kb.n !== null) return ka.n - kb.n;
+    return ka.raw.localeCompare(kb.raw);
+  }
+
+  function reorderHeatmapAxes(hm) {
+    const xOrder = hm.x_labels.map((_, i) => i);
+    xOrder.sort((i, j) => compareAxisLabels(hm.x_labels[i], hm.x_labels[j]));
+    hm.x_labels = xOrder.map(i => hm.x_labels[i]);
+    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fitness_na_matrix']) {
+      if (!hm[key]) continue;
+      hm[key] = hm[key].map(row => xOrder.map(i => row[i]));
+    }
+    const yOrder = hm.y_labels.map((_, i) => i);
+    yOrder.sort((i, j) => compareAxisLabels(hm.y_labels[i], hm.y_labels[j]));
+    hm.y_labels = yOrder.map(i => hm.y_labels[i]);
+    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fitness_na_matrix']) {
+      if (!hm[key]) continue;
+      hm[key] = yOrder.map(i => hm[key][i]);
+    }
+  }
+
   /** Human-readable sweep axis labels (backward-compat with cap=). */
   function formatAxisLabel(label) {
     if (!label) return label;
@@ -254,7 +354,8 @@
       .replace(/^max_brain_nodes=/, 'max brain nodes=')
       .replace(/^landmarks=/, 'landmarks=')
       .replace(/^layers=/, 'founder layers=')
-      .replace(/^generate_nodes=/, 'generate nodes=')
+      .replace(/^generate_nodes=/, 'GoO founder nodes=')
+      .replace(/^goo_nodes=/, 'GoO founder nodes=')
       .replace(/^nodes=/, 'hidden nodes=')
       .replace(/^L1=/, 'layer 1 nodes=')
       .replace(/^L2=/, 'layer 2 nodes=');
@@ -268,13 +369,15 @@
     if (label.startsWith('founder layers=') || label.startsWith('layers=')) {
       return 'Founder layer count in the spatial macromolecule blob.';
     }
-    if (label.startsWith('generate nodes=') || label.startsWith('generate_nodes=')) {
-      return 'Number of Generate nodes seeded in the GoO graph at founder.';
+    if (label.startsWith('GoO founder nodes=') || label.startsWith('generate nodes=') || label.startsWith('generate_nodes=')) {
+      return 'Founder GoO graph size (Gen/Agg/Score/KeepBest mix via grow_to_size).';
     }
     return '';
   }
 
-  function colorScale(v, min, max) {
+  function colorScale(v, min, max, isNa, isPending) {
+    if (isPending) return '#1a2030';
+    if (isNa) return '#3a4254';
     if (v === null || v === undefined || Number.isNaN(v)) return '#2a3142';
     if (max <= min) return '#4c78a8';
     const t = Math.max(0, Math.min(1, (v - min) / (max - min)));
@@ -284,8 +387,12 @@
     return `rgb(${r},${g},${b})`;
   }
 
-  function matrixRange(matrix) {
-    const vals = matrix.flat().filter(v => v !== null && v !== undefined);
+  function matrixRange(matrix, naMatrix) {
+    const vals = [];
+    matrix.forEach((row, yi) => row.forEach((v, xi) => {
+      if (naMatrix?.[yi]?.[xi]) return;
+      if (v !== null && v !== undefined) vals.push(v);
+    }));
     if (!vals.length) return [0, 1];
     return [Math.min(...vals), Math.max(...vals)];
   }
@@ -306,6 +413,493 @@
     );
   }
 
+  // --- Perlin (matches rust/src/perlin.rs) ---
+  function perlinHash3(seed, xi, yi, zi) {
+    let h = BigInt(seed)
+      ^ (BigInt(xi) * 0x9E3779B97F4A7C15n)
+      ^ (BigInt(yi) * 0xC2B2AE3D27D4EB4Fn)
+      ^ (BigInt(zi) * 0x165667B19E3779F9n);
+    h = h ^ (h >> 33n);
+    h = h * 0xFF51AFD7ED558CCDn;
+    h = h ^ (h >> 33n);
+    h = h * 0xC4CEB9FE1A85EC53n;
+    h = h ^ (h >> 33n);
+    return h;
+  }
+
+  function perlinHashUnit(seed, xi, yi, zi) {
+    const v = perlinHash3(seed, xi, yi, zi);
+    return Number(v & 0xFFFFFFFFFFFFFn) / Number(0xFFFFFFFFFFFFFn);
+  }
+
+  function perlinSmoothstep(t) { return t * t * (3 - 2 * t); }
+  function perlinLerp(a, b, t) { return a + (b - a) * t; }
+
+  function perlinSample2dTime(x, y, time, seed, spatialScale, timeScale) {
+    const s = Math.max(spatialScale, 1e-9);
+    const ts = Math.max(timeScale, 1e-9);
+    const xf = x * s, yf = y * s, tf = time * ts;
+    const x0 = Math.floor(xf), y0 = Math.floor(yf), t0 = Math.floor(tf);
+    const x1 = x0 + 1, y1 = y0 + 1, t1 = t0 + 1;
+    const ux = perlinSmoothstep(xf - x0);
+    const uy = perlinSmoothstep(yf - y0);
+    const ut = perlinSmoothstep(tf - t0);
+    const c000 = perlinHashUnit(seed, x0, y0, t0);
+    const c100 = perlinHashUnit(seed, x1, y0, t0);
+    const c010 = perlinHashUnit(seed, x0, y1, t0);
+    const c110 = perlinHashUnit(seed, x1, y1, t0);
+    const c001 = perlinHashUnit(seed, x0, y0, t1);
+    const c101 = perlinHashUnit(seed, x1, y0, t1);
+    const c011 = perlinHashUnit(seed, x0, y1, t1);
+    const c111 = perlinHashUnit(seed, x1, y1, t1);
+    const x00 = perlinLerp(c000, c100, ux);
+    const x10 = perlinLerp(c010, c110, ux);
+    const y0v = perlinLerp(x00, x10, uy);
+    const x01 = perlinLerp(c001, c101, ux);
+    const x11 = perlinLerp(c011, c111, ux);
+    const y1v = perlinLerp(x01, x11, uy);
+    return perlinLerp(y0v, y1v, ut);
+  }
+
+  function shapeResourceContrast(raw, contrast) {
+    const r = Math.max(0, Math.min(1, raw));
+    if (contrast <= 1.000000001) return r;
+    return Math.max(0, Math.min(1, 0.5 + (r - 0.5) * contrast));
+  }
+
+  function scaledResource(raw, scale, contrast) {
+    return shapeResourceContrast(raw, contrast) * scale;
+  }
+
+  function hexDisk(radius) {
+    const coords = [];
+    for (let dq = -radius; dq <= radius; dq++) {
+      for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+        coords.push({ q: dq, r: dr });
+      }
+    }
+    return coords;
+  }
+
+  const HEX_NEIGHBORS = [
+    { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
+    { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
+  ];
+
+  function hexKey(q, r) { return `${q},${r}`; }
+
+  function axialToPixel(q, r, size) {
+    const x = size * (3 / 2) * q;
+    const y = size * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
+    return { x, y };
+  }
+
+  function drawFlatHex(ctx, cx, cy, size) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const ang = (Math.PI / 180) * (60 * i);
+      const px = cx + size * Math.cos(ang);
+      const py = cy + size * Math.sin(ang);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  function buildResourceMap(meta) {
+    const map = new Map();
+    for (const { q, r } of hexDisk(HEX_PROBE_RADIUS)) {
+      const raw = perlinSample2dTime(
+        q, r, 0, meta.resource_seed,
+        meta.env_perlin_spatial_scale,
+        meta.env_perlin_time_scale,
+      );
+      map.set(hexKey(q, r), scaledResource(raw, meta.resource_scale, meta.resource_contrast));
+    }
+    return map;
+  }
+
+  function edgeResourcesAt(map, q, r) {
+    return HEX_NEIGHBORS.map(n => map.get(hexKey(q + n.q, r + n.r)) ?? 0);
+  }
+
+  function resourceColor(v, maxV) {
+    const t = maxV > 0 ? Math.max(0, Math.min(1, v / maxV)) : 0;
+    const r = Math.round(30 + t * 40);
+    const g = Math.round(50 + t * 130);
+    const b = Math.round(90 + t * 60);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  async function ensureWasmProbe() {
+    if (wasmProbe) return wasmProbe;
+    if (wasmProbeError) return null;
+    try {
+      const mod = await import('./brain_playground_wasm/brain_playground_wasm.js');
+      await mod.default();
+      wasmProbe = mod;
+      return mod;
+    } catch (e) {
+      wasmProbeError = e.message || String(e);
+      return null;
+    }
+  }
+
+  function parseProbeResult(jsonStr) {
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.error) throw new Error(parsed.error);
+    return parsed;
+  }
+
+  async function runForwardProbe(state) {
+    const wasm = await ensureWasmProbe();
+    if (!wasm || !state.brainJson) return null;
+    const { agentQ, agentR, resourceMap, probeMeta } = state;
+    const center = resourceMap.get(hexKey(agentQ, agentR)) ?? 0;
+    const edges = edgeResourcesAt(resourceMap, agentQ, agentR);
+    const pos = state.coords.findIndex(c => c.q === agentQ && c.r === agentR);
+    const raw = wasm.forward_probe_json(
+      state.brainJson,
+      JSON.stringify(edges),
+      center,
+      state.competition,
+      state.internalStores,
+      Math.max(0, pos),
+      probeMeta.movement_output_mode,
+      probeMeta.movement_cost_factor,
+    );
+    return parseProbeResult(raw);
+  }
+
+  function decisionVector(decision) {
+    if (!decision) return { dx: 0, dy: 0, magnitude: 0, label: '—' };
+    const rad = (decision.direction_degrees * Math.PI) / 180;
+    const mag = decision.move_one_step
+      ? Math.max(0.05, Math.min(1, Math.abs(decision.move_signal)))
+      : Math.max(0.05, Math.min(1, decision.gathered / 5));
+    return {
+      dx: Math.cos(rad) * mag,
+      dy: -Math.sin(rad) * mag,
+      magnitude: mag,
+      label: decision.move_one_step
+        ? `move · signal ${decision.move_signal.toFixed(3)} · ${decision.direction_degrees.toFixed(0)}°`
+        : `gather · ${decision.gathered.toFixed(3)}`,
+    };
+  }
+
+  function drawHexProbeCanvas(canvas, state, decision) {
+    if (!canvas || !state) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 320;
+    const h = canvas.clientHeight || 240;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const hexSize = Math.min(w, h) / (HEX_PROBE_RADIUS * 3.4);
+    const maxRes = Math.max(...state.coords.map(c => state.resourceMap.get(hexKey(c.q, c.r)) ?? 0), 0.001);
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of state.coords) {
+      const p = axialToPixel(c.q, c.r, hexSize);
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    const cx0 = w / 2 - (minX + maxX) / 2;
+    const cy0 = h / 2 - (minY + maxY) / 2;
+
+    for (const c of state.coords) {
+      const res = state.resourceMap.get(hexKey(c.q, c.r)) ?? 0;
+      const p = axialToPixel(c.q, c.r, hexSize);
+      const cx = cx0 + p.x;
+      const cy = cy0 + p.y;
+      drawFlatHex(ctx, cx, cy, hexSize * 0.95);
+      ctx.fillStyle = resourceColor(res, maxRes);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    const agentP = axialToPixel(state.agentQ, state.agentR, hexSize);
+    const ax = cx0 + agentP.x;
+    const ay = cy0 + agentP.y;
+    drawFlatHex(ctx, ax, ay, hexSize * 0.72);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fill();
+    ctx.strokeStyle = '#7ee787';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#7ee787';
+    ctx.beginPath();
+    ctx.arc(ax, ay, hexSize * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (decision) {
+      const vec = decisionVector(decision);
+      const arrowLen = hexSize * 1.35 * vec.magnitude;
+      const ex = ax + vec.dx * arrowLen;
+      const ey = ay + vec.dy * arrowLen;
+      ctx.strokeStyle = decision.move_one_step ? '#6ea8fe' : '#f0b429';
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      const head = hexSize * 0.22;
+      const ang = Math.atan2(ey - ay, ex - ax);
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - head * Math.cos(ang - 0.45), ey - head * Math.sin(ang - 0.45));
+      ctx.lineTo(ex - head * Math.cos(ang + 0.45), ey - head * Math.sin(ang + 0.45));
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function hexFromCanvasEvent(canvas, state, evt) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = evt.clientX - rect.left;
+    const my = evt.clientY - rect.top;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const hexSize = Math.min(w, h) / (HEX_PROBE_RADIUS * 3.4);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of state.coords) {
+      const p = axialToPixel(c.q, c.r, hexSize);
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    const cx0 = w / 2 - (minX + maxX) / 2;
+    const cy0 = h / 2 - (minY + maxY) / 2;
+    let best = null;
+    let bestD = Infinity;
+    for (const c of state.coords) {
+      const p = axialToPixel(c.q, c.r, hexSize);
+      const cx = cx0 + p.x;
+      const cy = cy0 + p.y;
+      const d = (mx - cx) ** 2 + (my - cy) ** 2;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
+  async function refreshHexProbe(arch) {
+    const probe = hexProbes.get(arch);
+    if (!probe?.state) return;
+    const decision = await runForwardProbe(probe.state);
+    probe.lastDecision = decision;
+    const panel = document.getElementById(`side-${arch}`);
+    const decEl = panel?.querySelector('.probe-decision');
+    if (decEl && decision) {
+      const cls = decision.move_one_step ? 'move' : 'gather';
+      decEl.innerHTML = `
+        <span class="${cls}">${decision.move_one_step ? 'Move' : 'Gather'}</span>
+        · signal ${decision.move_signal.toFixed(3)}
+        · direction ${decision.direction_degrees.toFixed(1)}°
+        ${decision.move_one_step
+          ? `· spend ${decision.movement_spend.toFixed(2)}`
+          : `· gathered ${decision.gathered.toFixed(3)}`}
+      `;
+    }
+    drawHexProbeCanvas(probe.canvas, probe.state, decision);
+    await updateResponseCurve(arch, probe);
+  }
+
+  async function updateResponseCurve(arch, probe) {
+    const chartCanvas = document.querySelector(`#side-${arch} canvas.probe-response-chart`);
+    if (!chartCanvas || !probe?.state?.brainJson) return;
+    const wasm = await ensureWasmProbe();
+    if (!wasm) return;
+
+    const axis = probe.sweepAxis || 'stores';
+    const steps = 25;
+    const moveSignals = [];
+    const directions = [];
+    const labels = [];
+    const saved = { ...probe.state };
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      let competition = saved.competition;
+      let internalStores = saved.internalStores;
+      let resourceMap = saved.resourceMap;
+      if (axis === 'stores') {
+        internalStores = t * 30;
+      } else if (axis === 'competition') {
+        competition = 1 + Math.round(t * 7);
+      } else {
+        const factor = 0.2 + t * 1.8;
+        resourceMap = new Map(saved.resourceMap);
+        const centerKey = hexKey(saved.agentQ, saved.agentR);
+        const base = resourceMap.get(centerKey) ?? 0;
+        resourceMap.set(centerKey, base * factor);
+      }
+      probe.state = { ...saved, competition, internalStores, resourceMap };
+      const d = await runForwardProbe(probe.state);
+      labels.push(
+        axis === 'stores' ? internalStores.toFixed(1)
+          : axis === 'competition' ? String(competition)
+            : (resourceMap.get(hexKey(saved.agentQ, saved.agentR)) ?? 0).toFixed(2),
+      );
+      moveSignals.push(d?.move_signal ?? 0);
+      directions.push(d?.direction_degrees ?? 0);
+    }
+    probe.state = saved;
+
+    const chartId = `probe-${arch}`;
+    if (charts.has(chartId)) charts.get(chartId).destroy();
+    charts.set(chartId, new Chart(chartCanvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'move signal',
+            data: moveSignals,
+            borderColor: '#6ea8fe',
+            backgroundColor: 'rgba(110,168,254,0.12)',
+            tension: 0.25,
+            pointRadius: 0,
+            yAxisID: 'y',
+          },
+          {
+            label: 'direction °',
+            data: directions,
+            borderColor: '#f0b429',
+            borderDash: [4, 3],
+            tension: 0.25,
+            pointRadius: 0,
+            yAxisID: 'y1',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#c5d0e6', boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: axis === 'stores' ? 'Internal stores' : axis === 'competition' ? 'Local competition' : 'Center resource',
+              color: '#9aa6bd',
+              font: { size: 10 },
+            },
+            ticks: { color: '#9aa6bd', maxTicksLimit: 8, font: { size: 9 } },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
+          y: {
+            position: 'left',
+            title: { display: true, text: 'Move signal', color: '#9aa6bd', font: { size: 10 } },
+            ticks: { color: '#9aa6bd', font: { size: 9 } },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
+          y1: {
+            position: 'right',
+            min: 0,
+            max: 360,
+            title: { display: true, text: 'Direction °', color: '#9aa6bd', font: { size: 10 } },
+            ticks: { color: '#9aa6bd', font: { size: 9 } },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
+    }));
+  }
+
+  function wireHexProbePanel(arch, panel) {
+    if (panel.dataset.probeWired === '1') return;
+    panel.dataset.probeWired = '1';
+    const canvas = panel.querySelector('canvas.hex-probe-canvas');
+    const competition = panel.querySelector('.probe-competition');
+    const stores = panel.querySelector('.probe-stores');
+    const sweepAxis = panel.querySelector('.probe-sweep-axis');
+    if (!canvas) return;
+
+    const onChange = () => {
+      const probe = hexProbes.get(arch);
+      if (!probe?.state) return;
+      probe.state.competition = Number(competition.value);
+      probe.state.internalStores = Number(stores.value);
+      probe.sweepAxis = sweepAxis.value;
+      refreshHexProbe(arch);
+    };
+
+    competition?.addEventListener('input', onChange);
+    stores?.addEventListener('input', onChange);
+    sweepAxis?.addEventListener('change', onChange);
+
+    canvas.addEventListener('click', evt => {
+      const probe = hexProbes.get(arch);
+      if (!probe?.state) return;
+      const hit = hexFromCanvasEvent(canvas, probe.state, evt);
+      if (!hit) return;
+      probe.state.agentQ = hit.q;
+      probe.state.agentR = hit.r;
+      refreshHexProbe(arch);
+    });
+  }
+
+  async function initHexProbe(arch, x, y, founder, cell, panel) {
+    const diag = findDiagram(arch, x, y);
+    const statsEl = panel.querySelector('.probe-stats');
+    const wasmNote = panel.querySelector('.probe-wasm-note');
+    const canvas = panel.querySelector('canvas.hex-probe-canvas');
+
+    if (!cell) {
+      if (statsEl) statsEl.textContent = 'No data for this cell.';
+      return;
+    }
+
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <strong>${formatAxisLabel(x)}</strong> × <strong>${formatAxisLabel(y)}</strong>
+        · ${archDisplayName(arch)} · founder: <strong>${founder}</strong><br/>
+        ${cell.data_na
+          ? '<span style="color:var(--warn)">N/A — immediate extinction</span>'
+          : `fitness μ=${cell.fitness_mean.toFixed(3)} · pop μ=${cell.pop_ratio_mean.toFixed(3)} · complexity μ=${cell.complexity_mean.toFixed(2)}`}
+      `;
+    }
+
+    if (!diag?.brain_json || !diag?.probe_meta) {
+      if (wasmNote) {
+        wasmNote.textContent = 'Probe brain not in database — re-run sweep to export founder weights.';
+      }
+      return;
+    }
+
+    await ensureWasmProbe();
+    if (wasmNote) {
+      wasmNote.textContent = wasmProbeError
+        ? `WASM probe unavailable (${wasmProbeError}). Serve via HTTP with brain_playground_wasm/ beside the HTML.`
+        : 'Click hex to move agent · sliders adjust competition & internal stores';
+    }
+
+    const probeMeta = diag.probe_meta;
+    const resourceMap = buildResourceMap(probeMeta);
+    const coords = hexDisk(HEX_PROBE_RADIUS);
+    hexProbes.set(arch, {
+      canvas,
+      sweepAxis: panel.querySelector('.probe-sweep-axis')?.value || 'stores',
+      state: {
+        brainJson: diag.brain_json,
+        probeMeta,
+        resourceMap,
+        coords,
+        agentQ: 0,
+        agentR: 0,
+        competition: Number(panel.querySelector('.probe-competition')?.value || 1),
+        internalStores: Number(panel.querySelector('.probe-stores')?.value || 10),
+      },
+      lastDecision: null,
+    });
+    wireHexProbePanel(arch, panel);
+    await refreshHexProbe(arch);
+  }
+
   function runsForCell(arch, x, y, founder) {
     return DATA.runs.filter(r =>
       r.architecture === arch && r.x_label === x && r.y_label === y && r.founder_mode === founder
@@ -314,11 +908,18 @@
 
   function renderBrainDiagram(canvas, diagram) {
     const ctx = canvas.getContext('2d');
-    const w = canvas.clientWidth || 360;
-    const h = canvas.clientHeight || 200;
-    canvas.width = w * devicePixelRatio;
-    canvas.height = h * devicePixelRatio;
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    // Fixed fallbacks if layout not ready; CSS .brain-canvas should supply 100% × 200px.
+    const w = Math.max(1, Math.floor(rect.width) || 360);
+    const h = Math.max(1, Math.floor(rect.height) || 200);
+    const bw = Math.floor(w * dpr);
+    const bh = Math.floor(h * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     if (!diagram) {
       ctx.fillStyle = '#6b7280';
@@ -378,21 +979,15 @@
     const cell = findCell(arch, x, y, founder);
     const panel = document.getElementById(`side-${arch}`);
     if (!panel) return;
-    const meta = panel.querySelector('.cell-meta');
     const chartCanvas = panel.querySelector('canvas.trajectory-chart');
     const brainCanvas = panel.querySelector('canvas.brain-canvas');
     const conv = panel.querySelector('.convergence-note');
 
+    initHexProbe(arch, x, y, founder, cell, panel);
+
     if (!cell) {
-      meta.textContent = 'No data for this cell.';
       return;
     }
-    meta.innerHTML = `
-      <strong>${x}</strong> × <strong>${y}</strong> · founder: <strong>${founder}</strong><br/>
-      fitness μ=${cell.fitness_mean.toFixed(3)} ± ${cell.fitness_std.toFixed(3)} ·
-      pop μ=${cell.pop_ratio_mean.toFixed(3)} · complexity μ=${cell.complexity_mean.toFixed(2)}<br/>
-      ${cell.replicates} replicate(s) · ${DATA.steps.toLocaleString()} steps max
-    `;
 
     const chartId = `chart-${arch}`;
     if (charts.has(chartId)) charts.get(chartId).destroy();
@@ -476,10 +1071,15 @@
     conv.style.display = cell.trajectory_mean?.length ? 'block' : 'none';
   }
 
+  function cellIsPending(v) {
+    return (v === null || v === undefined) && DATA?.status === 'running';
+  }
+
   function renderHeatmapSection(hm) {
     const founder = document.getElementById('founder-filter').value;
     const matrix = hm[metricMatrixKey[metric]];
-    const [min, max] = matrixRange(matrix);
+    const naMatrix = metric === 'fitness' ? hm.fitness_na_matrix : null;
+    const [min, max] = matrixRange(matrix, naMatrix);
     const section = document.createElement('section');
     section.className = 'arch-section';
     section.dataset.arch = hm.architecture;
@@ -497,9 +1097,30 @@
           <table class="heatmap"></table>
         </div>
         <div class="side-panel" id="side-${hm.architecture}">
-          <div class="panel-card">
-            <h3>Selected cell</h3>
-            <div class="cell-meta empty-hint">Click a heatmap cell to inspect fitness over time and brain topology.</div>
+          <div class="panel-card hex-probe-card">
+            <h3>Environment probe</h3>
+            <div class="probe-stats empty-hint">Click a heatmap cell to explore local resources and NN decisions.</div>
+            <div class="probe-wasm-note"></div>
+            <canvas class="hex-probe-canvas"></canvas>
+            <div class="probe-controls">
+              <label>Local competition
+                <input type="range" class="probe-competition" min="1" max="8" step="1" value="1"/>
+              </label>
+              <label>Internal stores
+                <input type="range" class="probe-stores" min="0" max="30" step="0.5" value="10"/>
+              </label>
+              <label style="grid-column: 1 / -1">Response sweep
+                <select class="probe-sweep-axis">
+                  <option value="stores">move signal vs internal stores</option>
+                  <option value="competition">move signal vs competition</option>
+                  <option value="center">move signal vs center resource</option>
+                </select>
+              </label>
+            </div>
+            <div class="probe-decision">Decision vector appears after probe loads.</div>
+            <div class="panel-card chart-box probe-response-box" style="padding:8px;margin:0">
+              <canvas class="probe-response-chart"></canvas>
+            </div>
             <div class="convergence-note"></div>
           </div>
           <div class="panel-card chart-box">
@@ -508,7 +1129,7 @@
           </div>
           <div class="panel-card">
             <h3>Brain topology</h3>
-            <canvas class="brain-canvas" width="360" height="200"></canvas>
+            <canvas class="brain-canvas"></canvas>
           </div>
         </div>
       </div>
@@ -537,8 +1158,19 @@
       hm.x_labels.forEach((x, xi) => {
         const td = document.createElement('td');
         const v = matrix[yi][xi];
-        td.style.background = colorScale(v, min, max);
-        td.textContent = v === null || v === undefined ? '—' : v.toFixed(3);
+        const isNa = metric === 'fitness' && naMatrix?.[yi]?.[xi];
+        const isPending = cellIsPending(v);
+        td.style.background = colorScale(v, min, max, isNa, isPending);
+        if (isNa) {
+          td.textContent = 'N/A';
+          td.title = 'Immediate extinction — only step 0 recorded (no meaningful fitness trajectory)';
+        } else if (isPending) {
+          td.textContent = 'pending';
+          td.classList.add('pending');
+          td.title = 'Run not completed yet';
+        } else {
+          td.textContent = v === null || v === undefined ? '—' : v.toFixed(3);
+        }
         td.dataset.x = x;
         td.dataset.y = y;
         if (sel && sel.x === x && sel.y === y) td.classList.add('selected');
@@ -574,7 +1206,200 @@
     heatmaps.forEach(hm => root.appendChild(renderHeatmapSection(hm)));
   }
 
-  function init() {
+  function metaValue(db, key, fallback = '') {
+    const stmt = db.prepare('SELECT value FROM meta WHERE key = ?');
+    stmt.bind([key]);
+    if (stmt.step()) {
+      const v = stmt.get()[0];
+      stmt.free();
+      return v ?? fallback;
+    }
+    stmt.free();
+    return fallback;
+  }
+
+  function queryAll(db, sql) {
+    const res = db.exec(sql);
+    if (!res.length) return [];
+    const cols = res[0].columns;
+    return res[0].values.map(row => {
+      const obj = {};
+      cols.forEach((c, i) => { obj[c] = row[i]; });
+      return obj;
+    });
+  }
+
+  function buildDataFromDb(db) {
+    const founderModes = JSON.parse(metaValue(db, 'founder_modes', '[]'));
+    return {
+      version: metaValue(db, 'version', ''),
+      build_id: metaValue(db, 'build_id', ''),
+      steps: Number(metaValue(db, 'steps', '0')),
+      replicates: Number(metaValue(db, 'replicates', '0')),
+      founder_modes: founderModes,
+      status: metaValue(db, 'status', 'complete'),
+      run_count: Number(metaValue(db, 'run_count', '0')),
+      total_runs: Number(metaValue(db, 'total_runs', '0')),
+      updated_at_ms: Number(metaValue(db, 'updated_at_ms', '0')),
+      complexity_help: JSON.parse(metaValue(db, 'complexity_help', '{}')),
+      fitness_help: JSON.parse(metaValue(db, 'fitness_help', '{}')),
+      architecture_labels: JSON.parse(metaValue(db, 'architecture_labels', '{}')),
+      runs: queryAll(db, 'SELECT * FROM runs').map(r => ({
+        architecture: r.architecture,
+        x_label: r.x_label,
+        y_label: r.y_label,
+        founder_mode: r.founder_mode,
+        seed: r.seed,
+        steps_completed: r.steps_completed,
+        final_population: r.final_population,
+        max_population: r.max_population,
+        pop_ratio: r.pop_ratio,
+        avg_resources: r.avg_resources,
+        avg_complexity: r.avg_complexity,
+        prop_moved_final: r.prop_moved_final,
+        fitness_score: r.fitness_score,
+        immediate_extinction: !!r.immediate_extinction,
+        trajectory: JSON.parse(r.trajectory_json || '[]'),
+      })),
+      cells: queryAll(db, 'SELECT * FROM cells').map(c => ({
+        architecture: c.architecture,
+        x_label: c.x_label,
+        y_label: c.y_label,
+        founder_mode: c.founder_mode,
+        replicates: c.replicates,
+        fitness_mean: c.fitness_mean,
+        fitness_std: c.fitness_std,
+        pop_ratio_mean: c.pop_ratio_mean,
+        complexity_mean: c.complexity_mean,
+        data_na: !!c.data_na,
+        trajectory_mean: JSON.parse(c.trajectory_mean_json || '[]'),
+      })),
+      heatmaps: queryAll(db, 'SELECT * FROM heatmaps').map(h => ({
+        architecture: h.architecture,
+        founder_mode: h.founder_mode,
+        x_labels: JSON.parse(h.x_labels_json || '[]'),
+        y_labels: JSON.parse(h.y_labels_json || '[]'),
+        fitness_matrix: JSON.parse(h.fitness_matrix_json || '[]'),
+        fitness_na_matrix: JSON.parse(h.fitness_na_matrix_json || '[]'),
+        pop_ratio_matrix: JSON.parse(h.pop_ratio_matrix_json || '[]'),
+        complexity_matrix: JSON.parse(h.complexity_matrix_json || '[]'),
+      })),
+      cell_diagrams: queryAll(db, 'SELECT * FROM cell_diagrams').map(d => ({
+        architecture: d.architecture,
+        x_label: d.x_label,
+        y_label: d.y_label,
+        structure_signature: d.structure_signature,
+        diagram: JSON.parse(d.diagram_json || '{}'),
+        brain_json: d.brain_json || null,
+        probe_meta: d.probe_meta_json ? JSON.parse(d.probe_meta_json) : null,
+      })),
+    };
+  }
+
+  async function openSqliteBuffer(buffer) {
+    const SQL = await initSqlJs({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${file}`,
+    });
+    return new SQL.Database(new Uint8Array(buffer));
+  }
+
+  async function loadLandscapeFromBuffer(buffer, sourceLabel) {
+    const db = await openSqliteBuffer(buffer);
+    const next = buildDataFromDb(db);
+    const changed = !DATA || next.updated_at_ms !== lastUpdatedAtMs || next.run_count !== DATA.run_count;
+    DATA = next;
+    lastUpdatedAtMs = next.updated_at_ms || 0;
+    window.__landscapeSource = sourceLabel;
+    if (!viewerBooted || changed) {
+      bootViewer();
+    } else {
+      updateMetaLine();
+    }
+    syncLivePolling();
+  }
+
+  function progressLabel() {
+    if (!DATA) return '';
+    if (DATA.status === 'running' && DATA.total_runs > 0) {
+      return ` · sweep ${DATA.run_count}/${DATA.total_runs} runs`;
+    }
+    if (DATA.total_runs > 0 && DATA.run_count < DATA.total_runs) {
+      return ` · ${DATA.run_count}/${DATA.total_runs} runs`;
+    }
+    return '';
+  }
+
+  function updateMetaLine() {
+    const src = window.__landscapeSource || 'database';
+    const liveTag = DATA?.status === 'running' ? ' · live sweep' : '';
+    document.getElementById('meta-line').textContent =
+      `build ${DATA.build_id} · ${DATA.steps.toLocaleString()} steps/run · ${DATA.replicates} replicates · modes: ${DATA.founder_modes.join(', ')} · source: ${src}${progressLabel()}${liveTag}`;
+  }
+
+  async function pollLiveUpdate() {
+    if (!liveEnabled || !dbUrl) return;
+    try {
+      const resp = await fetch(`${dbUrl}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!resp.ok) return;
+      const buf = await resp.arrayBuffer();
+      await loadLandscapeFromBuffer(buf, dbUrl);
+    } catch {
+      /* sweep may not have started yet */
+    }
+  }
+
+  function syncLivePolling() {
+    const shouldPoll = liveEnabled && (
+      !DATA ||
+      DATA.status === 'running' ||
+      (DATA.total_runs > 0 && DATA.run_count < DATA.total_runs)
+    );
+    if (shouldPoll && !livePollTimer) {
+      livePollTimer = setInterval(pollLiveUpdate, 2000);
+    } else if (!shouldPoll && livePollTimer) {
+      clearInterval(livePollTimer);
+      livePollTimer = null;
+    }
+    const btn = document.getElementById('live-btn');
+    if (btn) btn.classList.toggle('active', liveEnabled);
+  }
+
+  async function loadLandscapeData() {
+    const params = new URLSearchParams(location.search);
+    dbUrl = params.get('db') || 'fitness_landscape.sqlite';
+    if (params.get('live') === '0') liveEnabled = false;
+    try {
+      const resp = await fetch(`${dbUrl}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`fetch failed (${resp.status})`);
+      const buf = await resp.arrayBuffer();
+      await loadLandscapeFromBuffer(buf, dbUrl);
+      return;
+    } catch (fetchErr) {
+      const embedded = document.getElementById('landscape-data')?.textContent?.trim();
+      if (embedded && embedded !== 'null' && embedded !== '__LANDSCAPE_JSON__') {
+        DATA = JSON.parse(embedded);
+        DATA.status = 'complete';
+        window.__landscapeSource = 'embedded JSON';
+        bootViewer();
+        return;
+      }
+      document.getElementById('meta-line').textContent =
+        `Could not load ${dbUrl} — serve this folder over HTTP or use “Load database…”. (${fetchErr.message})`;
+      document.getElementById('root').innerHTML =
+        '<p class="empty-hint">Waiting for fitness_landscape.sqlite. Start a sweep or click Load database… — live updates poll every 2s once the DB appears.</p>';
+      syncLivePolling();
+    }
+  }
+
+  function bootViewer() {
+    viewerBooted = true;
+    if (!DATA) {
+      document.getElementById('root').innerHTML = '<p class="empty-hint">No landscape data loaded.</p>';
+      return;
+    }
+    if (DATA.heatmaps?.length) {
+      DATA.heatmaps.forEach(reorderHeatmapAxes);
+    }
     const help = DATA.complexity_help;
     document.getElementById('complexity-help').dataset.tip = help?.tooltip || 'Population-mean brain complexity.';
     const fhelp = DATA.fitness_help;
@@ -582,25 +1407,47 @@
       ? `${fhelp.tooltip}\n\n${fhelp.formula}`
       : 'fitness = pop_ratio × (0.55 + 0.25×resource_term + 0.20×complexity_term) × cap_penalty';
     document.getElementById('fitness-help').dataset.tip = fitnessTip;
-    document.getElementById('meta-line').textContent =
-      `build ${DATA.build_id} · ${DATA.steps.toLocaleString()} steps/run · ${DATA.replicates} replicates · modes: ${DATA.founder_modes.join(', ')}`;
+    updateMetaLine();
 
     const archSel = document.getElementById('arch-filter');
-    const arches = [...new Set(DATA.heatmaps.map(h => h.architecture))].sort();
+    const prevArch = archSel.value || 'all';
+    archSel.innerHTML = '<option value="all">All architectures</option>';
+    const arches = [...new Set((DATA.heatmaps || []).map(h => h.architecture))].sort();
     arches.forEach(a => {
       const o = document.createElement('option');
       o.value = a;
       o.textContent = archDisplayName(a);
       archSel.appendChild(o);
     });
+    if ([...archSel.options].some(o => o.value === prevArch)) archSel.value = prevArch;
 
     const founderSel = document.getElementById('founder-filter');
+    const prevFounder = founderSel.value || DATA.founder_modes[0];
+    founderSel.innerHTML = '';
     DATA.founder_modes.forEach(f => {
       const o = document.createElement('option');
       o.value = f; o.textContent = f;
       founderSel.appendChild(o);
     });
+    if (prevFounder && DATA.founder_modes.includes(prevFounder)) founderSel.value = prevFounder;
 
+    if (!DATA.heatmaps?.length) {
+      const prog = DATA.run_count > 0
+        ? `${DATA.run_count} run(s) in database — waiting for heatmap skeleton`
+        : `waiting for sweep to start (${DATA.run_count}/${DATA.total_runs || '?'} runs)`;
+      document.getElementById('root').innerHTML =
+        `<p class="empty-hint">Sweep in progress — ${prog}.</p>`;
+      syncLivePolling();
+      return;
+    }
+
+    renderAll();
+    syncLivePolling();
+  }
+
+  function wireControlsOnce() {
+    if (window.__landscapeControlsWired) return;
+    window.__landscapeControlsWired = true;
     document.getElementById('metric-toggle').addEventListener('click', e => {
       const btn = e.target.closest('button[data-metric]');
       if (!btn) return;
@@ -608,8 +1455,8 @@
       document.querySelectorAll('#metric-toggle button').forEach(b => b.classList.toggle('active', b === btn));
       renderAll();
     });
-    founderSel.addEventListener('change', renderAll);
-    archSel.addEventListener('change', renderAll);
+    document.getElementById('founder-filter').addEventListener('change', renderAll);
+    document.getElementById('arch-filter').addEventListener('change', renderAll);
     document.getElementById('compare-seeds-btn').addEventListener('click', () => {
       compareSeeds = !compareSeeds;
       document.getElementById('compare-seeds-btn').textContent = compareSeeds
@@ -617,11 +1464,28 @@
         : 'Compare seed modes';
       if (selected) updateSidePanel(selected.arch, selected.x, selected.y, selected.founder);
     });
-
-    renderAll();
+    document.getElementById('load-db-btn').addEventListener('click', () => {
+      document.getElementById('db-file-input').click();
+    });
+    document.getElementById('live-btn').addEventListener('click', () => {
+      liveEnabled = !liveEnabled;
+      document.getElementById('live-btn').classList.toggle('active', liveEnabled);
+      document.getElementById('live-btn').textContent = liveEnabled ? 'Live updates' : 'Live updates (off)';
+      syncLivePolling();
+      if (liveEnabled) pollLiveUpdate();
+    });
+    document.getElementById('db-file-input').addEventListener('change', async e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      liveEnabled = false;
+      dbUrl = '';
+      const buf = await file.arrayBuffer();
+      await loadLandscapeFromBuffer(buf, file.name);
+    });
   }
 
-  init();
+  wireControlsOnce();
+  loadLandscapeData();
   </script>
 </body>
 </html>

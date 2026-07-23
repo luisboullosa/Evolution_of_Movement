@@ -1183,6 +1183,7 @@ impl PetriDish {
                 center,
                 local_population,
                 self.simulation.config.movement_cost_factor,
+                self.simulation.config.resolved_movement_output_mode(),
                 &mut self.simulation.nn_hidden_buf,
                 &mut self.simulation.nn_out2_buf,
             );

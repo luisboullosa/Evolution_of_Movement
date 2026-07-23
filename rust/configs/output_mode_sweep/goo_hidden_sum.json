@@ -1,0 +1,4 @@
+{
+  "movement_output_mode": "hidden_sum",
+  "output_run_dir": "output/output_mode_sweep/goo_hidden_sum"
+}

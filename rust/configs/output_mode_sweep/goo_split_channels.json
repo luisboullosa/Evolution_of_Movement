@@ -1,0 +1,5 @@
+{
+  "movement_output_mode": "split_channels",
+  "use_gpu_step": false,
+  "output_run_dir": "output/output_mode_sweep/goo_split_channels"
+}
