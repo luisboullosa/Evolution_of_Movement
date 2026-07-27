@@ -1,4 +1,5 @@
 use crate::architecture_lineage::{ArchitectureLineageEvent, write_lineage_jsonl};
+use crate::brain::gpu_pack::PopulationBrainTensor;
 use crate::cladogram::Cladogram;
 use crate::config::Config;
 use crate::environment::Environment;
@@ -9,11 +10,14 @@ use crate::population_dynamics::{
     apply_metabolism_and_cull, clamp_initial_population, record_births_in_cladogram,
     record_births_in_lineage, run_reproduction_phase,
 };
+use crate::population_tensor::RowRngManager;
+#[cfg(feature = "cuda")]
 use crate::step_engine::apply_decisions_sequential;
 use crate::run_record::{persist_run_record, RunRecordContext};
 use crate::snapshot::{PopulationSnapshot, SnapshotError};
 use crate::snapshot_registry;
-use crate::tensor::{run_brain_forward, GpuForwardState, PopulationBrainTensor, RowRngManager};
+#[cfg(feature = "cuda")]
+use crate::tensor::{run_brain_forward, GpuForwardState};
 use crate::webviewer_writer::{resolve_individuals_encoding, IndividualsEncoding, WebviewerWriter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -51,6 +55,7 @@ pub struct Simulation {
     pub nn_out2_buf: Vec<f64>,
     pub tensor: PopulationBrainTensor,
     pub row_rng: RowRngManager,
+    #[cfg(feature = "cuda")]
     pub gpu_state: GpuForwardState,
     pub step_count: i32,
     /// Brain forward passes executed on GPU during this run (for run_record).
@@ -109,6 +114,7 @@ impl Simulation {
             nn_out2_buf: vec![0.0; max_buf.max(32)],
             tensor,
             row_rng,
+            #[cfg(feature = "cuda")]
             gpu_state: GpuForwardState::new(),
             step_count: 0,
             gpu_steps_executed: 0,
@@ -124,7 +130,14 @@ impl Simulation {
     }
 
     fn use_gpu_step(&self) -> bool {
-        self.config.use_gpu_step && self.tensor.population_is_gpu_compatible()
+        #[cfg(feature = "cuda")]
+        {
+            self.config.use_gpu_step && self.tensor.population_is_gpu_compatible()
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            false
+        }
     }
 
     pub fn init_population(&mut self, n: usize) {
@@ -175,43 +188,46 @@ impl Simulation {
         }
 
         if self.use_gpu_step() {
-            let cell_count = grid_cell_count(&self.config);
-            let mut occupancy = vec![0i32; cell_count];
-            for ind in &self.individuals {
-                let pos = ind.position % cell_count;
-                occupancy[pos] = occupancy[pos].saturating_add(1);
-            }
+            #[cfg(feature = "cuda")]
+            {
+                let cell_count = grid_cell_count(&self.config);
+                let mut occupancy = vec![0i32; cell_count];
+                for ind in &self.individuals {
+                    let pos = ind.position % cell_count;
+                    occupancy[pos] = occupancy[pos].saturating_add(1);
+                }
 
-            self.tensor
-                .sync_from_individuals(&self.individuals, &self.config);
-            let (decisions, gpu_ran) = run_brain_forward(
-                &mut self.tensor,
-                &mut self.individuals,
-                &self.env.resources,
-                &occupancy,
-                &self.config,
-                &mut self.nn_hidden_buf,
-                &mut self.nn_out2_buf,
-                &mut self.gpu_state,
-                self.hex_dish.as_deref(),
-            );
-            let outcome = apply_decisions_sequential(
-                &mut self.individuals,
-                &decisions,
-                &self.config,
-                &mut self.env,
-                self.hex_dish.as_deref(),
-            );
-            if gpu_ran {
-                self.gpu_steps_executed = self.gpu_steps_executed.saturating_add(1);
                 self.tensor
-                    .apply_spatial_runtime_to_individuals(&mut self.individuals);
-            } else {
-                self.cpu_brain_steps_executed = self.cpu_brain_steps_executed.saturating_add(1);
+                    .sync_from_individuals(&self.individuals, &self.config);
+                let (decisions, gpu_ran) = run_brain_forward(
+                    &mut self.tensor,
+                    &mut self.individuals,
+                    &self.env.resources,
+                    &occupancy,
+                    &self.config,
+                    &mut self.nn_hidden_buf,
+                    &mut self.nn_out2_buf,
+                    &mut self.gpu_state,
+                    self.hex_dish.as_deref(),
+                );
+                let outcome = apply_decisions_sequential(
+                    &mut self.individuals,
+                    &decisions,
+                    &self.config,
+                    &mut self.env,
+                    self.hex_dish.as_deref(),
+                );
+                if gpu_ran {
+                    self.gpu_steps_executed = self.gpu_steps_executed.saturating_add(1);
+                    self.tensor
+                        .apply_spatial_runtime_to_individuals(&mut self.individuals);
+                } else {
+                    self.cpu_brain_steps_executed = self.cpu_brain_steps_executed.saturating_add(1);
+                }
+                self.last_spend = outcome.last_spend;
+                self.last_delta = outcome.last_delta;
+                self.last_movers = outcome.last_movers;
             }
-            self.last_spend = outcome.last_spend;
-            self.last_delta = outcome.last_delta;
-            self.last_movers = outcome.last_movers;
         } else {
             self.cpu_brain_steps_executed = self.cpu_brain_steps_executed.saturating_add(1);
             let outcome = step_individuals_cpu(

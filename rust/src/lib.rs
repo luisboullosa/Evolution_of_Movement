@@ -34,6 +34,8 @@ pub mod nn_viz;
 #[cfg(not(feature = "playground"))]
 pub mod perlin;
 #[cfg(not(feature = "playground"))]
+pub mod population_tensor;
+#[cfg(not(feature = "playground"))]
 pub mod population_dynamics;
 #[cfg(not(feature = "playground"))]
 pub mod run_record;

@@ -32,7 +32,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
-      - name: Build Rust workspace (CPU fallback when nvcc absent)
+      - name: Build Rust workspace (no CUDA on CI runners)
         run: |
           cd rust
-          cargo build --verbose
+          cargo build --verbose --no-default-features --features "gui,sqlite"

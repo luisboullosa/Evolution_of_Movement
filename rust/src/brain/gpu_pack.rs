@@ -6,7 +6,7 @@ use crate::brain::{
 use crate::config::Config;
 use crate::individual::Individual;
 use crate::step_engine::DecisionRow;
-use crate::tensor::PopulationTensor;
+use crate::population_tensor::PopulationTensor;
 
 pub const MAX_GOO_PARENTS: usize = 8;
 /// Hex edge directions (matches `step_engine` / CUDA sensor layout).

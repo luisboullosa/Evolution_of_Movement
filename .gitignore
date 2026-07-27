@@ -31,6 +31,7 @@ build/tests_out/
 
 # IDE / editor
 .vscode/
+.cursor/
 *.suo
 *.user
 *.userosscache

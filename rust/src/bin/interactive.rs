@@ -1,12 +1,13 @@
 /// Interactive evolution simulation viewer with GUI
 use eframe::egui;
+#[cfg(feature = "cuda")]
+use evo_movement_rust::gpu_resource::GpuResourceUpdater;
 use evo_movement_rust::{
     brain::{BrainGenome, PERCEPTRON_SENSOR_DIM},
     build_info,
     cladogram::Cladogram,
   config::{ArchitecturePolicy, Config, GridTopology, MovementSpeed},
     ecology_presets,
-    gpu_resource::GpuResourceUpdater,
     hex_grid::{HexCell, HexCoord, HexGrid},
     individual::Individual,
     neural_network::NeuralNetwork,
@@ -775,6 +776,7 @@ struct PetriDish {
     active_coords: Vec<HexCoord>,
     coord_to_index: HashMap<HexCoord, usize>,
     resource_base: Vec<f64>,
+    #[cfg(feature = "cuda")]
     gpu_resource_updater: Option<GpuResourceUpdater>,
     last_avg_move_signal: f64,
     headless_genotype_stats: HashMap<String, HeadlessGenotypeStats>,
@@ -825,6 +827,7 @@ impl PetriDish {
             resource_base.push(v);
         }
 
+        #[cfg(feature = "cuda")]
         let gpu_resource_updater = GpuResourceUpdater::new(&active_coords, &resource_base).ok();
 
         let mut dish = Self {
@@ -840,6 +843,7 @@ impl PetriDish {
             active_coords,
             coord_to_index,
             resource_base,
+            #[cfg(feature = "cuda")]
             gpu_resource_updater,
             last_avg_move_signal: 0.0,
             headless_genotype_stats: HashMap::new(),
@@ -1062,6 +1066,7 @@ impl PetriDish {
         let time_amplitude = self.simulation.config.env_time_amplitude;
         let resource_scale = self.simulation.config.resource_scale;
 
+        #[cfg(feature = "cuda")]
         if let Some(gpu) = self.gpu_resource_updater.as_mut() {
             if let Some(resources) = gpu.compute(
                 seed as u32,
