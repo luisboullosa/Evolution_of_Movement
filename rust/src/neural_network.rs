@@ -141,20 +141,20 @@ impl NeuralNetwork {
         out2_buf: &mut [f64],
     ) -> (f64, f64) {
         let nodes = self.nodes;
-        for i in 0..nodes {
+        for (i, h) in hidden_buf.iter_mut().enumerate().take(nodes) {
             let v = self.weights.get(i).copied().unwrap_or(0.0) * input
                 + self.biases.get(i).copied().unwrap_or(0.0);
-            hidden_buf[i] = Self::activate(v);
+            *h = Self::activate(v);
         }
         if self.layers == 2 && self.nodes2 > 0 {
             let nodes2 = self.nodes2;
-            for j in 0..nodes2 {
+            for (j, o) in out2_buf.iter_mut().enumerate().take(nodes2) {
                 let mut acc = self.biases2.get(j).copied().unwrap_or(0.0);
-                for i in 0..nodes {
+                for (i, h) in hidden_buf.iter().enumerate().take(nodes) {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
-                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * hidden_buf[i];
+                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                out2_buf[j] = Self::activate(acc);
+                *o = Self::activate(acc);
             }
             Self::decode_outputs_from_layer(&out2_buf[..self.nodes2])
         } else {
@@ -199,24 +199,24 @@ impl NeuralNetwork {
     ) -> (f64, f64) {
         let nodes = self.nodes;
         let in_len = input.len();
-        for i in 0..nodes {
+        for (i, h) in hidden_buf.iter_mut().enumerate().take(nodes) {
             let mut acc = self.biases.get(i).copied().unwrap_or(0.0);
             let read_len = self.inputs.min(in_len);
-            for j in 0..read_len {
+            for (j, val) in input.iter().enumerate().take(read_len) {
                 let idx = i.saturating_mul(self.inputs).saturating_add(j);
-                acc += self.weights_multi.get(idx).copied().unwrap_or(0.0) * input[j];
+                acc += self.weights_multi.get(idx).copied().unwrap_or(0.0) * val;
             }
-            hidden_buf[i] = Self::activate(acc);
+            *h = Self::activate(acc);
         }
         if self.layers == 2 && self.nodes2 > 0 {
             let nodes2 = self.nodes2;
-            for j in 0..nodes2 {
+            for (j, o) in out2_buf.iter_mut().enumerate().take(nodes2) {
                 let mut acc = self.biases2.get(j).copied().unwrap_or(0.0);
-                for i in 0..nodes {
+                for (i, h) in hidden_buf.iter().enumerate().take(nodes) {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
-                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * hidden_buf[i];
+                    acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                out2_buf[j] = Self::activate(acc);
+                *o = Self::activate(acc);
             }
             Self::decode_outputs_from_layer(&out2_buf[..nodes2])
         } else {

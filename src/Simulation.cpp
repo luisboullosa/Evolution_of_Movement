@@ -555,7 +555,7 @@ void Simulation::run() {
                     if (config.nn_index_flush_interval > 0 && (t % config.nn_index_flush_interval) == 0) do_flush = true;
                     if (config.nn_index_flush_size > 0 && nn_index_cache.size() >= config.nn_index_flush_size) do_flush = true;
                     if (!do_flush) return;
-                    std::filesystem::path p(nn_index_target_dir.empty() ? std::filesystem::path(config.webviewer_base) : nn_index_target_dir);
+                    std::filesystem::path p(nn_index_target_dir.empty() ? config.webviewer_base : nn_index_target_dir);
                     std::filesystem::create_directories(p);
                     p /= "nn_index.json";
                     std::ofstream jf(p.string(), std::ofstream::out | std::ofstream::trunc);

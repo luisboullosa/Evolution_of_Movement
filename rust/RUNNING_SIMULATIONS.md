@@ -13,7 +13,7 @@ This document describes how to run the Rust simulation binary, where outputs are
 
 To build everything:
 
-```powershell
+```bash
 cd rust
 cargo build
 ```
@@ -37,14 +37,14 @@ This document describes how to run the Rust simulation binary, where outputs are
 
 To build everything:
 
-```powershell
+```bash
 cd rust
 cargo build
 ```
 
 To run the current CLI with defaults:
 
-```powershell
+```bash
 cd rust
 cargo run --bin evo_movement_rust
 ```
@@ -118,10 +118,10 @@ This is the default behavior: run a simulation, but only persist the binary popu
 
 Example:
 
-```powershell
+```bash
 cd rust
-cargo run --bin evo_movement_rust -- `
-  --steps=100 `
+cargo run --bin evo_movement_rust -- \
+  --steps=100 \
   --initial-population=2000
 ```
 
@@ -138,12 +138,12 @@ No `env.jsonl`, `individuals.*`, or `nn_index.json` are written in this mode.
 
 When you want the full per-timestep outputs directly from the binary:
 
-```powershell
+```bash
 cd rust
-cargo run --bin evo_movement_rust -- `
-  --steps=100 `
-  --initial-population=2000 `
-  --write-outputs `
+cargo run --bin evo_movement_rust -- \
+  --steps=100 \
+  --initial-population=2000 \
+  --write-outputs \
   --no-print-frames
 ```
 
@@ -169,14 +169,20 @@ There is a convenience PowerShell script that runs the Rust binary with the corr
 
 Usage:
 
+**Windows (PowerShell):**
+
 ```powershell
-cd D:\Development\Movement
-
-# Debug build
 ./scripts/generate_webviewer_outputs.ps1 ./output/prod_runs/sim0000/config.json
-
-# Release build
 ./scripts/generate_webviewer_outputs.ps1 ./output/prod_runs/sim0000/config.json -Release
+```
+
+**Linux / macOS** (equivalent manual command):
+
+```bash
+cd rust
+cargo run --release --bin evo_movement_rust -- \
+  --config-file ../output/prod_runs/sim0000/config.json \
+  --write-outputs --no-print-frames
 ```
 
 What it does:
@@ -192,7 +198,8 @@ This produces a **new** `simYYYY` directory under `output/prod_runs/` with full 
 Note: each new run also copies a `generate_webviewer_outputs.ps1` helper into its own `simXXXX` directory, so you can:
 
 ```powershell
-cd D:\Development\Movement\output\prod_runs\sim0000
+# Windows only
+cd output\prod_runs\sim0000
 ./generate_webviewer_outputs.ps1 ./config.json
 ```
 

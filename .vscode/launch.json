@@ -7,9 +7,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/webviewer/visualize_population.py",
       "console": "integratedTerminal",
-      "args": [
-
-      ],
+      "args": [],
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
       }
@@ -20,49 +18,63 @@
       "request": "launch",
       "program": "${workspaceFolder}/webviewer/visualize_individual.py",
       "console": "integratedTerminal",
-      "args": [
-
-      ],
+      "args": [],
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
       }
     },
-    
+    {
+      "name": "Python: Interactive Dashboard",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webviewer/interactive_dash.py",
+      "console": "integratedTerminal",
+      "args": ["--port", "8050"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
     {
       "name": "C++: Debug evo-movement-sim (gdb)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/Debug/evo-movement-sim.exe",
+      "program": "${workspaceFolder}/build/Debug/evo-movement-sim",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],
       "preLaunchTask": "CMake: Build (Debug)",
-      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "windows": {
+        "program": "${workspaceFolder}/build/Debug/evo-movement-sim.exe",
+        "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe"
+      },
       "MIMode": "gdb",
       "externalConsole": false
-    }
-    ,
+    },
     {
       "name": "Run Tests (Release)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/Release/test_config_output.exe",
+      "program": "${workspaceFolder}/build/Release/test_config_output",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],
       "preLaunchTask": "Run CTest (Release)",
-      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "windows": {
+        "program": "${workspaceFolder}/build/Release/test_config_output.exe",
+        "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe"
+      },
       "MIMode": "gdb",
-      "externalConsole": true
-    }
-    ,
+      "externalConsole": false
+    },
     {
       "name": "Rust: Debug evo_movement_rust (gdb)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/rust/target/debug/evo_movement_rust.exe",
+      "program": "${workspaceFolder}/rust/target/debug/evo_movement_rust",
       "args": ["--config", "rust/prod_run.json"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
@@ -73,7 +85,11 @@
         { "name": "NUMEXPR_MAX_THREADS", "value": "1" }
       ],
       "preLaunchTask": "Cargo: build (debug)",
-      "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "windows": {
+        "program": "${workspaceFolder}/rust/target/debug/evo_movement_rust.exe",
+        "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe"
+      },
       "MIMode": "gdb",
       "externalConsole": false
     }

@@ -189,6 +189,7 @@ impl Individual {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn act(
         &mut self,
         left: f64,

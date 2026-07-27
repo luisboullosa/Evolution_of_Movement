@@ -21,10 +21,12 @@ For details on how axial hex coordinates, dish geometry, and related helper
 functions are implemented in Rust, see `HEX_COORDS.md` in this directory.
 
 Interactive dashboards
+
 ----------------------
 If you want to explore the environment/NN behavior without running the binary, start the Dash app at `webviewer/interactive_dash.py` (from repo root):
 
-```powershell
+```bash
+pip install dash plotly numpy
 python webviewer/interactive_dash.py --port 8050
 ```
 

@@ -29,28 +29,24 @@ Build (Windows, PowerShell):
 ```powershell
 mkdir build; cd build
 cmake .. -G "Visual Studio 17 2022"; cmake --build . --config Release
-```
-
-Run (Release):
-
-```powershell
-.
-# from build/Release or run the exe directly
-./evo-movement-sim.exe
+./Release/evo-movement-sim.exe
 ```
 
 This project is intentionally small and dependency-free (uses only the C++ standard library).
 
-Rust port
----------
-A Rust port of the simulator lives in the `rust/` subdirectory. To build and run the Rust
-binary use Cargo:
+Prerequisites: CMake 3.10+, a C++17 compiler (`gcc-c++` on Fedora, `build-essential` on Ubuntu, MSVC/MinGW on Windows).
 
-```powershell
-pushd rust
+Rust port
+
+-----
+A Rust port of the simulator lives in the `rust/` subdirectory. To build and run the Rust
+binary use Cargo (works on all platforms):
+
+```bash
+cd rust
 cargo build --release
-./target/release/evo_movement_rust.exe --help
-popd
+./target/release/evo_movement_rust --help   # Linux/macOS
+# ./target/release/evo_movement_rust.exe --help   # Windows
 ```
 
 Note: Perlin temporal evolution is always enabled in the Rust port (the previous
@@ -60,26 +56,31 @@ have been removed). Use the `--env-time-speed`, `--env-time-amplitude`,
 component.
 
 Web viewer
-----------
+
+-----
 The `webviewer/index.html` page is a legacy viewer that loads a TSV frames file (typically `frames.tsv`).
 This workflow is deprecated; newer runs use JSONL/CBOR outputs (e.g. `env.jsonl`, `individuals.jsonl`/`individuals.cbor`, `nn_index.json`).
 
 Interactive dashboard (Python)
-------------------------------
+
+-----
 For a Shiny-like playground that does not require simulator outputs, use the Dash app:
 
-```powershell
+```bash
+pip install dash plotly numpy    # or: pip install -r requirements-dash.txt
 python webviewer/interactive_dash.py --port 8050
 ```
 
 It provides three panels: (1) live 1D Perlin-ish environment preview with tunable seed/scale/time; (2) NN response explorer where you can edit weights/biases and see movement vs gather thresholds; (3) rough carrying-capacity estimator (K) using the simulator's maintenance, death, and resource assumptions.
 
 Scan driver (Rust)
-------------------
+
+-----
 A convenience driver for batch parameter scans using the Rust binary is provided at `scripts/scan_rust_population_scan.py`.
 It performs a grid or sampled parameter sweep and writes summary outputs for consumption by the webviewer.
 
 Key flags:
+
 - `--outdir`: output base directory (default `output/scan_population`). A single timestamped `jobs...` folder will be created under this path containing summary files.
 - `--workers`: number of parallel workers for the sweep.
 - `--steps`: number of simulation steps for short/pilot runs.
@@ -90,6 +91,7 @@ Key flags:
 - `--deep-steps` / `--deep-population`: when deep runs are enabled, control their length and starting population.
 
 Behavior:
+
 - The driver writes per-job temporary config files to the system temp directory so the output folder only contains the summary files.
 - It forces `report_interval` to be larger than the number of steps and sets `write_outputs`/`write_frames` to `false` by default to avoid producing per-step files when possible.
 - Summary files produced in the jobs folder include `results_short.csv`, `deep_results.csv` (if deep runs executed), `progress.json`, and `promising.csv`.
@@ -102,14 +104,14 @@ python scripts\scan_rust_population_scan.py --pilot --workers 2 --steps 200 --in
 
 After the scan starts, open the webviewer at `webviewer/scan_live.html` served from a local HTTP server (see below) to watch `progress.json` updates.
 
-Remote scan runner (Orange Pi)
-------------------------------
+## Remote scan runner (Orange Pi)
+
 For distributing scan jobs to a remote Linux machine over SSH/SCP (e.g. an Orange Pi) and fetching deep-run population snapshots, see `scripts/REMOTE_SCAN.md`.
 
 On Windows, you can use the convenience wrapper `scripts/remote_scan.ps1`.
 
-Cleaning webviewer output
--------------------------
+## Cleaning webviewer output
+
 The `webviewer/`-root output layout and associated cleanup tooling are deprecated.
 Historically, the simulator wrote generated files directly into `webviewer/` (timestamped `env.tsv.*.tsv`,
 `individuals.tsv.*.tsv`, `nn_index.json`, and sometimes `frames.tsv`).
@@ -136,8 +138,8 @@ cmake --build build --target clean-webviewer --config Release
 
 The CMake target runs the cleaner in dry-run mode by default and prints which files would be removed; to actually delete files run the Python script with `--yes` as shown above.
 
-Running with burn-in and steps
------------------------------
+## Running with burn-in and steps
+
 You can set a burn-in period (timesteps to skip before recording frames/snapshots) and number of steps from the command line:
 
 ```powershell
@@ -149,12 +151,12 @@ You can set a burn-in period (timesteps to skip before recording frames/snapshot
 
 `--burn-in=N` causes the simulator to perform all timesteps but suppress console/frame/snapshot reporting until `t >= N`.
 
-
-
 Running the tests
------------------
-Test instructions were moved to `TESTS.md`. See `TESTS.md` for commands to build and run the project's tests.
 
+<<<<<<< HEAD
+-----
+Test instructions were moved to `TESTS.md`. See `TESTS.md` for commands to build and run the project's tests.
+=======
 GPU vs CPU comparison
 ----------------------
 The Rust simulator now supports a CUDA-based tensor kernel. Use the helper script
@@ -176,3 +178,4 @@ See `docs/cuda_kernel_arguments.md` for an argument-by-argument alignment table
 that explains how the CUDA kernel signature maps to the host launch helpers,
 ensuring the comparison script exercises identical buffers on both paths.
 
+>>>>>>> origin/main
