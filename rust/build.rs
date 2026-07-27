@@ -3,6 +3,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+fn write_empty_tensor_kernel_path(path: &PathBuf) {
+    let path_code = "pub const BUILT_TENSOR_KERNEL_PTX: &str = \"\";";
+    fs::write(path, path_code).expect("failed to write tensor kernel path helper");
+}
+
 fn main() {
     // Try to get git commit short hash
     let mut build_id = String::new();
@@ -40,27 +45,40 @@ fn main() {
         let kernel_ptx_str = kernel_ptx
             .to_str()
             .expect("output path must be valid UTF-8");
-        let nvcc_status = Command::new("nvcc")
+        let tensor_path_out = out_dir.join("tensor_kernel_path.rs");
+        match Command::new("nvcc")
             .args(&["--ptx", "-arch", &arch, "-o", kernel_ptx_str, cuda_src_str])
             .status()
-            .expect("nvcc not found; install the CUDA toolkit to build the brain step kernel");
-        if !nvcc_status.success() {
-            panic!("nvcc failed to compile {} with arch {}", cuda_src_str, arch);
+        {
+            Ok(status) if status.success() => {
+                println!("cargo:rustc-env=TENSOR_KERNEL_PTX={}", kernel_ptx.display());
+                let path_literal = kernel_ptx.display();
+                let path_code = format!(
+                    "pub const BUILT_TENSOR_KERNEL_PTX: &str = r#\"{}\"#;",
+                    path_literal
+                );
+                fs::write(&tensor_path_out, path_code)
+                    .expect("failed to write tensor kernel path helper");
+            }
+            Ok(status) => {
+                println!(
+                    "cargo:warning=nvcc failed (exit {:?}) compiling {} with arch {}; building without CUDA PTX (CPU fallback at runtime)",
+                    status.code(),
+                    cuda_src_str,
+                    arch
+                );
+                write_empty_tensor_kernel_path(&tensor_path_out);
+            }
+            Err(err) => {
+                println!(
+                    "cargo:warning=nvcc not found ({err}); building without CUDA PTX (CPU fallback at runtime)"
+                );
+                write_empty_tensor_kernel_path(&tensor_path_out);
+            }
         }
-        println!("cargo:rustc-env=TENSOR_KERNEL_PTX={}", kernel_ptx.display());
-        let tensor_path_out = out_dir.join("tensor_kernel_path.rs");
-        let path_literal = kernel_ptx.display();
-        let path_code = format!(
-            "pub const BUILT_TENSOR_KERNEL_PTX: &str = r#\"{}\"#;",
-            path_literal
-        );
-        fs::write(&tensor_path_out, path_code)
-            .expect("failed to write tensor kernel path helper");
     } else {
         let tensor_path_out = out_dir.join("tensor_kernel_path.rs");
-        let path_code = "pub const BUILT_TENSOR_KERNEL_PTX: &str = \"\";";
-        fs::write(&tensor_path_out, path_code)
-            .expect("failed to write tensor kernel path helper");
+        write_empty_tensor_kernel_path(&tensor_path_out);
     }
     println!("cargo:rerun-if-changed=assets/fitness_landscape_viewer.html");
 }
