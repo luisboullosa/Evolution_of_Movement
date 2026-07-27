@@ -1,49 +1,81 @@
 # CUDA Kernel Argument Alignment
 
-This document verifies that `run_tensor_kernel_gpu` passes the arguments to
-`tensor_step_kernel` in the same order, with compatible types, and with the
-correct helpers for optional buffers. The CUDA kernel signature lives at
-[rust/cuda/tensor_kernel.cu](rust/cuda/tensor_kernel.cu#L22-L88) and the host launch is in
-[rust/src/tensor.rs](rust/src/tensor.rs#L458-L537).
+Host launch: `run_brain_forward_gpu` in [rust/src/tensor.rs](../rust/src/tensor.rs).  
+Kernel: `brain_step_kernel` in [rust/cuda/brain_step_kernel.cu](../rust/cuda/brain_step_kernel.cu).
 
-| Position | Kernel parameter | Type | Host value / helper | Notes |
-| --- | --- | --- | --- | --- |
-| 1 | `active_count` | `int` | `usize_to_i32(count)` | Number of rows; converted safely to `i32`. |
-| 2 | `env_width` | `int` | `usize_to_i32(width)` | Ensures zero-safe minimum in `run_tensor_kernel`. |
-| 3 | `env_resources` | `const double*` | `env_buf.as_device_ptr()` | `env_buf` holds the whole slice (even though kernel reads up to `env_width`). |
-| 4 | `occupancy` | `const int32_t*` | `occupancy_buf.as_device_ptr()` | Buffer always allocated/filled to `occupancy.len()`. |
-| 5 | `use_occupancy` | `bool` | `config.nn_use_occupancy` | Direct config boolean. |
-| 6 | `movement_cost_factor` | `double` | `config.movement_cost_factor` | Scalar control value. |
-| 7 | `nodes` | `int` | `tensor.nodes as i32` | Layer 1 neuron count. |
-| 8 | `inputs` | `int` | `tensor.inputs as i32` | Number of NN inputs; kernel uses it for multi-weight branch. |
-| 9 | `nodes2` | `int` | `tensor.nodes2 as i32` | Optional second layer size. |
-| 10 | `layers` | `int` | `tensor.layers` | Saved from config. |
-| 11 | `row_seeds` | `const uint64_t*` | `row_seeds_buf.as_device_ptr()` | Sliced to `count` entries before upload. |
-| 12 | `layer1_stride` | `int` | `usize_to_i32(tensor.layer1_stride)` | Matches layout used to `copy_to_tensor`. |
-| 13 | `multi_stride` | `int` | `usize_to_i32(tensor.multi_stride)` | Needed when `inputs > 1`. |
-| 14 | `layer2_weights_stride` | `int` | `usize_to_i32(tensor.layer2_weights_stride)` | Kernel iterates per-node weights. |
-| 15 | `layer2_bias_stride` | `int` | `usize_to_i32(tensor.layer2_bias_stride)` | One bias per `nodes2`. |
-| 16 | `ids` | `const int32_t*` | `ids_buf.as_device_ptr()` | `tensor.ids` up to `count`. |
-| 17 | `positions` | `uint64_t*` | `positions_buf.as_device_ptr()` | Host vector converted to `u64`. |
-| 18 | `resources` | `double*` | `resources_buf.as_device_ptr()` | Updated in-place. |
-| 19 | `ages` | `int32_t*` | `ages_buf.as_device_ptr()` | Mirrors CPU path. |
-| 20 | `layer1_weights` | `double*` | `device_ptr_or_null(layer1_weights_buf.as_ref())` | Optional backing; `null` is safe when stride is zero. |
-| 21 | `layer1_biases` | `double*` | `device_ptr_or_null(layer1_biases_buf.as_ref())` | Same helper. |
-| 22 | `multi_weights` | `double*` | `device_ptr_or_null(multi_weights_buf.as_ref())` | Only present when `tensor.multi_stride > 0`. |
-| 23 | `layer2_weights` | `double*` | `device_ptr_or_null(layer2_weights_buf.as_ref())` | Passed per-node to second layer. |
-| 24 | `layer2_biases` | `double*` | `device_ptr_or_null(layer2_biases_buf.as_ref())` | Optional for second layer. |
-| 25 | `hidden_buf` | `double*` | `device_ptr_or_null(hidden_buf_dev.as_ref())` | Temporary size matches `tensor.nodes`. |
-| 26 | `out2_buf` | `double*` | `device_ptr_or_null(out2_buf_dev.as_ref())` | Used when `nodes2 > 0`. |
-| 27 | `last_spend` | `double*` | `last_spend_buf.as_device_ptr()` | Host buffer mirrored to GPU. |
-| 28 | `last_delta` | `int32_t*` | `last_delta_buf.as_device_ptr()` | Int32 per row. |
-| 29 | `last_movers_out` | `int32_t*` | `last_movers_buf.as_device_ptr()` | Kernel writes mover count back (converted to `usize`). |
+The kernel performs **forward + decision only**. It does not mutate positions, resources, or environment. Rust applies decisions via `step_engine::apply_decisions_sequential`.
 
-Null handling for optional buffers is already centralized in
-`device_ptr_or_null`, so the kernel never dereferences invalid pointers.
-Running `scripts/compare_cuda_simulations.py` exercises the CPU and GPU paths with
-the same configuration and buffer layout, making it easy to spot any sanitised
-differences that stem from argument misalignment.
-Keep this table in sync with any future kernel or host-launch tweaks so the helper
-continues to verify identical buffers on both paths.
-With this alignment confirmed, the next investigation step is to inspect why
-the `UnknownError` occurs despite the launch arguments matching the signature.
+## Launch configuration
+
+- Grid: `((active_count + 127) / 128, 1, 1)` blocks × 128 threads
+- One thread per individual (`row = blockIdx.x * blockDim.x + threadIdx.x`)
+
+## Argument table
+
+| Position | Kernel parameter | Type | Host source |
+| --- | --- | --- | --- |
+| 1 | `active_count` | `int` | `usize_to_i32(count)` |
+| 2 | `env_cell_count` | `int` | `grid_cell_count(config)` |
+| 3 | `grid_width` | `int` | `config.grid_width` |
+| 4 | `grid_height` | `int` | `config.grid_height` or width |
+| 5 | `grid_topology` | `int` | `0` ring, `1` hex |
+| 6 | `env_resources` | `const double*` | env slice device buffer |
+| 7 | `occupancy` | `const int32_t*` | snapshot occupancy |
+| 8 | `movement_cost_factor` | `double` | `config.movement_cost_factor` |
+| 9 | `nodes` | `int` | MLP layer-1 size |
+| 10 | `inputs` | `int` | sensor / NN input count |
+| 11 | `nodes2` | `int` | MLP layer-2 size |
+| 12 | `layers` | `int` | MLP layer count |
+| 13 | `layer1_stride` | `int` | per-row layer-1 width |
+| 14 | `multi_stride` | `int` | `nodes * inputs` |
+| 15 | `layer2_weights_stride` | `int` | layer-2 weight row stride |
+| 16 | `layer2_bias_stride` | `int` | layer-2 bias row stride |
+| 17 | `max_brain_nodes` | `int` | spatial/goo padding |
+| 18 | `max_edges` | `int` | spatial edge padding |
+| 19 | `max_goo_params` | `int` | goo param padding |
+| 20 | `brain_kind` | `const unsigned char*` | `0=P, 1=MLP, 2=SG, 3=Goo` |
+| 21 | `positions` | `const uint64_t*` | read-only positions |
+| 22 | `resources` | `const double*` | read-only resources |
+| 23 | `layer1_weights` | `const double*` | optional / null |
+| 24 | `layer1_biases` | `const double*` | optional / null |
+| 25 | `multi_weights` | `const double*` | Perceptron + multi-input MLP |
+| 26 | `layer2_weights` | `const double*` | optional |
+| 27 | `layer2_biases` | `const double*` | optional |
+| 28 | `spatial_landmark_count` | `const int32_t*` | per row |
+| 29 | `spatial_edge_count` | `const int32_t*` | per row |
+| 30 | `spatial_edges` | `const int32_t*` | `[pop, max_edges, 3]` flat |
+| 31 | `spatial_edge_weights` | `const double*` | padded edge weights |
+| 32 | `spatial_readout_weights` | `const double*` | readout |
+| 33 | `spatial_readout_biases` | `const double*` | 2 per row |
+| 34 | `spatial_learn_rate` | `const double*` | per row |
+| 35 | `spatial_message_passes` | `const int32_t*` | per row |
+| 36 | `spatial_runtime` | `double*` | `[pop, max_lm, EMBED_DIM]` read/write |
+| 37 | `goo_node_count` | `const int32_t*` | per row |
+| 38 | `goo_ops` | `const unsigned char*` | op type per node |
+| 39 | `goo_parent_count` | `const unsigned char*` | per node |
+| 40 | `goo_parents` | `const int32_t*` | `[pop, max_nodes, MAX_GOO_PARENTS]` |
+| 41 | `goo_params` | `const double*` | padded params |
+| 42 | `decision_out` | `DecisionRowGpu*` | output per row |
+
+## DecisionRowGpu layout (`repr(C)`)
+
+```rust
+struct DecisionRowGpu {
+    move_signal: f64,
+    direction_degrees: f64,
+    movement_spend: f64,
+    gathered: f64,
+    move_one_step: i32,  // 0 or 1
+}
+```
+
+## Persistent device buffers
+
+`GpuForwardState` in `tensor.rs` reuses `DeviceBuffer` allocations when slice lengths are unchanged (`sync_device_buffer`). Host data is refreshed each step with `copy_from`.
+
+## Parity verification
+
+- Rust integration: `rust/tests/parity.rs` (`cargo test --test parity`)
+- Script: `scripts/compare_cuda_simulations.py` (CPU `--no-use-gpu-step` vs GPU `--use-gpu-step`)
+
+Build PTX via `build.rs` compiling `cuda/brain_step_kernel.cu` (override arch with `CUDA_ARCH`, path with `TENSOR_KERNEL_PTX`).

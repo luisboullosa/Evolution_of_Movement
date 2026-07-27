@@ -64,7 +64,7 @@ def diff_outputs(cpu_dir: Path, gpu_dir: Path) -> None:
     print(f"Compared {len(cpu_keys & gpu_keys)} files between runs.")
 
 
-def run_simulation(label: str, args: argparse.Namespace, env_override_ptx: str | None) -> tuple[Path, float]:
+def run_simulation(label: str, args: argparse.Namespace, use_gpu: bool) -> tuple[Path, float]:
     output_dir = args.output_base / label
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -72,12 +72,11 @@ def run_simulation(label: str, args: argparse.Namespace, env_override_ptx: str |
 
     env = os.environ.copy()
     env["CUDA_ARCH"] = args.cuda_arch
-    if env_override_ptx is not None:
-        env["TENSOR_KERNEL_PTX"] = env_override_ptx
+    if not use_gpu:
+        env["TENSOR_KERNEL_PTX"] = args.fallback_ptx
     else:
         env.pop("TENSOR_KERNEL_PTX", None)
 
-    build_flag = "--release" if args.release else ""
     cmd = ["cargo", "run", "--bin", "evo_movement_bin_old"]
     if args.release:
         cmd.append("--release")
@@ -93,7 +92,13 @@ def run_simulation(label: str, args: argparse.Namespace, env_override_ptx: str |
         str(args.report_interval),
         "--output-run-dir",
         str(output_dir),
+        "--seed",
+        str(args.seed),
     ])
+    if use_gpu:
+        cmd.append("--use-gpu-step")
+    else:
+        cmd.append("--no-use-gpu-step")
 
     print(f"Running {label} simulation -> {output_dir}")
     start = time.perf_counter()
@@ -111,6 +116,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--initial-population", type=int, default=100)
     parser.add_argument("--report-interval", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--output-base", type=Path, default=DEFAULT_OUTPUT_BASE)
     parser.add_argument("--fallback-ptx", type=str, default="missing.ptx")
     parser.add_argument("--cuda-arch", default="sm_89")
@@ -126,8 +132,8 @@ def main() -> None:
         build_cmd.append("--release")
     subprocess.run(build_cmd, cwd=RUST_DIR, env=env, check=True)
 
-    cpu_dir, cpu_time = run_simulation("cpu-fallback", args, args.fallback_ptx)
-    gpu_dir, gpu_time = run_simulation("gpu", args, None)
+    cpu_dir, cpu_time = run_simulation("cpu", args, use_gpu=False)
+    gpu_dir, gpu_time = run_simulation("gpu", args, use_gpu=True)
 
     print(f"CPU fallback run time: {cpu_time:.2f}s")
     print(f"GPU run time: {gpu_time:.2f}s")

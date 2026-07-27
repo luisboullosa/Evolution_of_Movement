@@ -1,33 +1,764 @@
 /// Interactive evolution simulation viewer with GUI
 use eframe::egui;
 use evo_movement_rust::{
+    brain::{BrainGenome, PERCEPTRON_SENSOR_DIM},
+    build_info,
     cladogram::Cladogram,
-    config::Config,
+  config::{ArchitecturePolicy, Config, GridTopology, MovementSpeed},
+    ecology_presets,
     gpu_resource::GpuResourceUpdater,
     hex_grid::{HexCell, HexCoord, HexGrid},
     individual::Individual,
     neural_network::NeuralNetwork,
     nn_viz,
     perlin::Perlin,
+    population_dynamics::{apply_metabolism_and_cull, run_reproduction_phase},
     save_state::SimulationState,
     simulation::Simulation,
+    snapshot::{PopulationSnapshot, SnapshotError, SnapshotIndividual},
+    snapshot_registry::{self, SnapshotManifest},
+    step_engine::{
+        forward_decision, gather_amount_for_decision, move_allowed, start_move_cooldown,
+        tick_move_wait,
+    },
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map::DefaultHasher;
+use std::env;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_DISH_RADIUS_CELLS: i32 = 100;
+use serde::Serialize;
+
+/// Default axial radius for new interactive dishes (1 + 3r(r+1) cells; r=30 → 931 cells).
+const DEFAULT_DISH_RADIUS_CELLS: i32 = 30;
+/// Batch configs with larger dish radii are not used for fresh interactive sessions.
+const INTERACTIVE_MAX_DISH_RADIUS: i32 = 100;
+const REWIND_CAP: usize = 60;
+const TRAIL_MAX_AGE: u8 = 10;
+const TARGET_FPS: f32 = 24.0;
+
+const INTERACTIVE_SESSIONS_DIR: &str = "output/interactive_sessions";
+
+fn compute_session_id(seed: u32, snapshot_paths: &[PathBuf]) -> String {
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    build_info::BUILD_ID.hash(&mut hasher);
+    unix_now_secs().hash(&mut hasher);
+    for path in snapshot_paths {
+        path.to_string_lossy().hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+#[derive(Serialize)]
+struct InteractiveSessionManifest {
+    session_id: String,
+    started_at_unix_secs: u64,
+    build_id: String,
+    version_label: String,
+    seed: u32,
+    architecture_policy: String,
+    source_snapshots: Vec<String>,
+    export_dir: String,
+}
+
+#[derive(Serialize)]
+struct ExportedIndividualRecord {
+    session_id: String,
+    exported_at_unix_secs: u64,
+    individual_id: i32,
+    resources: f64,
+    age: i32,
+    position: usize,
+    genotype: String,
+    brain_kind: String,
+    brain: BrainGenome,
+}
+
+fn init_interactive_session(
+    seed: u32,
+    config: &Config,
+    snapshot_paths: &[PathBuf],
+) -> (String, PathBuf) {
+    let session_id = compute_session_id(seed, snapshot_paths);
+    let session_dir = PathBuf::from(INTERACTIVE_SESSIONS_DIR).join(&session_id);
+    let individuals_dir = session_dir.join("individuals");
+    let _ = fs::create_dir_all(&individuals_dir);
+
+    let manifest = InteractiveSessionManifest {
+        session_id: session_id.clone(),
+        started_at_unix_secs: unix_now_secs(),
+        build_id: build_info::BUILD_ID.to_string(),
+        version_label: build_info::VERSION_LABEL.to_string(),
+        seed,
+        architecture_policy: config.architecture_policy.label().to_string(),
+        source_snapshots: snapshot_paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        export_dir: session_dir.to_string_lossy().into_owned(),
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&manifest) {
+        let _ = fs::write(session_dir.join("session.json"), json);
+    }
+
+    println!(
+        "[interactive] session {} -> {}",
+        session_id,
+        session_dir.display()
+    );
+    (session_id, session_dir)
+}
+
+fn export_individual_brain_json(
+    session_id: &str,
+    session_dir: &Path,
+    ind: &Individual,
+) -> Result<PathBuf, String> {
+    let genotype = genotype_signature(ind);
+    let record = ExportedIndividualRecord {
+        session_id: session_id.to_string(),
+        exported_at_unix_secs: unix_now_secs(),
+        individual_id: ind.id,
+        resources: ind.resources,
+        age: ind.age,
+        position: ind.position,
+        genotype,
+        brain_kind: ind.brain.kind().as_str().to_string(),
+        brain: ind.brain.clone(),
+    };
+    let path = session_dir
+        .join("individuals")
+        .join(format!("individual_{}.json", ind.id));
+    let json = serde_json::to_string_pretty(&record)
+        .map_err(|e| format!("serialize brain json: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+fn reveal_in_file_manager(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(parent) = path.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+        }
+    }
+}
+
+fn open_session_folder(session_dir: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer").arg(session_dir).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(session_dir).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(session_dir).spawn();
+    }
+}
+
+fn draw_brain_json_export_ui(ui: &mut egui::Ui, session_id: &str, path: Option<&PathBuf>) {
+    ui.label(egui::RichText::new("Session").strong());
+    ui.label(
+        egui::RichText::new(session_id)
+            .monospace()
+            .weak(),
+    );
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("Brain JSON export").strong());
+    if let Some(path) = path {
+        let display = path.to_string_lossy();
+        ui.label(
+            egui::RichText::new(display.as_ref())
+                .monospace()
+                .small(),
+        );
+        ui.horizontal(|ui| {
+            if ui.button("Reveal in Explorer").clicked() {
+                reveal_in_file_manager(path);
+            }
+            if ui.button("Copy path").clicked() {
+                ui.ctx().copy_text(display.into_owned());
+            }
+        });
+    } else {
+        ui.label(
+            egui::RichText::new("Select an individual to export BrainGenome JSON.")
+                .weak()
+                .italics(),
+        );
+    }
+}
+
+fn viewer_window_title() -> String {
+    format!(
+        "Evolution of Movement - Interactive Viewer {}",
+        build_info::VERSION_LABEL
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HexBackgroundMode {
+    Resources,
+    Competition,
+}
+
+fn max_cell_occupancy(cells: &std::collections::HashMap<HexCoord, HexCell>) -> usize {
+    cells
+        .values()
+        .map(|c| c.individual_indices.len())
+        .max()
+        .unwrap_or(0)
+}
+
+fn competition_heatmap_color(t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.01 {
+        return egui::Color32::from_rgb(26, 30, 38);
+    }
+    // Cool (empty) → warm (crowded) competition map
+    let r = (40.0 + t * 215.0) as u8;
+    let g = (50.0 + (1.0 - t) * 120.0 + t * 40.0) as u8;
+    let b = (70.0 + (1.0 - t) * 100.0) as u8;
+    egui::Color32::from_rgb(r, g, b)
+}
+
+fn hex_background_color(
+    mode: HexBackgroundMode,
+    resource_level: f64,
+    occupant_count: usize,
+    max_occupants: usize,
+) -> egui::Color32 {
+    match mode {
+        HexBackgroundMode::Resources => {
+            let brightness = (resource_level * 255.0).clamp(0.0, 255.0) as u8;
+            egui::Color32::from_rgb(brightness, brightness, 100)
+        }
+        HexBackgroundMode::Competition => {
+            let t = if max_occupants > 0 {
+                occupant_count as f32 / max_occupants as f32
+            } else {
+                0.0
+            };
+            competition_heatmap_color(t)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HeadlessGenotypeStats {
+    pop_rank: usize,
+    pop_share: f64,
+    resource_rank: usize,
+    resource_share: f64,
+    total_genotypes: usize,
+}
+
+#[derive(Debug, Clone)]
+struct GenotypeLineageRow {
+    signature: String,
+    color: [u8; 3],
+    pop: usize,
+    movers_pct: Option<f64>,
+    member_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct MoveTrail {
+    from_pos: usize,
+    to_pos: usize,
+    color: [u8; 3],
+    age: u8,
+}
+
+#[derive(Debug, Clone)]
+struct DishCheckpoint {
+    timestep: i32,
+    perlin_time: f64,
+    env_resources: Vec<f64>,
+    individuals: Vec<Individual>,
+    next_id: i32,
+    cladogram: Cladogram,
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    [
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    ]
+}
+
+fn genotype_signature(ind: &Individual) -> String {
+    ind.brain.structure_signature()
+}
+
+fn genotype_signature_from_snapshot(rec: &SnapshotIndividual) -> String {
+    if let Some(ref json) = rec.brain_json {
+        if let Some(sig) = BrainGenome::structure_signature_from_brain_json(json) {
+            return sig;
+        }
+    }
+    if rec.nn_layers >= 2 || rec.weights2.iter().any(|&w| w != 0.0) {
+        format!("m:{}:{}:{}:{}", rec.nn_nodes, rec.nn_inputs, rec.nn_nodes2, rec.nn_layers)
+    } else {
+        format!("p:{}:{}", rec.nn_inputs, rec.nn_nodes.max(1))
+    }
+}
+
+fn genotype_color(sig: &str) -> [u8; 3] {
+    let mut hasher = DefaultHasher::new();
+    sig.hash(&mut hasher);
+    let hue = (hasher.finish() % 360) as f32;
+    hsv_to_rgb(hue, 0.7, 0.95)
+}
+
+fn assign_genotype_colors(individuals: &mut [Individual]) {
+    for ind in individuals.iter_mut() {
+        let sig = genotype_signature(ind);
+        ind.lineage_color = genotype_color(&sig);
+    }
+}
+
+fn rank_descending(values: &[(String, f64)]) -> HashMap<String, usize> {
+    let mut sorted: Vec<(String, f64)> = values.to_vec();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut ranks = HashMap::new();
+    let mut rank = 0usize;
+    let mut prev: Option<f64> = None;
+    for (sig, val) in sorted {
+        if prev.map(|p| (p - val).abs() < f64::EPSILON) != Some(true) {
+            rank += 1;
+        }
+        ranks.insert(sig, rank);
+        prev = Some(val);
+    }
+    ranks
+}
+
+fn compute_headless_genotype_stats(records: &[SnapshotIndividual]) -> HashMap<String, HeadlessGenotypeStats> {
+    let mut pop_counts: HashMap<String, usize> = HashMap::new();
+    let mut resource_sums: HashMap<String, f64> = HashMap::new();
+    let total_pop = records.len().max(1);
+    let mut total_resources = 0.0f64;
+
+    for rec in records {
+        let sig = genotype_signature_from_snapshot(rec);
+        *pop_counts.entry(sig.clone()).or_insert(0) += 1;
+        let res = rec.resources as f64;
+        *resource_sums.entry(sig).or_insert(0.0) += res;
+        total_resources += res;
+    }
+
+    let total_genotypes = pop_counts.len().max(1);
+    let total_resources = total_resources.max(f64::EPSILON);
+
+    let pop_values: Vec<(String, f64)> = pop_counts
+        .iter()
+        .map(|(k, &v)| (k.clone(), v as f64))
+        .collect();
+    let res_values: Vec<(String, f64)> = resource_sums
+        .iter()
+        .map(|(k, &v)| (k.clone(), v))
+        .collect();
+    let pop_ranks = rank_descending(&pop_values);
+    let res_ranks = rank_descending(&res_values);
+
+    pop_counts
+        .keys()
+        .map(|sig| {
+            let pop_count = *pop_counts.get(sig).unwrap_or(&0);
+            let pop_share = pop_count as f64 / total_pop as f64 * 100.0;
+            let resource_sum = *resource_sums.get(sig).unwrap_or(&0.0);
+            let resource_share = resource_sum / total_resources * 100.0;
+            (
+                sig.clone(),
+                HeadlessGenotypeStats {
+                    pop_rank: *pop_ranks.get(sig).unwrap_or(&total_genotypes),
+                    pop_share,
+                    resource_rank: *res_ranks.get(sig).unwrap_or(&total_genotypes),
+                    resource_share,
+                    total_genotypes,
+                },
+            )
+        })
+        .collect()
+}
+
+fn interactive_default_config() -> Config {
+    let mut cfg = Config::default();
+    cfg.grid_topology = GridTopology::Hex2d;
+    cfg.initial_population = 30;
+    cfg.max_population = 500;
+    cfg.steps = 10_000;
+    cfg.hex_dish_radius = 0;
+    cfg
+}
+
+/// Strip batch-scale grid settings so fresh interactive sessions stay responsive.
+fn prepare_interactive_session_config(cfg: &mut Config) {
+    if cfg.hex_dish_radius > INTERACTIVE_MAX_DISH_RADIUS {
+        eprintln!(
+            "[interactive] ignoring config hex_dish_radius {} (max {} for new sessions); using dish radius {}",
+            cfg.hex_dish_radius, INTERACTIVE_MAX_DISH_RADIUS, DEFAULT_DISH_RADIUS_CELLS
+        );
+    }
+    cfg.grid_topology = GridTopology::Hex2d;
+    cfg.hex_dish_radius = 0;
+    if cfg.max_population <= 0 {
+        cfg.max_population = 500;
+    }
+    cfg.initial_population = cfg.initial_population.min(200);
+}
+
+struct AppOptions {
+    config: Option<Config>,
+    snapshot_paths: Vec<PathBuf>,
+    arena_dir: Option<PathBuf>,
+    add_sandbox: bool,
+    /// Center-crop hex dish snapshots to this axial radius when loading.
+    interactive_radius: Option<i32>,
+}
+
+fn collect_snapshots_from_dir(dir: &Path) -> Vec<PathBuf> {
+    snapshot_registry::collect_snapshots_from_dir(dir)
+}
+
+fn print_snapshot_load_hint(failed_path: &Path) {
+    let reg = snapshot_registry::resolve_registry_dir();
+    let entries = snapshot_registry::list_registry_entries(&reg);
+    if entries.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[hint] registered snapshots in {} (use --arena or --load-snapshot=PATH):",
+        reg.display()
+    );
+    for (path, label) in entries.iter().take(12) {
+        if let Some(label) = label {
+            eprintln!("  {}  ({})", path.display(), label);
+        } else {
+            eprintln!("  {}", path.display());
+        }
+    }
+    if failed_path.components().any(|c| c.as_os_str() == "pipeline_goo_evolved") {
+        let goo = reg
+            .parent()
+            .map(|p| p.join("pipeline_goo_evolved").join("goo").join("snapshot.cbor"));
+        if let Some(goo) = goo {
+            if goo.is_file() {
+                eprintln!(
+                    "[hint] GoO evolved snapshot is at: {}",
+                    goo.display()
+                );
+            }
+        }
+    }
+}
+
+fn copy_dynamics_config(dst: &mut Config, src: &Config) {
+    dst.reproduction_threshold = src.reproduction_threshold;
+    dst.reproduction_cost = src.reproduction_cost;
+    dst.max_population = src.max_population;
+    dst.basal_metabolic_cost = src.basal_metabolic_cost;
+    dst.maintenance_cost_per_node = src.maintenance_cost_per_node;
+    dst.death_risk = src.death_risk;
+    dst.initial_population = src.initial_population;
+}
+
+fn merge_run_config_from_snapshot(config: &mut Config, file_cfg: &Config) {
+    config.architecture_policy = file_cfg.architecture_policy;
+    config.architecture_mutation_rate = file_cfg.architecture_mutation_rate;
+    config.neutral_founder_weights = file_cfg.neutral_founder_weights;
+    copy_dynamics_config(config, file_cfg);
+}
+
+fn dish_run_config_candidates(dish: &PetriDish) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(ref snap) = dish.source_snapshot {
+        let reg_dir = snapshot_registry::resolve_registry_dir();
+        if let Some(stem) = snap.file_stem().and_then(|s| s.to_str()) {
+            let manifest_path = reg_dir.join(format!("{stem}.json"));
+            if let Ok(text) = fs::read_to_string(&manifest_path) {
+                if let Ok(manifest) = serde_json::from_str::<SnapshotManifest>(&text) {
+                    if !manifest.source_run_dir.is_empty() {
+                        let run_dir = PathBuf::from(&manifest.source_run_dir);
+                        paths.push(run_dir.join("config.json"));
+                        paths.push(run_dir.join("run_config.json"));
+                    }
+                    if let Some(cf) = manifest.config_file.filter(|s| !s.is_empty()) {
+                        paths.push(PathBuf::from(cf));
+                    }
+                }
+            }
+        }
+        if let Some(parent) = snap.parent() {
+            paths.push(parent.join("config.json"));
+            paths.push(parent.join("run_config.json"));
+        }
+    }
+    let out = dish.simulation.config.output_run_dir.trim();
+    if !out.is_empty() {
+        let run_dir = PathBuf::from(out);
+        paths.push(run_dir.join("config.json"));
+        paths.push(run_dir.join("run_config.json"));
+    }
+    paths
+}
+
+fn dish_run_config_display(dish: &PetriDish) -> (String, String) {
+    for path in dish_run_config_candidates(dish) {
+        if path.is_file() {
+            if let Ok(text) = fs::read_to_string(&path) {
+                return (text, format!("{}", path.display()));
+            }
+        }
+    }
+    match serde_json::to_string_pretty(&dish.simulation.config) {
+        Ok(json) => (
+            json,
+            "merged dish config (no run config.json found on disk)".to_string(),
+        ),
+        Err(e) => (format!("{{\"error\": \"{e}\"}}"), "unavailable".to_string()),
+    }
+}
+
+fn draw_dish_run_config_panel(ui: &mut egui::Ui, dish: &PetriDish) {
+    ui.heading("Run Configuration");
+    ui.label(format!("Dish: {}", dish.name));
+    ui.label(dish_info_line(dish));
+    if let Some(ref path) = dish.source_snapshot {
+        ui.label(format!("Snapshot: {}", path.display()));
+    }
+    ui.separator();
+    let (json, source) = dish_run_config_display(dish);
+    ui.label(format!("Source: {source}"));
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical()
+        .max_height(480.0)
+        .show(ui, |ui| {
+            let mut text = json;
+            ui.add(
+                egui::TextEdit::multiline(&mut text)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY)
+                    .interactive(false),
+            );
+        });
+}
+
+fn dish_info_line(dish: &PetriDish) -> String {
+    if dish.is_sandbox {
+        return "Empty sandbox — drag individuals here to experiment".to_string();
+    }
+    let arch = dish.architecture_policy.label();
+    let pop = dish.simulation.individuals.len();
+    let t = dish.headless_timestep.unwrap_or(dish.timestep);
+    let max_pop = dish.simulation.config.max_population;
+    let mut line = if max_pop > 0 {
+        format!("{arch} · t={t} · n={pop}/{max_pop}")
+    } else {
+        format!("{arch} · t={t} · n={pop}")
+    };
+    if let Some(ref path) = dish.source_snapshot {
+        if let Some(name) = path.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()) {
+            line.push_str(&format!(" · from {name}"));
+        }
+    }
+    line
+}
+
+fn parse_interactive_radius(value: &str) -> Option<i32> {
+    let trimmed = value.trim().strip_prefix('r').unwrap_or(value.trim());
+    trimmed.parse::<i32>().ok().map(|r| r.max(0))
+}
+
+fn print_interactive_help() {
+    eprintln!(
+        "evo_movement_interactive {} — options:",
+        build_info::VERSION_LABEL
+    );
+    eprintln!("  --config-file=PATH         Load simulation config JSON");
+    eprintln!("  --load-snapshot=PATH       Load one population snapshot (repeatable)");
+    eprintln!(
+        "  --arena[=DIR]              Load snapshots from DIR (default: ../output/snapshots flat registry, or */snapshot.cbor)"
+    );
+    eprintln!("  --sandbox                  Add an empty dish for manual drag-and-drop experiments");
+    eprintln!(
+        "  --interactive-radius=N     Hex dish radius when loading snapshot genetics (default {DEFAULT_DISH_RADIUS_CELLS})"
+    );
+    eprintln!("  --r=N                      Alias for --interactive-radius=N");
+    eprintln!("  --help, -h                 Show this help message");
+    eprintln!("  --version, -V              Show build version and exit");
+}
+
+fn parse_cli_options() -> AppOptions {
+    let mut config = None;
+    let mut snapshot_paths = Vec::new();
+    let mut arena_dir = None;
+    let mut add_sandbox = false;
+    let mut interactive_radius = None;
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--help" || arg == "-h" {
+            print_interactive_help();
+            std::process::exit(0);
+        }
+        if arg == "--version" || arg == "-V" {
+            eprintln!(
+                "evo_movement_interactive {}",
+                build_info::VERSION_LABEL
+            );
+            std::process::exit(0);
+        }
+        if let Some(path) = arg.strip_prefix("--config-file=") {
+            config = Config::from_file(path).ok();
+            continue;
+        }
+        if arg == "--config-file" {
+            if let Some(path) = args.next() {
+                config = Config::from_file(&path).ok();
+            }
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--load-snapshot=") {
+            snapshot_paths.push(PathBuf::from(path));
+            continue;
+        }
+        if arg == "--load-snapshot" {
+            if let Some(path) = args.next() {
+                snapshot_paths.push(PathBuf::from(path));
+            }
+            continue;
+        }
+        if arg == "--arena" {
+            arena_dir = Some(PathBuf::from("../output/snapshots"));
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--arena=") {
+            arena_dir = Some(PathBuf::from(path));
+            continue;
+        }
+        if arg == "--arena-dir" {
+            if let Some(path) = args.next() {
+                arena_dir = Some(PathBuf::from(path));
+            }
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--arena-dir=") {
+            arena_dir = Some(PathBuf::from(path));
+            continue;
+        }
+        if arg == "--sandbox" {
+            add_sandbox = true;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--interactive-radius=") {
+            interactive_radius = parse_interactive_radius(value);
+            continue;
+        }
+        if arg == "--interactive-radius" || arg == "-r" {
+            if let Some(value) = args.next() {
+                interactive_radius = parse_interactive_radius(&value);
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--r=") {
+            interactive_radius = parse_interactive_radius(value);
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("r=") {
+            interactive_radius = parse_interactive_radius(value);
+        }
+    }
+    AppOptions {
+        config,
+        snapshot_paths,
+        arena_dir,
+        add_sandbox,
+        interactive_radius,
+    }
+}
 
 fn main() -> Result<(), eframe::Error> {
+    for arg in env::args().skip(1) {
+        if arg == "--help" || arg == "-h" {
+            print_interactive_help();
+            return Ok(());
+        }
+        if arg == "--version" || arg == "-V" {
+            eprintln!(
+                "evo_movement_interactive {}",
+                build_info::VERSION_LABEL
+            );
+            return Ok(());
+        }
+    }
+
+    println!(
+        "Evolution interactive viewer {}",
+        build_info::VERSION_LABEL
+    );
+    let options = parse_cli_options();
+    let options = std::sync::Arc::new(options);
+    let options_for_app = options.clone();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1600.0, 900.0])
-            .with_title("Evolution of Movement - Interactive Viewer"),
+            .with_title(viewer_window_title()),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Evolution of Movement",
+        &viewer_window_title(),
         options,
-        Box::new(|cc| Box::new(EvolutionApp::new(cc))),
+        Box::new(move |cc| Box::new(EvolutionApp::new(cc, options_for_app))),
     )
 }
 
@@ -36,6 +767,9 @@ struct PetriDish {
     simulation: Simulation,
     cladogram: Cladogram,
     name: String,
+    architecture_policy: ArchitecturePolicy,
+    source_snapshot: Option<PathBuf>,
+    is_sandbox: bool,
     timestep: i32,
     radius_cells: i32,
     active_coords: Vec<HexCoord>,
@@ -43,6 +777,11 @@ struct PetriDish {
     resource_base: Vec<f64>,
     gpu_resource_updater: Option<GpuResourceUpdater>,
     last_avg_move_signal: f64,
+    headless_genotype_stats: HashMap<String, HeadlessGenotypeStats>,
+    headless_timestep: Option<i32>,
+    move_trails: Vec<MoveTrail>,
+    rewind_history: VecDeque<DishCheckpoint>,
+    rewind_index: usize,
 }
 
 impl PetriDish {
@@ -59,9 +798,13 @@ impl PetriDish {
             coord_to_index.insert(*coord, idx);
         }
 
-        // Interactive dishes require one resource sensor per hex edge (6),
-        // plus occupancy and internal resources.
-        config.nn_inputs = config.nn_inputs.max(8);
+        // Perceptron: current-cell sensors; other policies need six edge + occupancy + stores.
+        config.grid_topology = GridTopology::Hex2d;
+        if config.architecture_policy == ArchitecturePolicy::PerceptronOnly {
+            config.nn_inputs = PERCEPTRON_SENSOR_DIM as i32;
+        } else {
+            config.nn_inputs = config.nn_inputs.max(8);
+        }
         config.grid_width = active_coords.len().max(1);
         let simulation = Simulation::new(&config);
         let cladogram = Cladogram::new();
@@ -89,6 +832,9 @@ impl PetriDish {
             simulation,
             cladogram,
             name: format!("Dish {}", id),
+            architecture_policy: config.architecture_policy,
+            source_snapshot: None,
+            is_sandbox: false,
             timestep: 0,
             radius_cells,
             active_coords,
@@ -96,9 +842,198 @@ impl PetriDish {
             resource_base,
             gpu_resource_updater,
             last_avg_move_signal: 0.0,
+            headless_genotype_stats: HashMap::new(),
+            headless_timestep: None,
+            move_trails: Vec::new(),
+            rewind_history: VecDeque::new(),
+            rewind_index: 0,
         };
         dish.update_resource_grid();
+        dish.seed_rewind_history();
         dish
+    }
+
+    fn seed_rewind_history(&mut self) {
+        self.rewind_history.clear();
+        self.rewind_history.push_back(self.capture_checkpoint());
+        self.rewind_index = 0;
+    }
+
+    fn capture_checkpoint(&self) -> DishCheckpoint {
+        DishCheckpoint {
+            timestep: self.timestep,
+            perlin_time: self.simulation.env.perlin_time,
+            env_resources: self.simulation.env.resources.clone(),
+            individuals: self.simulation.individuals.clone(),
+            next_id: self.simulation.next_id,
+            cladogram: self.cladogram.clone(),
+        }
+    }
+
+    fn restore_checkpoint(&mut self, cp: DishCheckpoint) {
+        self.timestep = cp.timestep;
+        self.simulation.env.perlin_time = cp.perlin_time;
+        self.simulation.env.resources = cp.env_resources;
+        self.simulation.individuals = cp.individuals;
+        self.simulation.next_id = cp.next_id;
+        self.cladogram = cp.cladogram;
+        self.move_trails.clear();
+        self.rebuild_hex_occupancy();
+        self.update_resource_grid();
+    }
+
+    fn truncate_rewind_future(&mut self) {
+        if self.rewind_index + 1 < self.rewind_history.len() {
+            self.rewind_history.truncate(self.rewind_index + 1);
+        }
+    }
+
+    fn push_rewind_checkpoint(&mut self) {
+        self.rewind_history.push_back(self.capture_checkpoint());
+        self.rewind_index = self.rewind_history.len().saturating_sub(1);
+        while self.rewind_history.len() > REWIND_CAP {
+            self.rewind_history.pop_front();
+            self.rewind_index = self.rewind_index.saturating_sub(1);
+        }
+    }
+
+    fn step_back(&mut self) -> bool {
+        if self.rewind_index == 0 {
+            return false;
+        }
+        self.rewind_index -= 1;
+        let cp = self
+            .rewind_history
+            .get(self.rewind_index)
+            .cloned()
+            .expect("rewind checkpoint");
+        self.restore_checkpoint(cp);
+        true
+    }
+
+    fn age_move_trails(&mut self) {
+        for trail in &mut self.move_trails {
+            trail.age = trail.age.saturating_add(1);
+        }
+        self.move_trails.retain(|t| t.age < TRAIL_MAX_AGE);
+    }
+
+    fn new_sandbox(id: usize, radius_cells: i32, hex_size: f32, config: Config) -> Self {
+        let mut dish = Self::new_hex_dish(id, radius_cells, hex_size, config);
+        dish.is_sandbox = true;
+        dish.name = "Sandbox".to_string();
+        dish.simulation.individuals.clear();
+        dish.cladogram = Cladogram::new();
+        dish.timestep = 0;
+        dish.headless_timestep = None;
+        dish.headless_genotype_stats.clear();
+        dish.seed_rewind_history();
+        dish
+    }
+
+    /// Load snapshot genetics onto a fresh interactive dish (no spatial replay).
+    fn from_population_snapshot(
+        id: usize,
+        snapshot: PopulationSnapshot,
+        mut config: Config,
+        hex_size: f32,
+        interactive_radius: Option<i32>,
+        source_snapshot: Option<PathBuf>,
+    ) -> Result<Self, SnapshotError> {
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+        use rand::seq::SliceRandom;
+
+        let view_radius = interactive_radius
+            .filter(|&r| r > 0)
+            .unwrap_or(DEFAULT_DISH_RADIUS_CELLS);
+        let source_pop = snapshot.individuals.len();
+        let source_dish = snapshot.hex_dish_radius;
+        let headless_timestep = snapshot.timestep;
+        let headless_genotype_stats =
+            compute_headless_genotype_stats(&snapshot.individuals);
+
+        config.grid_topology = GridTopology::Hex2d;
+        if config.architecture_policy == ArchitecturePolicy::PerceptronOnly {
+            config.nn_inputs = PERCEPTRON_SENSOR_DIM as i32;
+        } else {
+            config.nn_inputs = config.nn_inputs.max(8);
+        }
+        config.hex_dish_radius = 0;
+
+        if let Some(ref src) = source_snapshot {
+            if let Some(parent) = src.parent() {
+                for name in ["config.json", "resolved_config.json"] {
+                    let cfg_path = parent.join(name);
+                    if let Ok(file_cfg) = Config::from_file(&cfg_path) {
+                        merge_run_config_from_snapshot(&mut config, &file_cfg);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let arch_policy = config.architecture_policy;
+        let mut dish = Self::new_hex_dish(id, view_radius, hex_size, config);
+        let cell_count = dish.active_coords.len().max(1);
+
+        let display_cap = dish
+            .simulation
+            .config
+            .max_population
+            .max(1) as usize;
+        let mut rng = StdRng::seed_from_u64(snapshot.rng_seed_hint);
+        let mut records = snapshot.individuals;
+        if records.len() > display_cap {
+            records.shuffle(&mut rng);
+            records.truncate(display_cap);
+            eprintln!(
+                "[interactive] subsampled {display_cap} / {source_pop} snapshot genotypes for display"
+            );
+        }
+
+        let mut individuals: Vec<Individual> = records
+            .into_iter()
+            .map(|rec| rec.into_individual())
+            .collect();
+
+        assign_genotype_colors(&mut individuals);
+
+        let mut place_rng = StdRng::seed_from_u64(snapshot.rng_seed_hint.wrapping_add(1));
+        for ind in &mut individuals {
+            ind.position = place_rng.gen_range(0..cell_count);
+        }
+
+        dish.simulation.next_id = snapshot.next_id;
+        dish.simulation.individuals = individuals;
+        dish.simulation.env.perlin_time = snapshot.env_perlin_time;
+        dish.timestep = snapshot.timestep;
+        dish.headless_genotype_stats = headless_genotype_stats;
+        dish.headless_timestep = Some(headless_timestep);
+        dish.architecture_policy = arch_policy;
+        dish.source_snapshot = source_snapshot;
+
+        dish.cladogram = Cladogram::new();
+        for ind in &dish.simulation.individuals {
+            dish.cladogram.add_founder(ind.id, ind.lineage_color);
+        }
+
+        dish.name = format!(
+            "{} · t={} · n={}",
+            arch_policy.label(),
+            headless_timestep,
+            dish.simulation.individuals.len(),
+        );
+
+        eprintln!(
+            "[interactive] seeded visualization dish r={view_radius} from snapshot \
+             (source dish r={source_dish}, t={headless_timestep}, genetics only — env/positions not restored)",
+        );
+
+        dish.rebuild_hex_occupancy();
+        dish.update_resource_grid();
+        dish.seed_rewind_history();
+        Ok(dish)
     }
 
     fn init_population(&mut self, count: usize) {
@@ -107,10 +1042,10 @@ impl PetriDish {
 
         for i in start..self.simulation.individuals.len() {
             if let Some(ind) = self.simulation.individuals.get_mut(i) {
-                let color = Self::generate_color(i - start);
-                ind.lineage_color = color;
                 ind.parent_id = None;
-                self.cladogram.add_founder(ind.id, color);
+                let sig = genotype_signature(ind);
+                ind.lineage_color = genotype_color(&sig);
+                self.cladogram.add_founder(ind.id, ind.lineage_color);
             }
         }
 
@@ -186,7 +1121,7 @@ impl PetriDish {
         }
     }
 
-    fn step(&mut self, move_threshold: f64) {
+    fn step(&mut self, move_threshold: f64, env_speed_multiplier: f32) {
         if self.active_coords.is_empty() {
             return;
         }
@@ -201,7 +1136,8 @@ impl PetriDish {
         // Advance time
         self.timestep += 1;
         self.cladogram.advance_time();
-        self.simulation.env.perlin_time += self.simulation.config.env_time_speed;
+        let env_delta = self.simulation.config.env_time_speed * env_speed_multiplier as f64;
+        self.simulation.env.perlin_time += env_delta;
 
         // Refresh 2D spatial + temporal resources for this dish
         self.update_resource_grid();
@@ -241,26 +1177,38 @@ impl PetriDish {
                 0
             };
 
-            let decision = ind.decide_action(
+            let decision = forward_decision(
+                ind,
                 edge_resources,
+                center,
                 local_population,
                 self.simulation.config.movement_cost_factor,
-                &mut self.simulation.rng,
+                self.simulation.config.resolved_movement_output_mode(),
                 &mut self.simulation.nn_hidden_buf,
                 &mut self.simulation.nn_out2_buf,
             );
             move_signal_sum += decision.move_signal;
             move_signal_count = move_signal_count.saturating_add(1);
 
-            if decision.gathered > 0.0 {
-                if let Some(resource_slot) = self.simulation.env.resources.get_mut(pos) {
-                    *resource_slot = (*resource_slot - decision.gathered).max(0.0);
+            let wants_move = decision.move_one_step && decision.move_signal > move_threshold;
+            if wants_move && !move_allowed(ind, true, &self.simulation.config) {
+                tick_move_wait(ind);
+                let gathered = gather_amount_for_decision(
+                    decision,
+                    &self.simulation.env,
+                    pos,
+                    local_population.max(1),
+                );
+                if gathered > 0.0 {
+                    ind.resources += gathered;
+                    if let Some(resource_slot) = self.simulation.env.resources.get_mut(pos) {
+                        *resource_slot = (*resource_slot - gathered).max(0.0);
+                    }
                 }
-            }
-
-            if decision.move_one_step && decision.move_signal > move_threshold {
+            } else if wants_move {
                 self.simulation.last_spend[i] = decision.movement_spend;
                 self.simulation.last_movers = self.simulation.last_movers.saturating_add(1);
+                ind.resources -= decision.movement_spend;
 
                 let mut sector = ((decision.direction_degrees.rem_euclid(360.0) / 60.0).floor() as usize) % 6;
                 if sector >= 6 {
@@ -268,8 +1216,24 @@ impl PetriDish {
                 }
                 let target_coord = neighbors[sector];
                 if let Some(target_idx) = self.coord_to_index.get(&target_coord).copied() {
+                    let from_pos = pos;
+                    let color = ind.lineage_color;
                     ind.position = target_idx;
                     self.simulation.last_delta[i] = 1;
+                    occupancy[pos] = occupancy[pos].saturating_sub(1);
+                    occupancy[target_idx] = occupancy[target_idx].saturating_add(1);
+                    start_move_cooldown(ind, &self.simulation.config);
+                    self.move_trails.push(MoveTrail {
+                        from_pos,
+                        to_pos: target_idx,
+                        color,
+                        age: 0,
+                    });
+                }
+            } else if decision.gathered > 0.0 {
+                ind.resources += decision.gathered;
+                if let Some(resource_slot) = self.simulation.env.resources.get_mut(pos) {
+                    *resource_slot = (*resource_slot - decision.gathered).max(0.0);
                 }
             }
         }
@@ -284,54 +1248,34 @@ impl PetriDish {
             ind.age += 1;
         }
 
-        let before = self.simulation.individuals.len();
-        for idx in 0..before {
-            if idx >= self.simulation.individuals.len() {
-                break;
-            }
-            let res = self.simulation.individuals[idx].resources;
-            if res > self.simulation.config.reproduction_threshold {
-                if self.simulation.config.max_population > 0
-                    && (self.simulation.individuals.len() as i32) >= self.simulation.config.max_population
-                {
-                    break;
-                }
-                let child_opt = {
-                    let ind_mut = &mut self.simulation.individuals[idx];
-                    ind_mut.reproduce(
-                        &mut self.simulation.rng,
-                        &mut self.simulation.next_id,
-                        self.simulation.config.reproduction_threshold,
-                        self.simulation.config.reproduction_cost,
-                        self.simulation.config.mutation_rate,
-                        self.simulation.config.mutation_sigma,
-                    )
-                };
-                if let Some(child) = child_opt {
-                    self.simulation.individuals.push(child);
-                }
+        let births = run_reproduction_phase(
+            &mut self.simulation.individuals,
+            &self.simulation.config,
+            &mut self.simulation.rng,
+            &mut self.simulation.next_id,
+            |child| {
+                let sig = genotype_signature(child);
+                child.lineage_color = genotype_color(&sig);
+            },
+        );
+        for birth in &births {
+            if self.cladogram.nodes.contains_key(&birth.parent.id) {
+                self.cladogram.add_offspring(
+                    birth.parent.id,
+                    birth.child.id,
+                    birth.child.lineage_color,
+                    birth.genetic_distance,
+                );
+            } else {
+                self.cladogram.add_founder(birth.child.id, birth.child.lineage_color);
             }
         }
 
-        for ind in &mut self.simulation.individuals {
-            let total_nodes = ind.nn.nodes + ind.nn.nodes2;
-            ind.resources -= (total_nodes as f64) * self.simulation.config.maintenance_cost_per_node;
+        let dead_ids =
+            apply_metabolism_and_cull(&mut self.simulation.individuals, &self.simulation.config, &mut self.simulation.rng);
+        for dead_id in dead_ids {
+            self.cladogram.mark_death(dead_id);
         }
-
-        use rand::distributions::{Distribution, Uniform};
-        let ud = Uniform::new(0.0f64, 1.0f64);
-        self.simulation.individuals.retain(|ind| {
-            if ind.resources <= 0.0 {
-                return false;
-            }
-            if self.simulation.config.death_risk > 0.0 && ind.age > 0 {
-                let p = 1.0 - (-(self.simulation.config.death_risk * (ind.age as f64))).exp();
-                if ud.sample(&mut self.simulation.rng) < p {
-                    return false;
-                }
-            }
-            true
-        });
 
         let after_ids: HashSet<i32> = self
             .simulation
@@ -342,84 +1286,36 @@ impl PetriDish {
 
         for ind in &self.simulation.individuals {
             if !before_ids.contains(&ind.id) {
-                if let Some(parent_id) = ind.parent_id {
-                    if self.cladogram.nodes.contains_key(&parent_id) {
-                        let genetic_distance_to_parent = self
-                            .simulation
-                            .individuals
-                            .iter()
-                            .find(|p| p.id == parent_id)
-                            .map(|p| Cladogram::genetic_distance(&p.nn, &ind.nn))
-                            .unwrap_or(0.0);
-                        self.cladogram.add_offspring(
-                            parent_id,
-                            ind.id,
-                            ind.lineage_color,
-                            genetic_distance_to_parent,
-                        );
-                    } else {
-                        self.cladogram.add_founder(ind.id, ind.lineage_color);
-                    }
-                } else {
+                if ind.parent_id.is_none() && !births.iter().any(|b| b.child.id == ind.id) {
                     self.cladogram.add_founder(ind.id, ind.lineage_color);
                 }
             }
         }
-        for dead_id in before_ids.difference(&after_ids) {
-            self.cladogram.mark_death(*dead_id);
-        }
+        let _ = after_ids;
 
         self.rebuild_hex_occupancy();
     }
 
-    fn generate_color(index: usize) -> [u8; 3] {
-        // Generate visually distinct colors using golden angle
-        let hue = (index as f32 * 137.508) % 360.0;
-        Self::hsv_to_rgb(hue, 0.7, 0.95)
-    }
-
-    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
-        let c = v * s;
-        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-        let m = v - c;
-
-        let (r, g, b) = if h < 60.0 {
-            (c, x, 0.0)
-        } else if h < 120.0 {
-            (x, c, 0.0)
-        } else if h < 180.0 {
-            (0.0, c, x)
-        } else if h < 240.0 {
-            (0.0, x, c)
-        } else if h < 300.0 {
-            (x, 0.0, c)
-        } else {
-            (c, 0.0, x)
-        };
-
-        [
-            ((r + m) * 255.0) as u8,
-            ((g + m) * 255.0) as u8,
-            ((b + m) * 255.0) as u8,
-        ]
-    }
 }
 
 struct EvolutionApp {
     petri_dishes: Vec<PetriDish>,
     selected_dish: usize,
     show_all_dishes: bool,
+    simulate_all_dishes: bool,
     selected_individual_id: Option<i32>,
     selected_hex: Option<HexCoord>,
     paused: bool,
     paused_before_drag: bool,
     is_dragging_individual: bool,
-    simulation_speed: f32,
+    env_playback_speed: MovementSpeed,
     zoom: f32,
     timesteps_per_frame: usize,
     move_threshold: f64,
     show_nn_diagram: bool,
     show_cladogram: bool,
+    show_run_config: bool,
+    hex_background_mode: HexBackgroundMode,
     phylogeny_zoom: f32,
     phylogeny_height: f32,
     phylogeny_max_render_nodes: usize,
@@ -429,42 +1325,151 @@ struct EvolutionApp {
     config_radius_cells: i32,
     config_hex_size: f32,
     config: Config,
+    interactive_radius: Option<i32>,
+    extant_lineages_expanded: bool,
+    last_frame: Option<Instant>,
+    session_id: String,
+    session_dir: PathBuf,
+    last_brain_export_id: Option<i32>,
+    last_brain_export_path: Option<PathBuf>,
 }
 
 impl EvolutionApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let mut config = Config::default();
-        config.initial_population = 10;
-        config.steps = 10000;
+    fn new(_cc: &eframe::CreationContext<'_>, options: std::sync::Arc<AppOptions>) -> Self {
+        let mut config = options.config.clone().unwrap_or_else(interactive_default_config);
+
+        let mut snapshot_paths = options.snapshot_paths.clone();
+        if let Some(ref dir) = options.arena_dir {
+            snapshot_paths.extend(collect_snapshots_from_dir(dir));
+        }
+        snapshot_paths.sort();
+        snapshot_paths.dedup();
+
+        let loading_snapshot = !snapshot_paths.is_empty();
+        if !loading_snapshot {
+            prepare_interactive_session_config(&mut config);
+        }
 
         let mut dishes = Vec::new();
-        let dish = PetriDish::new_hex_dish(0, DEFAULT_DISH_RADIUS_CELLS, 10.0, config.clone());
-        dishes.push(dish);
+        for (i, snap_path) in snapshot_paths.iter().enumerate() {
+            match PopulationSnapshot::read_from_path(snap_path) {
+                Ok(snapshot) => {
+                    let dish_config = config.clone();
+                    match PetriDish::from_population_snapshot(
+                        i,
+                        snapshot,
+                        dish_config,
+                        10.0,
+                        options.interactive_radius,
+                        Some(snap_path.clone()),
+                    ) {
+                        Ok(dish) => {
+                            config = dish.simulation.config.clone();
+                            dishes.push(dish);
+                        }
+                        Err(e) => eprintln!("Failed to build dish from {}: {}", snap_path.display(), e),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load snapshot {:?}: {}", snap_path, e);
+                    print_snapshot_load_hint(snap_path);
+                }
+            }
+        }
+
+        if options.add_sandbox || options.arena_dir.is_some() {
+            let id = dishes.len();
+            dishes.push(PetriDish::new_sandbox(
+                id,
+                DEFAULT_DISH_RADIUS_CELLS,
+                10.0,
+                config.clone(),
+            ));
+        } else if dishes.is_empty() {
+            let dish = PetriDish::new_hex_dish(0, DEFAULT_DISH_RADIUS_CELLS, 10.0, config.clone());
+            dishes.push(dish);
+        }
+
+        let config_radius_cells = dishes
+            .first()
+            .map(|d| d.radius_cells)
+            .unwrap_or(DEFAULT_DISH_RADIUS_CELLS);
+
+        let seed = config.seed;
+        let (session_id, session_dir) =
+            init_interactive_session(seed, &config, &snapshot_paths);
 
         Self {
             petri_dishes: dishes,
             selected_dish: 0,
-            show_all_dishes: true,
+            show_all_dishes: false,
+            simulate_all_dishes: false,
             selected_individual_id: None,
             selected_hex: None,
             paused: true,
             paused_before_drag: true,
             is_dragging_individual: false,
-            simulation_speed: 1.0,
+            env_playback_speed: MovementSpeed::Medium,
             zoom: 1.0,
             timesteps_per_frame: 1,
             move_threshold: 0.0,
-            show_nn_diagram: false,
+            show_nn_diagram: true,
             show_cladogram: false,
+            show_run_config: false,
+            hex_background_mode: HexBackgroundMode::Resources,
             phylogeny_zoom: 1.0,
             phylogeny_height: 300.0,
             phylogeny_max_render_nodes: 1500,
             phylogeny_last_draw_ids: Vec::new(),
             phylogeny_last_y_rank: HashMap::new(),
             show_config_editor: false,
-            config_radius_cells: DEFAULT_DISH_RADIUS_CELLS,
+            config_radius_cells,
             config_hex_size: 10.0,
             config,
+            interactive_radius: options.interactive_radius,
+            extant_lineages_expanded: true,
+            last_frame: None,
+            session_id,
+            session_dir,
+            last_brain_export_id: None,
+            last_brain_export_path: None,
+        }
+    }
+
+    fn maybe_export_selected_brain(&mut self) {
+        let dish = match self.petri_dishes.get(self.selected_dish) {
+            Some(d) => d,
+            None => return,
+        };
+        let idx = match self.selected_individual_index(dish) {
+            Some(i) => i,
+            None => return,
+        };
+        let ind = match dish.simulation.individuals.get(idx) {
+            Some(i) => i,
+            None => return,
+        };
+        if self.last_brain_export_id == Some(ind.id) {
+            return;
+        }
+        match export_individual_brain_json(&self.session_id, &self.session_dir, ind) {
+            Ok(path) => {
+                self.last_brain_export_id = Some(ind.id);
+                self.last_brain_export_path = Some(path);
+            }
+            Err(e) => eprintln!("[interactive] brain json export failed: {e}"),
+        }
+    }
+
+    fn sync_dynamics_to_selected_dish(&mut self) {
+        if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
+            copy_dynamics_config(&mut dish.simulation.config, &self.config);
+        }
+    }
+
+    fn pull_dynamics_from_selected_dish(&mut self) {
+        if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+            copy_dynamics_config(&mut self.config, &dish.simulation.config);
         }
     }
 
@@ -511,83 +1516,223 @@ impl EvolutionApp {
     }
 
     fn step_simulation(&mut self) {
-        for dish in &mut self.petri_dishes {
+        let env_speed = ecology_presets::env_time_playback_multiplier(self.env_playback_speed);
+        let dishes_to_step: Vec<usize> = if self.simulate_all_dishes {
+            (0..self.petri_dishes.len()).collect()
+        } else {
+            vec![self.selected_dish]
+        };
+        for dish_idx in dishes_to_step {
+            let Some(dish) = self.petri_dishes.get_mut(dish_idx) else {
+                continue;
+            };
+            dish.truncate_rewind_future();
             for _ in 0..self.timesteps_per_frame {
-                dish.step(self.move_threshold);
+                dish.step(self.move_threshold, env_speed);
+            }
+            dish.push_rewind_checkpoint();
+        }
+    }
+
+    fn step_back_simulation(&mut self) {
+        if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
+            if dish.step_back() {
+                self.paused = true;
             }
         }
     }
 
-    fn sorted_lineages_in_cell(dish: &PetriDish, cell: &HexCell) -> Vec<([u8; 3], Vec<usize>)> {
-        let mut lineage_colors: HashMap<[u8; 3], Vec<usize>> = HashMap::new();
+    fn sorted_lineages_in_cell(dish: &PetriDish, cell: &HexCell) -> Vec<GenotypeLineageRow> {
+        let mut by_sig: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut colors: HashMap<String, [u8; 3]> = HashMap::new();
         for &ind_idx in &cell.individual_indices {
             if let Some(ind) = dish.simulation.individuals.get(ind_idx) {
-                lineage_colors
-                    .entry(ind.lineage_color)
-                    .or_insert_with(Vec::new)
-                    .push(ind_idx);
+                let sig = genotype_signature(ind);
+                colors.entry(sig.clone()).or_insert(ind.lineage_color);
+                by_sig.entry(sig).or_default().push(ind_idx);
             }
         }
 
-        let mut lineage_vec: Vec<([u8; 3], Vec<usize>)> = lineage_colors.into_iter().collect();
-        lineage_vec.sort_unstable_by(|(ca, ia), (cb, ib)| {
-            ib.len()
-                .cmp(&ia.len())
-                .then_with(|| ca[0].cmp(&cb[0]))
-                .then_with(|| ca[1].cmp(&cb[1]))
-                .then_with(|| ca[2].cmp(&cb[2]))
+        let mut rows: Vec<GenotypeLineageRow> = by_sig
+            .into_iter()
+            .map(|(signature, member_indices)| GenotypeLineageRow {
+                color: *colors.get(&signature).unwrap_or(&[128, 128, 128]),
+                signature,
+                pop: member_indices.len(),
+                movers_pct: None,
+                member_indices,
+            })
+            .collect();
+        rows.sort_unstable_by(|a, b| {
+            b.pop
+                .cmp(&a.pop)
+                .then_with(|| a.signature.cmp(&b.signature))
         });
-        lineage_vec
+        rows
     }
 
     fn dominant_lineage_color(dish: &PetriDish, cell: &HexCell) -> Option<[u8; 3]> {
         Self::sorted_lineages_in_cell(dish, cell)
             .into_iter()
             .next()
-            .map(|(color, _)| color)
+            .map(|row| row.color)
     }
 
-    fn sorted_extant_lineages(dish: &PetriDish) -> Vec<([u8; 3], usize, Option<usize>)> {
-        let mut pop_counts: HashMap<[u8; 3], usize> = HashMap::new();
+    fn sorted_extant_lineages(dish: &PetriDish) -> Vec<GenotypeLineageRow> {
+        let total_pop = dish.simulation.individuals.len().max(1);
         let has_mover_data = dish.timestep > 0
             && dish.simulation.last_delta.len() == dish.simulation.individuals.len();
-        let mut mover_counts: HashMap<[u8; 3], usize> = HashMap::new();
+        let mut by_sig: HashMap<String, (usize, usize, [u8; 3], Vec<usize>)> = HashMap::new();
 
         for (idx, ind) in dish.simulation.individuals.iter().enumerate() {
-            *pop_counts.entry(ind.lineage_color).or_insert(0) += 1;
+            let sig = genotype_signature(ind);
+            let entry = by_sig
+                .entry(sig)
+                .or_insert((0, 0, ind.lineage_color, Vec::new()));
+            entry.0 += 1;
+            entry.2 = ind.lineage_color;
+            entry.3.push(idx);
             if has_mover_data
-                && dish
-                    .simulation
-                    .last_delta
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(0)
-                    != 0
+                && dish.simulation.last_delta.get(idx).copied().unwrap_or(0) != 0
             {
-                *mover_counts.entry(ind.lineage_color).or_insert(0) += 1;
+                entry.1 += 1;
             }
         }
 
-        let mut rows: Vec<([u8; 3], usize, Option<usize>)> = pop_counts
+        let mut rows: Vec<GenotypeLineageRow> = by_sig
             .into_iter()
-            .map(|(color, pop)| {
-                let movers = if has_mover_data {
-                    Some(mover_counts.get(&color).copied().unwrap_or(0))
+            .map(|(signature, (pop, movers, color, member_indices))| {
+                let movers_pct = if has_mover_data {
+                    Some(movers as f64 / total_pop as f64 * 100.0)
                 } else {
                     None
                 };
-                (color, pop, movers)
+                GenotypeLineageRow {
+                    signature,
+                    color,
+                    pop,
+                    movers_pct,
+                    member_indices,
+                }
             })
             .collect();
 
-        rows.sort_unstable_by(|(ca, pa, ma), (cb, pb, mb)| {
-            pb.cmp(pa)
-                .then_with(|| mb.unwrap_or(0).cmp(&ma.unwrap_or(0)))
-                .then_with(|| ca[0].cmp(&cb[0]))
-                .then_with(|| ca[1].cmp(&cb[1]))
-                .then_with(|| ca[2].cmp(&cb[2]))
+        rows.sort_unstable_by(|a, b| {
+            b.pop
+                .cmp(&a.pop)
+                .then_with(|| {
+                    b.movers_pct
+                        .unwrap_or(0.0)
+                        .partial_cmp(&a.movers_pct.unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.signature.cmp(&b.signature))
         });
         rows
+    }
+
+    fn draw_extant_genotypes_panel(
+        extant_lineages_expanded: &mut bool,
+        selected_individual_id: &mut Option<i32>,
+        ui: &mut egui::Ui,
+        dish: &PetriDish,
+    ) {
+        let lineages = Self::sorted_extant_lineages(dish);
+        let total_pop: usize = lineages.iter().map(|r| r.pop).sum();
+
+        ui.horizontal(|ui| {
+            let arrow = if *extant_lineages_expanded { "▼" } else { "▶" };
+            if ui
+                .button(format!("{arrow} Extant Genotypes"))
+                .clicked()
+            {
+                *extant_lineages_expanded = !*extant_lineages_expanded;
+            }
+        });
+
+        if *extant_lineages_expanded {
+            if lineages.is_empty() {
+                ui.label("No extant genotypes yet.");
+            } else {
+                ui.label(format!(
+                    "{} genotypes · {} individuals",
+                    lineages.len(),
+                    total_pop
+                ));
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for row in &lineages {
+                            let movers_text = match row.movers_pct {
+                                Some(pct) => format!("movers: {:.2}%", pct),
+                                None => "movers: n/a".to_string(),
+                            };
+                            let batch_text = if let Some(batch_t) = dish.headless_timestep {
+                                if let Some(stats) = dish.headless_genotype_stats.get(&row.signature)
+                                {
+                                    format!(
+                                        "batch t={batch_t}: pop #{}/{} ({:.2}%) · res #{}/{} ({:.2}%)",
+                                        stats.pop_rank,
+                                        stats.total_genotypes,
+                                        stats.pop_share,
+                                        stats.resource_rank,
+                                        stats.total_genotypes,
+                                        stats.resource_share,
+                                    )
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+
+                            let label = if batch_text.is_empty() {
+                                format!("pop: {} | {}", row.pop, movers_text)
+                            } else {
+                                format!("pop: {} | {} | {}", row.pop, movers_text, batch_text)
+                            };
+
+                            ui.horizontal(|ui| {
+                                let (swatch_resp, swatch_painter) = ui.allocate_painter(
+                                    egui::vec2(16.0, 16.0),
+                                    egui::Sense::hover(),
+                                );
+                                let center = swatch_resp.rect.center();
+                                let hex = hexagon_points(center, 6.5);
+                                swatch_painter.add(egui::Shape::convex_polygon(
+                                    hex,
+                                    egui::Color32::from_rgb(
+                                        row.color[0], row.color[1], row.color[2],
+                                    ),
+                                    egui::Stroke::new(0.8, egui::Color32::BLACK),
+                                ));
+
+                                let response = ui.selectable_label(false, label);
+                                if response.clicked() {
+                                    use rand::seq::SliceRandom;
+                                    if let Some(&random_idx) = row
+                                        .member_indices
+                                        .as_slice()
+                                        .choose(&mut rand::thread_rng())
+                                    {
+                                        if let Some(ind) =
+                                            dish.simulation.individuals.get(random_idx)
+                                        {
+                                            *selected_individual_id = Some(ind.id);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    });
+            }
+        } else if !lineages.is_empty() {
+            ui.label(format!(
+                "{} genotypes · {} individuals (collapsed)",
+                lineages.len(),
+                total_pop
+            ));
+        }
     }
 
     fn generation_metrics(dish: &PetriDish) -> (usize, Option<f64>) {
@@ -684,6 +1829,9 @@ impl EvolutionApp {
             (canvas_size.y - drawn_h).max(0.0) * 0.5,
         );
 
+        let max_occupants = max_cell_occupancy(&dish.hex_grid.cells);
+        let bg_mode = self.hex_background_mode;
+
         for (coord, cell) in &dish.hex_grid.cells {
             let (x, y) = coord.to_pixel(hex_size);
             let local_x = (x - min_x + padding) * scale;
@@ -691,8 +1839,12 @@ impl EvolutionApp {
             let screen_pos = response.rect.min + offset + egui::vec2(local_x, local_y);
 
             let hex_points = hexagon_points(screen_pos, hex_size * scale);
-            let brightness = (cell.resource_level * 255.0).clamp(0.0, 255.0) as u8;
-            let color = egui::Color32::from_rgb(brightness, brightness, 100);
+            let color = hex_background_color(
+                bg_mode,
+                cell.resource_level,
+                cell.individual_indices.len(),
+                max_occupants,
+            );
             painter.add(egui::Shape::convex_polygon(
                 hex_points,
                 color,
@@ -775,7 +1927,7 @@ impl EvolutionApp {
                     nn.weights2 = ind_state.nn_weights2;
                     nn.biases2 = ind_state.nn_biases2;
 
-                    let mut ind = Individual::new_with_color(
+                    let mut ind = Individual::from_legacy_nn_with_color(
                         nn,
                         ind_state.position,
                         ind_state.id,
@@ -815,16 +1967,48 @@ impl EvolutionApp {
                     }
                 }
 
+                dish.seed_rewind_history();
                 self.petri_dishes[self.selected_dish] = dish;
                 println!("State loaded from {}", filename);
             }
             Err(e) => eprintln!("Failed to load state: {}", e),
         }
     }
+
+    fn load_population_snapshot(&mut self, filename: &str) {
+        match PopulationSnapshot::read_from_path(filename) {
+            Ok(snapshot) => {
+                let dish_id = self.selected_dish;
+                match PetriDish::from_population_snapshot(
+                    dish_id,
+                    snapshot,
+                    self.config.clone(),
+                    self.config_hex_size,
+                    self.interactive_radius,
+                    Some(PathBuf::from(filename)),
+                ) {
+                    Ok(dish) => {
+                        self.config = dish.simulation.config.clone();
+                        if let Some(slot) = self.petri_dishes.get_mut(dish_id) {
+                            *slot = dish;
+                        }
+                        self.selected_individual_id = None;
+                        self.selected_hex = None;
+                        self.paused = true;
+                        println!("Loaded population snapshot from {}", filename);
+                    }
+                    Err(e) => eprintln!("Failed to build dish from snapshot: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Failed to load snapshot {}: {}", filename, e),
+        }
+    }
 }
 
 impl eframe::App for EvolutionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.maybe_export_selected_brain();
+
         // Top menu bar
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -832,14 +2016,27 @@ impl eframe::App for EvolutionApp {
                     if ui.button("New Simulation").clicked() {
                         self.restart_simulation();
                     }
+                    if ui.button("➕ Add Petri Dish").clicked() {
+                        self.add_petri_dish();
+                    }
+                    if ui.button("🧬 Initialize Population").clicked() {
+                        self.initialize_population();
+                    }
+                    ui.separator();
                     if ui.button("Config Editor").clicked() {
                         self.show_config_editor = true;
                     }
                     if ui.button("Save State").clicked() {
                         self.save_state("simulation_state.json");
                     }
+                    if ui.button("Open Session Folder").clicked() {
+                        open_session_folder(&self.session_dir);
+                    }
                     if ui.button("Load State").clicked() {
                         self.load_state("simulation_state.json");
+                    }
+                    if ui.button("Load Snapshot (goo_gpu_demo)").clicked() {
+                        self.load_population_snapshot("../output/goo_gpu_demo/snapshot.cbor");
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
@@ -850,6 +2047,27 @@ impl eframe::App for EvolutionApp {
                 ui.menu_button("View", |ui| {
                     ui.checkbox(&mut self.show_nn_diagram, "Show Neural Network");
                     ui.checkbox(&mut self.show_cladogram, "Show Cladogram");
+                    ui.checkbox(&mut self.show_run_config, "Show Run Configuration")
+                        .on_hover_text("Headless run config for the active dish (right panel)");
+                    ui.separator();
+                    ui.checkbox(&mut self.show_all_dishes, "Show All Dishes")
+                        .on_hover_text("Arena grid of dish previews (heavier to draw)");
+                    ui.checkbox(&mut self.simulate_all_dishes, "Simulate All Dishes")
+                        .on_hover_text(
+                            "Step every loaded dish each frame. Off = only the selected dish (faster in arena mode).",
+                        );
+                    ui.separator();
+                    ui.label("Hex background");
+                    ui.selectable_value(
+                        &mut self.hex_background_mode,
+                        HexBackgroundMode::Resources,
+                        "Resource distribution",
+                    );
+                    ui.selectable_value(
+                        &mut self.hex_background_mode,
+                        HexBackgroundMode::Competition,
+                        "Competition heatmap (population)",
+                    );
                 });
 
                 ui.separator();
@@ -869,26 +2087,64 @@ impl eframe::App for EvolutionApp {
                     self.step_simulation();
                 }
 
+                if ui.button("⏮ Step Back").clicked() {
+                    self.step_back_simulation();
+                }
+
                 if ui.button("🔄 Restart").clicked() {
                     self.restart_simulation();
                 }
 
                 ui.separator();
 
-                ui.label("Speed:");
-                ui.add(egui::Slider::new(&mut self.simulation_speed, 0.1..=10.0).text("x"));
+                ui.label("Env:");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.env_playback_speed,
+                        MovementSpeed::Slow,
+                        "Slow",
+                    )
+                    .on_hover_text("Ecology slow preset (0.2× medium env advance)");
+                    ui.selectable_value(
+                        &mut self.env_playback_speed,
+                        MovementSpeed::Medium,
+                        "Medium",
+                    )
+                    .on_hover_text("Ecology medium preset (1× env advance)");
+                    ui.selectable_value(
+                        &mut self.env_playback_speed,
+                        MovementSpeed::Fast,
+                        "Fast",
+                    )
+                    .on_hover_text("Ecology fast preset (5× medium env advance)");
+                });
 
-                ui.separator();
-
-                ui.checkbox(&mut self.show_all_dishes, "Show All Dishes");
-
-                if ui.button("➕ Add Petri Dish").clicked() {
-                    self.add_petri_dish();
-                }
-
-                if ui.button("🧬 Initialize Population").clicked() {
-                    self.initialize_population();
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("session {}", &self.session_id[..8.min(self.session_id.len())]))
+                            .weak()
+                            .monospace(),
+                    )
+                    .on_hover_text(format!(
+                        "Cite this interactive run as session {}\n{}",
+                        self.session_id,
+                        self.session_dir.display()
+                    ));
+                    ui.label(
+                        egui::RichText::new(build_info::VERSION_LABEL)
+                            .weak()
+                            .monospace(),
+                    )
+                    .on_hover_text("Viewer build — window title and Help also show this");
+                    ui.menu_button("Help", |ui| {
+                        ui.heading("About");
+                        ui.label(format!(
+                            "Interactive Viewer {}",
+                            build_info::VERSION_LABEL
+                        ));
+                        ui.label("Rebuild after code changes to pick up a new build id.");
+                    });
+                });
             });
         });
 
@@ -903,20 +2159,60 @@ impl eframe::App for EvolutionApp {
                     ui.label("Core");
                     ui.add(egui::Slider::new(&mut self.config.initial_population, 1..=1000).text("Initial Population"));
                     ui.add(egui::Slider::new(&mut self.config.seed, 0..=u32::MAX).text("Seed"));
-                    ui.add(egui::Slider::new(&mut self.config_radius_cells, 10..=220).text("Dish Radius (cells)"));
+                    ui.add(egui::Slider::new(&mut self.config_radius_cells, 5..=INTERACTIVE_MAX_DISH_RADIUS).text("Dish Radius (cells)"));
                     ui.add(egui::Slider::new(&mut self.config_hex_size, 4.0..=24.0).text("Hex Size"));
+
+                    ui.label("Dynamics");
+                    let mut dynamics_changed = false;
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.max_population, 10..=50000)
+                                .text("Max Population"),
+                        )
+                        .changed();
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.reproduction_threshold, 1.0..=100.0)
+                                .text("Reproduction Threshold"),
+                        )
+                        .changed();
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.reproduction_cost, 0.0..=50.0)
+                                .text("Reproduction Cost"),
+                        )
+                        .changed();
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.basal_metabolic_cost, 0.0..=0.5)
+                                .text("Basal Metabolic Cost"),
+                        )
+                        .changed();
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.maintenance_cost_per_node, 0.0..=0.2)
+                                .text("Maintenance / Node"),
+                        )
+                        .changed();
+                    dynamics_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.config.death_risk, 0.0..=0.01)
+                                .text("Death Risk"),
+                        )
+                        .changed();
+                    if dynamics_changed {
+                        self.sync_dynamics_to_selected_dish();
+                    }
 
                     ui.separator();
                     ui.label("Neural Network");
                     ui.add(egui::Slider::new(&mut self.config.nn_nodes, 1..=128).text("Hidden Nodes"));
                     ui.add(egui::Slider::new(&mut self.config.nn_layers, 1..=2).text("Hidden Layers"));
                     ui.add(egui::Slider::new(&mut self.config.nn_nodes2, 0..=128).text("Second Hidden Nodes"));
-                    ui.label("NN Inputs are auto-enforced to 8 in interactive mode (6 edges + occupancy + internal resources).");
+                    ui.label("Sensors: 8 channels (6 edge resources + occupancy + internal resources) feed each individual's evolved brain (MLP, GoO graph, spatial graph, etc.).");
 
                     ui.separator();
-                    ui.label("Dynamics");
-                    ui.add(egui::Slider::new(&mut self.config.reproduction_threshold, 1.0..=100.0).text("Reproduction Threshold"));
-                    ui.add(egui::Slider::new(&mut self.config.reproduction_cost, 0.0..=50.0).text("Reproduction Cost"));
+                    ui.label("Evolution");
                     ui.add(egui::Slider::new(&mut self.config.mutation_rate, 0.0..=1.0).text("Mutation Rate"));
                     ui.add(egui::Slider::new(&mut self.config.mutation_sigma, 0.0..=2.0).text("Mutation Sigma"));
                     ui.add(egui::Slider::new(&mut self.config.movement_cost_factor, 0.0..=10.0).text("Movement Cost"));
@@ -952,6 +2248,7 @@ impl eframe::App for EvolutionApp {
 
             ui.separator();
 
+            let prev_dish = self.selected_dish;
             egui::ComboBox::from_label("Active Dish")
                 .selected_text(format!("Dish {}", self.selected_dish))
                 .show_ui(ui, |ui| {
@@ -959,24 +2256,64 @@ impl eframe::App for EvolutionApp {
                         ui.selectable_value(&mut self.selected_dish, i, &dish.name);
                     }
                 });
+            if self.selected_dish != prev_dish {
+                self.pull_dynamics_from_selected_dish();
+            }
 
             ui.separator();
 
             ui.label("Simulation Settings");
-            ui.add(egui::Slider::new(&mut self.config.initial_population, 1..=100)
-                .text("Initial Population"));
+            let mut dynamics_changed = false;
+            dynamics_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.config.initial_population, 1..=1000)
+                        .text("Initial Population"),
+                )
+                .changed();
+            dynamics_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.config.max_population, 10..=50000)
+                        .text("Max Population"),
+                )
+                .changed();
+            dynamics_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.config.reproduction_threshold, 1.0..=100.0)
+                        .text("Repro Threshold"),
+                )
+                .changed();
+            dynamics_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.config.reproduction_cost, 0.0..=50.0)
+                        .text("Repro Cost"),
+                )
+                .changed();
+            dynamics_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.config.basal_metabolic_cost, 0.0..=0.5)
+                        .text("Basal Metabolic"),
+                )
+                .changed();
+            if dynamics_changed {
+                self.sync_dynamics_to_selected_dish();
+            }
             ui.add(egui::Slider::new(&mut self.timesteps_per_frame, 1..=10)
                 .text("Steps per Frame"));
             ui.add(egui::Slider::new(&mut self.move_threshold, -2.0..=2.0)
                 .text("Move Threshold"));
-            ui.add(egui::Slider::new(&mut self.zoom, 0.25..=3.0)
-                .text("Zoom"));
 
             ui.separator();
 
-            if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+            let dish_idx = self.selected_dish;
+            let extant_expanded = &mut self.extant_lineages_expanded;
+            let selected_id = &mut self.selected_individual_id;
+            if let Some(dish) = self.petri_dishes.get(dish_idx) {
                 ui.heading("Statistics");
                 ui.label(format!("Individuals: {}", dish.simulation.individuals.len()));
+                let max_pop = dish.simulation.config.max_population;
+                if max_pop > 0 {
+                    ui.label(format!("Population cap: {}/{}", dish.simulation.individuals.len(), max_pop));
+                }
                 ui.label(format!("Timestep: {}", dish.timestep));
                 let (generations, generation_time) = Self::generation_metrics(dish);
                 ui.label(format!("Generations: {}", generations));
@@ -988,6 +2325,9 @@ impl eframe::App for EvolutionApp {
                 ui.label(format!("Move Threshold: {:.2}", self.move_threshold));
                 ui.label(format!("Avg Move Signal (last step): {:.3}", dish.last_avg_move_signal));
 
+                ui.separator();
+                Self::draw_extant_genotypes_panel(extant_expanded, selected_id, ui, dish);
+
                 // Display selected hex information
                 if let Some(hex_coord) = self.selected_hex {
                     match dish.hex_grid.get_cell(hex_coord) {
@@ -998,28 +2338,35 @@ impl eframe::App for EvolutionApp {
                             
                             let pop_density = cell.individual_indices.len();
                             ui.label(format!("Population: {}", pop_density));
-                            
-                            // Calculate approximate resources per individual per timestep
+
                             let resource_level = cell.resource_level;
-                            let resources_per_ind = if pop_density > 0 {
-                                resource_level / pop_density as f64
+                            if self.hex_background_mode == HexBackgroundMode::Competition {
+                                let max_occ = max_cell_occupancy(&dish.hex_grid.cells);
+                                if max_occ > 0 {
+                                    let pct = 100.0 * pop_density as f64 / max_occ as f64;
+                                    ui.label(format!("Competition intensity: {pct:.0}% of dish peak"));
+                                }
+                                ui.label(format!("Resource Level: {:.2}", resource_level));
                             } else {
-                                resource_level
-                            };
-                            ui.label(format!("Resource Level: {:.2}", resource_level));
-                            ui.label(format!("Resources/Individual: {:.2}", resources_per_ind));
+                                let resources_per_ind = if pop_density > 0 {
+                                    resource_level / pop_density as f64
+                                } else {
+                                    resource_level
+                                };
+                                ui.label(format!("Resource Level: {:.2}", resource_level));
+                                ui.label(format!("Resources/Individual: {:.2}", resources_per_ind));
+                            }
                             
                             // Display unique lineage colors present in this hex
                             if !cell.individual_indices.is_empty() {
                             ui.separator();
                             ui.label("Lineages in this hex:");
 
-                            let lineage_colors = Self::sorted_lineages_in_cell(dish, cell);
+                            let lineage_rows = Self::sorted_lineages_in_cell(dish, cell);
 
                             // Display each lineage with a button to select a random individual
-                            for (color, individual_indices) in lineage_colors {
+                            for row in lineage_rows {
                                 ui.horizontal(|ui| {
-                                    // Color swatch
                                     let color_rect = egui::Rect::from_min_size(
                                         ui.cursor().min,
                                         egui::vec2(16.0, 16.0),
@@ -1031,15 +2378,14 @@ impl eframe::App for EvolutionApp {
                                     color_painter.rect_filled(
                                         color_resp.rect,
                                         2.0,
-                                        egui::Color32::from_rgb(color[0], color[1], color[2]),
+                                        egui::Color32::from_rgb(row.color[0], row.color[1], row.color[2]),
                                     );
                                     
-                                    ui.label(format!("Count: {}", individual_indices.len()));
+                                    ui.label(format!("Count: {}", row.pop));
                                     
-                                    // Button to select random individual from this lineage
                                     if ui.small_button("Select Random").clicked() {
                                         use rand::seq::SliceRandom;
-                                        if let Some(&random_idx) = individual_indices.as_slice().choose(&mut rand::thread_rng()) {
+                                        if let Some(&random_idx) = row.member_indices.as_slice().choose(&mut rand::thread_rng()) {
                                             if let Some(ind) = dish.simulation.individuals.get(random_idx) {
                                                 self.selected_individual_id = Some(ind.id);
                                             }
@@ -1053,39 +2399,6 @@ impl eframe::App for EvolutionApp {
                             ui.label(format!("Selected hex ({}, {}) not found", hex_coord.q, hex_coord.r));
                         }
                     }
-                } else {
-                    ui.separator();
-                    ui.heading("Extant Lineages");
-                    let lineages = Self::sorted_extant_lineages(dish);
-                    if lineages.is_empty() {
-                        ui.label("No extant lineages yet.");
-                    } else {
-                        egui::ScrollArea::vertical()
-                            .max_height(260.0)
-                            .show(ui, |ui| {
-                                for (color, pop, movers) in lineages {
-                                    ui.horizontal(|ui| {
-                                        let (swatch_resp, swatch_painter) = ui.allocate_painter(
-                                            egui::vec2(16.0, 16.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        let center = swatch_resp.rect.center();
-                                        let hex = hexagon_points(center, 6.5);
-                                        swatch_painter.add(egui::Shape::convex_polygon(
-                                            hex,
-                                            egui::Color32::from_rgb(color[0], color[1], color[2]),
-                                            egui::Stroke::new(0.8, egui::Color32::BLACK),
-                                        ));
-
-                                        let movers_text = match movers {
-                                            Some(v) => format!("~ movers: {}", v),
-                                            None => "~ movers: n/a".to_string(),
-                                        };
-                                        ui.label(format!("pop: {} | {}", pop, movers_text));
-                                    });
-                                }
-                            });
-                    }
                 }
 
                 if let Some(idx) = self.selected_individual_index(dish) {
@@ -1096,6 +2409,16 @@ impl eframe::App for EvolutionApp {
                         ui.label(format!("Resources: {:.2}", ind.resources));
                         ui.label(format!("Age: {}", ind.age));
                         ui.label(format!("Position: {}", ind.position));
+                        ui.label(format!("Genotype: {}", genotype_signature(ind)));
+                        ui.label(format!("Brain: {}", ind.brain.kind().as_str()));
+                        draw_brain_json_export_ui(
+                            ui,
+                            &self.session_id,
+                            self.last_brain_export_path.as_ref(),
+                        );
+                        ui.collapsing("Neural network diagram", |ui| {
+                            nn_viz::draw_brain_panel(ui, &ind.brain);
+                        });
                         let lineage_hex = format!(
                             "#{:02X}{:02X}{:02X}",
                             ind.lineage_color[0], ind.lineage_color[1], ind.lineage_color[2]
@@ -1121,49 +2444,52 @@ impl eframe::App for EvolutionApp {
             }
         });
 
-        // Right panel - Neural Network / Cladogram
-        if self.show_nn_diagram || self.show_cladogram {
+        // Right panel - Neural Network / Cladogram / Run config
+        if self.show_nn_diagram || self.show_cladogram || self.show_run_config {
             egui::SidePanel::right("viz_panel")
                 .min_width(400.0)
                 .resizable(true)
                 .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                 if self.show_nn_diagram {
                     ui.heading("Neural Network");
-                    
+
                     if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
                         if let Some(idx) = self.selected_individual_index(dish) {
                             if let Some(ind) = dish.simulation.individuals.get(idx) {
-                                let available = ui.available_size();
-                                let rect = egui::Rect::from_min_size(
-                                    ui.cursor().min,
-                                    egui::vec2(available.x - 20.0, 300.0),
-                                );
-                                
-                                let (response, painter) = ui.allocate_painter(
-                                    rect.size(),
-                                    egui::Sense::hover(),
-                                );
-                                
-                                nn_viz::draw_neural_network(ui, &ind.nn, &painter, response.rect);
-                                
-                                ui.add_space(310.0);
-                                
-                                // Show some weight statistics
+                                nn_viz::draw_brain_panel(ui, &ind.brain);
                                 ui.separator();
-                                ui.label("Weight Statistics:");
-                                let (nodes, inputs, nodes2, layers) = ind.nn.shape();
-                                ui.label(format!("Architecture: {}x{} (layers: {})", nodes, inputs, layers));
-                                if nodes2 > 0 {
-                                    ui.label(format!("Hidden2: {}", nodes2));
-                                }
+                                ui.label(format!("Brain kind: {}", ind.brain.kind().as_str()));
+                                ui.label(format!("Structure: {}", ind.brain.structure_signature()));
+                                ui.label(format!("Complexity: {} nodes", ind.complexity()));
+                                draw_brain_json_export_ui(
+                                    ui,
+                                    &self.session_id,
+                                    self.last_brain_export_path.as_ref(),
+                                );
                             } else {
                                 ui.label("Select an individual to see its neural network");
                             }
                         } else {
-                            ui.label("Select an individual to see its neural network");
+                            ui.label("Click an individual on the dish (or use Select Random in Extant Genotypes).");
                         }
                     } else {
                         ui.label("Select an individual to see its neural network");
+                    }
+                }
+
+                if self.show_run_config {
+                    if self.show_nn_diagram || self.show_cladogram {
+                        ui.separator();
+                    }
+                    if let Some(dish) = self.petri_dishes.get(self.selected_dish) {
+                        draw_dish_run_config_panel(ui, dish);
+                    } else {
+                        ui.heading("Run Configuration");
+                        ui.label("No active dish.");
                     }
                 }
 
@@ -1497,28 +2823,34 @@ impl eframe::App for EvolutionApp {
                         self.phylogeny_last_y_rank = y_rank;
                     }
                 }
+                });
             });
         }
 
         // Central panel - Main visualization
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.show_all_dishes {
-                ui.heading("All Petri Dishes");
-                ui.label("Click a dish preview to make it active.");
-                let cols = 2usize;
+                ui.heading("Arena — All Petri Dishes");
+                ui.label("Click a dish preview to select it. Drag individuals on the sandbox dish.");
+                let cols = 2usize.max((self.petri_dishes.len() + 1) / 2);
                 egui::Grid::new("all_dishes_grid")
-                    .num_columns(cols)
+                    .num_columns(cols.min(3))
                     .spacing([12.0, 10.0])
                     .show(ui, |ui| {
                         let total = self.petri_dishes.len();
-                        let tile_size = egui::vec2(300.0, 220.0);
+                        let tile_size = egui::vec2(320.0, 240.0);
                         for i in 0..total {
                             ui.vertical(|ui| {
-                                let selected_marker = if i == self.selected_dish { "*" } else { "" };
-                                ui.label(format!("{} {}", selected_marker, self.petri_dishes[i].name));
+                                let dish = &self.petri_dishes[i];
+                                let selected_marker = if i == self.selected_dish { "▶ " } else { "  " };
+                                ui.heading(format!("{selected_marker}{}", dish.name));
+                                ui.label(dish_info_line(dish));
+                                if dish.is_sandbox {
+                                    ui.colored_label(egui::Color32::LIGHT_YELLOW, "Manual experiment dish");
+                                }
                                 self.draw_dish_thumbnail(ui, i, tile_size);
                             });
-                            if i % cols == cols - 1 {
+                            if (i + 1) % cols.min(3) == 0 {
                                 ui.end_row();
                             }
                         }
@@ -1532,9 +2864,53 @@ impl eframe::App for EvolutionApp {
                 return;
             };
 
-            ui.heading(&dish_name);
+            let is_sandbox = self
+                .petri_dishes
+                .get(self.selected_dish)
+                .map(|d| d.is_sandbox)
+                .unwrap_or(false);
+            let dish_info = self
+                .petri_dishes
+                .get(self.selected_dish)
+                .map(dish_info_line)
+                .unwrap_or_default();
+            let selected_dish_idx = self.selected_dish;
 
-            // Get dish data before the closure
+            ui.heading(&dish_name);
+            ui.horizontal(|ui| {
+                ui.label(&dish_info);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("+").on_hover_text("Zoom in").clicked() {
+                        self.zoom = (self.zoom + 0.15).min(3.0);
+                    }
+                    ui.label(format!("{:.0}%", self.zoom * 100.0));
+                    if ui.small_button("−").on_hover_text("Zoom out").clicked() {
+                        self.zoom = (self.zoom - 0.15).max(0.25);
+                    }
+                    ui.label("Zoom:");
+                });
+            });
+            if self.hex_background_mode == HexBackgroundMode::Competition {
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 140, 80),
+                    "Background: competition heatmap (dark = empty, warm = crowded)",
+                );
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(170, 170, 120),
+                    "Background: environmental resource distribution",
+                );
+            }
+            if is_sandbox {
+                let seed = ui.button("Seed random population").clicked();
+                if seed {
+                    if let Some(d) = self.petri_dishes.get_mut(selected_dish_idx) {
+                        d.init_population(d.simulation.config.initial_population as usize);
+                    }
+                }
+                ui.label("Drag individuals within this dish to reposition them.");
+            }
+
             let dish_opt = self.petri_dishes.get(self.selected_dish);
             if dish_opt.is_none() {
                 return;
@@ -1568,6 +2944,10 @@ impl eframe::App for EvolutionApp {
             let cells = &dish.hex_grid.cells;
             let individuals = &dish.simulation.individuals;
             let selected_ind_id = self.selected_individual_id;
+            let move_trails = &dish.move_trails;
+            let active_coords = &dish.active_coords;
+            let max_occupants = max_cell_occupancy(cells);
+            let bg_mode = self.hex_background_mode;
 
             let mut clicked_hex: Option<HexCoord> = None;
             let mut dragged_hex: Option<HexCoord> = None;
@@ -1587,20 +2967,22 @@ impl eframe::App for EvolutionApp {
                     let local_y = (y - min_y + padding) * scale;
                     let screen_pos = response.rect.min + egui::vec2(local_x, local_y);
 
-                    // Draw hexagon
+                    // Draw hexagon background (resources or competition heatmap)
                     let hex_points = hexagon_points(screen_pos, hex_size * scale);
-                    
-                    // Color based on resource level (light = resource)
-                    let brightness = (cell.resource_level * 255.0).min(255.0).max(0.0) as u8;
-                    let color = egui::Color32::from_rgb(brightness, brightness, 100);
-                    
+                    let color = hex_background_color(
+                        bg_mode,
+                        cell.resource_level,
+                        cell.individual_indices.len(),
+                        max_occupants,
+                    );
+
                     painter.add(egui::Shape::convex_polygon(
                         hex_points,
                         color,
                         egui::Stroke::new(0.5, egui::Color32::GRAY),
                     ));
 
-                    // Draw hex occupant marker using dominant lineage color.
+                    // In competition mode, still show lineage dots; in resource mode same as before.
                     if let Some(dom) = Self::dominant_lineage_color(dish, cell) {
                         painter.circle_filled(
                             screen_pos,
@@ -1624,6 +3006,46 @@ impl eframe::App for EvolutionApp {
                             }
                         }
                     }
+                }
+
+                for trail in move_trails {
+                    let alpha = (1.0_f32 - trail.age as f32 / TRAIL_MAX_AGE as f32).clamp(0.0, 1.0);
+                    if alpha <= 0.0 {
+                        continue;
+                    }
+                    let Some(from_coord) = active_coords.get(trail.from_pos) else {
+                        continue;
+                    };
+                    let Some(to_coord) = active_coords.get(trail.to_pos) else {
+                        continue;
+                    };
+                    let from_px = from_coord.to_pixel(hex_size);
+                    let to_px = to_coord.to_pixel(hex_size);
+                    let from_screen = response.rect.min
+                        + egui::vec2(
+                            (from_px.0 - min_x + padding) * scale,
+                            (from_px.1 - min_y + padding) * scale,
+                        );
+                    let to_screen = response.rect.min
+                        + egui::vec2(
+                            (to_px.0 - min_x + padding) * scale,
+                            (to_px.1 - min_y + padding) * scale,
+                        );
+                    let color = egui::Color32::from_rgba_unmultiplied(
+                        trail.color[0],
+                        trail.color[1],
+                        trail.color[2],
+                        (alpha * 180.0) as u8,
+                    );
+                    painter.line_segment(
+                        [from_screen, to_screen],
+                        egui::Stroke::new((2.0 * scale).max(1.0), color),
+                    );
+                    painter.circle_filled(
+                        from_screen,
+                        (2.0 * scale).max(1.5),
+                        color,
+                    );
                 }
 
                 // Handle clicks for selection
@@ -1714,10 +3136,24 @@ impl eframe::App for EvolutionApp {
             }
         });
 
-        // Run simulation if not paused
+        // Run simulation if not paused (~24 FPS)
+        let frame_interval = Duration::from_secs_f32(1.0 / TARGET_FPS);
         if !self.paused {
-            self.step_simulation();
-            ctx.request_repaint();
+            let now = Instant::now();
+            let should_step = match self.last_frame {
+                None => true,
+                Some(prev) => now.duration_since(prev) >= frame_interval,
+            };
+            if should_step {
+                self.step_simulation();
+                self.last_frame = Some(now);
+            }
+            if let Some(dish) = self.petri_dishes.get_mut(self.selected_dish) {
+                dish.age_move_trails();
+            }
+            ctx.request_repaint_after(frame_interval);
+        } else {
+            self.last_frame = None;
         }
     }
 }
@@ -1745,6 +3181,7 @@ mod tests {
         cfg.nn_nodes2 = 0;
         cfg.movement_cost_factor = 0.0;
         cfg.maintenance_cost_per_node = 0.0;
+        cfg.basal_metabolic_cost = 0.0;
         cfg.death_risk = 0.0;
         cfg.reproduction_threshold = 1e9;
 
@@ -1769,7 +3206,7 @@ mod tests {
         nn.biases[1] = direction_bias;
         nn.biases[2] = 2.0;
 
-        let mut ind = Individual::new(nn, center_idx, 1);
+        let mut ind = Individual::from_legacy_nn(nn, center_idx, 1);
         ind.resources = 10.0;
         dish.simulation.individuals.push(ind);
         dish.rebuild_hex_occupancy();
@@ -1786,7 +3223,7 @@ mod tests {
 
         for (direction_bias, expected_sector) in cases {
             let (mut dish, center) = make_direction_test_dish(direction_bias);
-            dish.step(-10.0);
+            dish.step(-10.0, 1.0);
 
             let pos_idx = dish.simulation.individuals[0].position;
             let moved_coord = dish.active_coords[pos_idx];
@@ -1811,7 +3248,7 @@ mod tests {
 
         // direction_bias=-5 yields a positive move signal via node 0+2,
         // but set threshold above that signal to suppress movement.
-        dish.step(2.0);
+        dish.step(2.0, 1.0);
 
         let pos_idx = dish.simulation.individuals[0].position;
         assert_eq!(pos_idx, center_idx, "individual should remain in place when move_signal <= threshold");

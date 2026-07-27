@@ -1,6 +1,12 @@
-use crate::config::Config;
+pub use crate::brain::gpu_pack::{DecisionRowGpu, PopulationBrainTensor};
+use crate::config::{Config, GridTopology};
+use crate::hex_dish::HexDishLayout;
+use crate::hex_simulation::grid_cell_count;
 use crate::individual::Individual;
+use crate::environment::Environment;
+use crate::step_engine::{self, DecisionRow};
 use crate::neural_network::NeuralNetwork;
+use cust::context::Context;
 use cust::error::CudaError;
 use cust::launch;
 use cust::memory::{CopyDestination, DeviceBuffer, DeviceCopy, DevicePointer};
@@ -13,6 +19,39 @@ use std::convert::TryFrom;
 use std::env;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+macro_rules! cuda_debug {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        eprintln!($($arg)*);
+    };
+}
+
+/// CUDA context + module kept alive for the process lifetime (`quick_init` context
+/// is destroyed on drop, which invalidates all subsequent driver API calls).
+struct CachedCudaRuntime {
+    _context: Context,
+    module: Module,
+}
+
+fn cached_cuda_module() -> Result<&'static Module, TensorKernelGpuError> {
+    static RUNTIME: OnceLock<Result<CachedCudaRuntime, String>> = OnceLock::new();
+    let result = RUNTIME.get_or_init(|| {
+        let ptx_path = tensor_kernel_ptx_path().map_err(|e| e.to_string())?;
+        cuda_debug!("[cuda] loading PTX from {:?}", ptx_path);
+        let context = quick_init().map_err(|e| e.to_string())?;
+        let module = Module::from_file(&ptx_path).map_err(|e| e.to_string())?;
+        Ok(CachedCudaRuntime {
+            _context: context,
+            module,
+        })
+    });
+    match result {
+        Ok(wrapper) => Ok(&wrapper.module),
+        Err(msg) => Err(TensorKernelGpuError::Init(msg.clone())),
+    }
+}
 
 include!(concat!(env!("OUT_DIR"), "/tensor_kernel_path.rs"));
 
@@ -23,7 +62,6 @@ include!(concat!(env!("OUT_DIR"), "/tensor_kernel_path.rs"));
 pub struct PopulationTensor {
     max_population: usize,
     active_count: usize,
-    base_seed: u64,
     nodes: usize,
     inputs: usize,
     nodes2: usize,
@@ -60,7 +98,6 @@ impl PopulationTensor {
         PopulationTensor {
             max_population: safe_max,
             active_count: 0,
-            base_seed: cfg.seed as u64,
             nodes,
             inputs,
             nodes2,
@@ -112,8 +149,8 @@ impl PopulationTensor {
         self.layers
     }
 
-    /// Prepare the tensor buffers from the supplied slice of individuals.
-    pub fn sync_from_individuals(&mut self, individuals: &[Individual]) {
+    /// Prepare metadata and MLP weights from individuals (non-MLP weights packed separately).
+    pub fn sync_metadata_from_individuals(&mut self, individuals: &[Individual]) {
         let count = individuals.len().min(self.max_population);
         self.record_active(count);
         for (row, ind) in individuals.iter().take(count).enumerate() {
@@ -121,7 +158,9 @@ impl PopulationTensor {
             self.positions[row] = ind.position;
             self.resources[row] = ind.resources;
             self.ages[row] = ind.age;
-            self.copy_nn_weights(row, &ind.nn);
+            if let Some(mlp) = ind.brain.as_mlp() {
+                self.copy_nn_weights(row, &mlp.nn);
+            }
         }
         for row in count..self.max_population {
             self.ids[row] = 0;
@@ -129,6 +168,11 @@ impl PopulationTensor {
             self.resources[row] = 0.0;
             self.ages[row] = 0;
         }
+    }
+
+    /// Prepare the tensor buffers from the supplied slice of individuals.
+    pub fn sync_from_individuals(&mut self, individuals: &[Individual]) {
+        self.sync_metadata_from_individuals(individuals);
     }
 
     pub fn ids_slice(&self) -> &[i32] {
@@ -181,31 +225,87 @@ impl PopulationTensor {
     }
 
     fn copy_back_nn_weights(ind: &mut Individual, tensor: &PopulationTensor, row: usize) {
-        copy_tensor_to_nn(&mut ind.nn, tensor, row);
+        if let Some(nn) = ind.nn_mut() {
+            copy_tensor_to_nn(nn, tensor, row);
+        }
     }
-    fn copy_nn_weights(&mut self, row: usize, nn: &NeuralNetwork) {
+    fn copy_padded(dst: &mut [f64], src: &[f64]) {
+        let n = dst.len().min(src.len());
+        dst[..n].copy_from_slice(&src[..n]);
+        if n < dst.len() {
+            dst[n..].fill(0.0);
+        }
+    }
+
+    pub fn copy_nn_weights(&mut self, row: usize, nn: &NeuralNetwork) {
         if self.layer1_stride > 0 {
             let base = row.saturating_mul(self.layer1_stride);
             let target = &mut self.nn_weights[base..base + self.layer1_stride];
-            target.copy_from_slice(&nn.weights[..self.layer1_stride]);
+            Self::copy_padded(target, &nn.weights);
             let bias_target = &mut self.nn_biases[base..base + self.layer1_stride];
-            bias_target.copy_from_slice(&nn.biases[..self.layer1_stride]);
+            Self::copy_padded(bias_target, &nn.biases);
         }
         if self.multi_stride > 0 {
             let base = row.saturating_mul(self.multi_stride);
             let target = &mut self.nn_weights_multi[base..base + self.multi_stride];
-            target.copy_from_slice(&nn.weights_multi[..self.multi_stride]);
+            Self::copy_padded(target, &nn.weights_multi);
         }
         if self.layer2_weights_stride > 0 {
             let base = row.saturating_mul(self.layer2_weights_stride);
             let target = &mut self.nn_weights2[base..base + self.layer2_weights_stride];
-            target.copy_from_slice(&nn.weights2[..self.layer2_weights_stride]);
+            Self::copy_padded(target, &nn.weights2);
         }
         if self.layer2_bias_stride > 0 {
             let base = row.saturating_mul(self.layer2_bias_stride);
             let target = &mut self.nn_biases2[base..base + self.layer2_bias_stride];
-            target.copy_from_slice(&nn.biases2[..self.layer2_bias_stride]);
+            Self::copy_padded(target, &nn.biases2);
         }
+    }
+
+    pub fn set_perceptron_row(
+        &mut self,
+        row: usize,
+        nodes: usize,
+        inputs: usize,
+        weights: &[f64],
+        biases: &[f64],
+    ) {
+        let nodes = nodes.min(self.nodes);
+        let inputs = inputs.min(self.inputs);
+        let layer1_base = row * self.layer1_stride;
+        let multi_base = row * self.multi_stride;
+        for i in 0..nodes {
+            self.nn_biases[layer1_base + i] = biases.get(i).copied().unwrap_or(0.0);
+            self.nn_weights[layer1_base + i] = 0.0;
+            for j in 0..inputs {
+                let idx = i * inputs + j;
+                self.nn_weights_multi[multi_base + idx] = weights.get(idx).copied().unwrap_or(0.0);
+            }
+        }
+    }
+
+    pub fn layer1_stride(&self) -> usize {
+        self.layer1_stride
+    }
+
+    pub fn multi_stride(&self) -> usize {
+        self.multi_stride
+    }
+
+    pub fn layer2_weights_stride(&self) -> usize {
+        self.layer2_weights_stride
+    }
+
+    pub fn layer2_bias_stride(&self) -> usize {
+        self.layer2_bias_stride
+    }
+
+    pub fn positions_host_u64(&self, count: usize) -> Vec<u64> {
+        self.positions
+            .iter()
+            .take(count)
+            .map(|&p| p as u64)
+            .collect()
     }
 }
 
@@ -282,251 +382,298 @@ fn copy_tensor_to_nn(nn: &mut NeuralNetwork, tensor: &PopulationTensor, row: usi
     }
 }
 
-fn build_individual_from_row(tensor: &PopulationTensor, row: usize) -> Individual {
-    let mut nn = NeuralNetwork::new(tensor.nodes, tensor.inputs, tensor.layers, tensor.nodes2);
-    copy_tensor_to_nn(&mut nn, tensor, row);
-    let mut ind = Individual::new(nn, tensor.positions[row], tensor.ids[row]);
-    ind.resources = tensor.resources[row];
-    ind.age = tensor.ages[row];
-    ind
+/// Persistent GPU buffers for brain forward (reallocated only when capacity grows).
+pub struct GpuForwardState {
+    capacity: usize,
+    env_buf: Option<DeviceBuffer<f64>>,
+    occupancy_buf: Option<DeviceBuffer<i32>>,
+    positions_buf: Option<DeviceBuffer<u64>>,
+    resources_buf: Option<DeviceBuffer<f64>>,
+    brain_kind_buf: Option<DeviceBuffer<u8>>,
+    layer1_weights_buf: Option<DeviceBuffer<f64>>,
+    layer1_biases_buf: Option<DeviceBuffer<f64>>,
+    multi_weights_buf: Option<DeviceBuffer<f64>>,
+    layer2_weights_buf: Option<DeviceBuffer<f64>>,
+    layer2_biases_buf: Option<DeviceBuffer<f64>>,
+    spatial_landmark_count_buf: Option<DeviceBuffer<i32>>,
+    spatial_edge_count_buf: Option<DeviceBuffer<i32>>,
+    spatial_edges_buf: Option<DeviceBuffer<i32>>,
+    spatial_edge_weights_buf: Option<DeviceBuffer<f64>>,
+    spatial_readout_weights_buf: Option<DeviceBuffer<f64>>,
+    spatial_readout_biases_buf: Option<DeviceBuffer<f64>>,
+    spatial_landmark_sectors_buf: Option<DeviceBuffer<u8>>,
+    spatial_learn_rate_buf: Option<DeviceBuffer<f64>>,
+    spatial_message_passes_buf: Option<DeviceBuffer<i32>>,
+    spatial_runtime_buf: Option<DeviceBuffer<f64>>,
+    goo_node_count_buf: Option<DeviceBuffer<i32>>,
+    goo_ops_buf: Option<DeviceBuffer<u8>>,
+    goo_parent_count_buf: Option<DeviceBuffer<u8>>,
+    goo_parents_buf: Option<DeviceBuffer<i32>>,
+    goo_params_buf: Option<DeviceBuffer<f64>>,
+    dish_neighbors_buf: Option<DeviceBuffer<i32>>,
+    decision_buf: Option<DeviceBuffer<DecisionRowGpu>>,
 }
 
-/// Stubbed "GPU" kernel that reads from the tensor buffers, performs the NN
-/// decision (currently on the CPU), and writes the outcomes back into the
-/// same tensor so `apply_to_individuals` can sync the results to the CPU
-/// `Vec<Individual>` before the rest of the run uses them.
-///
-/// The eventual CUDA entry point is declared in `rust/cuda/tensor_kernel.cu`
-/// with the following signature so the Rust side can launch it with the same
-/// parameters that `run_tensor_kernel` accepts now:
-///
-/// extern "C" __global__ void tensor_step_kernel(
-///     int active_count,
-///     int env_width,
-///     const double* env_resources,
-///     const int32_t* occupancy,
-///     bool use_occupancy,
-///     double movement_cost_factor,
-///     int nodes,
-///     int inputs,
-///     int nodes2,
-///     int layers,
-///     const uint64_t* row_seeds,
-///     int layer1_stride,
-///     int multi_stride,
-///     int layer2_weights_stride,
-///     int layer2_bias_stride,
-///     const int32_t* ids,
-///     uint64_t* positions,
-///     double* resources,
-///     int32_t* ages,
-///     double* layer1_weights,
-///     double* layer1_biases,
-///     double* multi_weights,
-///     double* layer2_weights,
-///     double* layer2_biases,
-///     double* hidden_buf,
-///     double* out2_buf,
-///     double* last_spend,
-///     int32_t* last_delta,
-///     int32_t* last_movers_out
-/// );
-pub fn run_tensor_kernel(
-    tensor: &mut PopulationTensor,
+impl GpuForwardState {
+    pub fn new() -> Self {
+        GpuForwardState {
+            capacity: 0,
+            env_buf: None,
+            occupancy_buf: None,
+            positions_buf: None,
+            resources_buf: None,
+            brain_kind_buf: None,
+            layer1_weights_buf: None,
+            layer1_biases_buf: None,
+            multi_weights_buf: None,
+            layer2_weights_buf: None,
+            layer2_biases_buf: None,
+            spatial_landmark_count_buf: None,
+            spatial_edge_count_buf: None,
+            spatial_edges_buf: None,
+            spatial_edge_weights_buf: None,
+            spatial_readout_weights_buf: None,
+            spatial_readout_biases_buf: None,
+            spatial_landmark_sectors_buf: None,
+            spatial_learn_rate_buf: None,
+            spatial_message_passes_buf: None,
+            spatial_runtime_buf: None,
+            goo_node_count_buf: None,
+            goo_ops_buf: None,
+            goo_parent_count_buf: None,
+            goo_parents_buf: None,
+            goo_params_buf: None,
+            dish_neighbors_buf: None,
+            decision_buf: None,
+        }
+    }
+}
+
+unsafe impl DeviceCopy for DecisionRowGpu {}
+
+/// GPU forward with CPU fallback using shared step_engine semantics.
+pub fn run_brain_forward(
+    tensor: &mut PopulationBrainTensor,
+    individuals: &mut [Individual],
     env_resources: &[f64],
     occupancy: &[i32],
     config: &Config,
-    row_rng: &RowRngManager,
     hidden_buf: &mut [f64],
     out2_buf: &mut [f64],
-    last_spend: &mut [f64],
-    last_delta: &mut [i32],
-    last_movers: &mut usize,
-) {
+    gpu_state: &mut GpuForwardState,
+    dish: Option<&HexDishLayout>,
+) -> (Vec<DecisionRow>, bool) {
     let count = tensor.active_count();
     if count == 0 {
-        *last_movers = 0;
-        return;
+        return (Vec::new(), false);
     }
-    let width = env_resources.len().max(1);
-    for slot in last_spend.iter_mut().take(count) {
-        *slot = 0.0;
-    }
-    for slot in last_delta.iter_mut().take(count) {
-        *slot = 0;
-    }
-    *last_movers = 0;
 
-    eprintln!("[DEBUG] attempting GPU path for {} rows", count);
-    if let Err(err) = run_tensor_kernel_gpu(
-        tensor,
-        env_resources,
-        occupancy,
-        config,
-        row_rng,
-        hidden_buf,
-        out2_buf,
-        last_spend,
-        last_delta,
-        last_movers,
-        count,
-        width,
-    ) {
-        if let TensorKernelGpuError::Cuda(cuda_err) = &err {
-            eprintln!(
-                "[DEBUG] raw CUDA error: {:?} ({})",
-                cuda_err, cuda_err
-            );
-        }
-        eprintln!(
-            "tensor_step_kernel launch failed ({}); falling back to CPU stub",
-            err
-        );
-        run_tensor_kernel_cpu(
-            tensor,
-            env_resources,
-            occupancy,
-            config,
-            row_rng,
-            hidden_buf,
-            out2_buf,
-            last_spend,
-            last_delta,
-            last_movers,
-            count,
-            width,
-        );
-    }
-}
-
-fn run_tensor_kernel_cpu(
-    tensor: &mut PopulationTensor,
-    env_resources: &[f64],
-    occupancy: &[i32],
-    config: &Config,
-    row_rng: &RowRngManager,
-    hidden_buf: &mut [f64],
-    out2_buf: &mut [f64],
-    last_spend: &mut [f64],
-    last_delta: &mut [i32],
-    last_movers: &mut usize,
-    count: usize,
-    width: usize,
-) {
-    let width = width.max(1);
-    for row in 0..count {
-        let mut ind = build_individual_from_row(tensor, row);
-        let pos = ind.position % width;
-        let left_idx = if pos == 0 { width - 1 } else { pos - 1 };
-        let right_idx = (pos + 1) % width;
-        let center = env_resources.get(pos).copied().unwrap_or(0.0);
-        let left = env_resources.get(left_idx).copied().unwrap_or(center);
-        let right = env_resources.get(right_idx).copied().unwrap_or(center);
-        let local_population = if config.nn_use_occupancy {
-            occupancy[pos]
-        } else {
-            0
-        };
-        let mut rng = row_rng
-            .rng_for(row)
-            .unwrap_or_else(|| StdRng::seed_from_u64(tensor.base_seed.wrapping_add(row as u64)));
-        let out = ind.act(
-            left,
-            center,
-            right,
-            local_population,
-            config.movement_cost_factor,
-            &mut rng,
-            hidden_buf,
-            out2_buf,
-        );
-        if out != 0.0 {
-            let delta = out.round() as i32;
-            last_spend[row] = out.abs();
-            last_delta[row] = delta;
-            *last_movers = last_movers.saturating_add(1);
-            let width_i64 = width as i64;
-            let mut new_position = ind.position as i64 + delta as i64;
-            new_position %= width_i64;
-            if new_position < 0 {
-                new_position += width_i64;
+    cuda_debug!("[cuda] brain forward for {} rows", count);
+    match run_brain_forward_gpu(tensor, env_resources, occupancy, config, gpu_state, count, dish) {
+        Ok(decisions) => (decisions, true),
+        Err(err) => {
+            static GPU_FAIL_LOGS: std::sync::atomic::AtomicU32 =
+                std::sync::atomic::AtomicU32::new(0);
+            let n = GPU_FAIL_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 5 || n % 1000 == 0 {
+                eprintln!(
+                    "brain_step_kernel failed ({}); falling back to CPU forward (occurrence #{})",
+                    err,
+                    n + 1
+                );
             }
-            ind.position = new_position as usize;
+            (
+                run_brain_forward_cpu(
+                    individuals,
+                    env_resources,
+                    occupancy,
+                    config,
+                    hidden_buf,
+                    out2_buf,
+                    dish,
+                ),
+                false,
+            )
         }
-        tensor.resources[row] = ind.resources;
-        tensor.positions[row] = ind.position;
     }
 }
 
-fn run_tensor_kernel_gpu(
-    tensor: &mut PopulationTensor,
+fn run_brain_forward_cpu(
+    individuals: &mut [Individual],
     env_resources: &[f64],
     occupancy: &[i32],
     config: &Config,
-    row_rng: &RowRngManager,
     hidden_buf: &mut [f64],
     out2_buf: &mut [f64],
-    last_spend: &mut [f64],
-    last_delta: &mut [i32],
-    last_movers: &mut usize,
-    count: usize,
-    width: usize,
-) -> Result<(), TensorKernelGpuError> {
-    let ptx_path = tensor_kernel_ptx_path()?;
-    eprintln!("[DEBUG] loading PTX from {:?}", ptx_path);
-    let _context = quick_init()?;
-    eprintln!("[DEBUG] CUDA context initialized");
-    let module = Module::from_file(&ptx_path)?;
-    eprintln!("[DEBUG] module loaded");
-    let function = module.get_function("tensor_step_kernel")?;
-    eprintln!("[DEBUG] function resolved");
-    let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
-    eprintln!("[DEBUG] stream created");
-
-    let row_seeds = row_rng.seeds_slice();
-    if row_seeds.len() < count {
-        return Err(TensorKernelGpuError::InsufficientSeeds {
-            requested: count,
-            available: row_seeds.len(),
-        });
+    dish: Option<&HexDishLayout>,
+) -> Vec<DecisionRow> {
+    let cell_count = grid_cell_count(config);
+    let env = make_env_view(env_resources, cell_count);
+    let mut decisions = Vec::with_capacity(individuals.len());
+    for ind in individuals.iter_mut() {
+        let pos = ind.position % cell_count;
+        let local_pop = occupancy.get(pos).copied().unwrap_or(1);
+        let edges =
+            step_engine::edge_resources_for_position(config, &env, pos, cell_count, dish);
+        let center = env.resources.get(pos).copied().unwrap_or(0.0);
+        decisions.push(step_engine::forward_decision(
+            ind,
+            edges,
+            center,
+            local_pop,
+            config.movement_cost_factor,
+            config.resolved_movement_output_mode(),
+            hidden_buf,
+            out2_buf,
+        ));
     }
+    decisions
+}
 
-    let env_buf = DeviceBuffer::from_slice(env_resources)?;
-    eprintln!("[DEBUG] env buffer allocated");
-    let occupancy_buf = DeviceBuffer::from_slice(occupancy)?;
-    eprintln!("[DEBUG] occupancy buffer allocated");
-    let row_seeds_buf = DeviceBuffer::from_slice(&row_seeds[..count])?;
-    eprintln!("[DEBUG] row seeds buffer allocated");
-    let ids_buf = DeviceBuffer::from_slice(&tensor.ids[..count])?;
-    eprintln!("[DEBUG] ids buffer allocated");
-    let mut positions_host: Vec<u64> = tensor
-        .positions
-        .iter()
-        .take(count)
-        .map(|&p| p as u64)
-        .collect();
-    let positions_buf = DeviceBuffer::from_slice(&positions_host)?;
-    eprintln!("[DEBUG] positions buffer allocated");
-    let resources_buf = DeviceBuffer::from_slice(&tensor.resources[..count])?;
-    eprintln!("[DEBUG] resources buffer allocated");
-    let ages_buf = DeviceBuffer::from_slice(&tensor.ages[..count])?;
-    eprintln!("[DEBUG] ages buffer allocated");
-    let last_spend_buf = DeviceBuffer::from_slice(&last_spend[..count])?;
-    eprintln!("[DEBUG] last spend buffer allocated");
-    let last_delta_buf = DeviceBuffer::from_slice(&last_delta[..count])?;
-    eprintln!("[DEBUG] last delta buffer allocated");
-    let last_movers_buf = DeviceBuffer::from_slice(&[0i32])?;
-    eprintln!("[DEBUG] last movers buffer allocated");
+fn make_env_view(resources: &[f64], width: usize) -> Environment {
+    let w = width.max(1);
+    Environment {
+        width: w,
+        resources: resources.to_vec(),
+        perlin_base: vec![0.0; w],
+        perlin_time: 0.0,
+    }
+}
 
-    let layer1_weights_buf = optional_device_buffer(&tensor.layer1_weights_slice())?;
-    let layer1_biases_buf = optional_device_buffer(&tensor.layer1_biases_slice())?;
-    let multi_weights_buf = optional_device_buffer(&tensor.multi_weights_slice())?;
-    let layer2_weights_buf = optional_device_buffer(&tensor.layer2_weights_slice())?;
-    let layer2_biases_buf = optional_device_buffer(&tensor.layer2_biases_slice())?;
-    let hidden_buf_dev = optional_device_buffer(hidden_buf)?;
-    let out2_buf_dev = optional_device_buffer(out2_buf)?;
+fn run_brain_forward_gpu(
+    tensor: &mut PopulationBrainTensor,
+    env_resources: &[f64],
+    occupancy: &[i32],
+    config: &Config,
+    gpu_state: &mut GpuForwardState,
+    count: usize,
+    dish: Option<&HexDishLayout>,
+) -> Result<Vec<DecisionRow>, TensorKernelGpuError> {
+    let module = cached_cuda_module()?;
+    let function = module.get_function("brain_step_kernel")?;
+    let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
 
-    if let Err(err) = unsafe {
+    let base = &tensor.base;
+    let cell_count = grid_cell_count(config);
+    let grid_topology = if dish.is_some() {
+        2i32
+    } else {
+        match config.grid_topology {
+            GridTopology::Hex2d => 1i32,
+            GridTopology::Ring1d => 0i32,
+        }
+    };
+    let grid_height = if let Some(d) = dish {
+        d.bounding_size
+    } else if config.grid_height > 0 {
+        config.grid_height
+    } else {
+        config.grid_width
+    };
+    let grid_width = dish.map(|d| d.bounding_size).unwrap_or_else(|| config.grid_width.max(1));
+
+    let env_buf = sync_device_buffer(&mut gpu_state.env_buf, env_resources)?;
+    let occupancy_buf = sync_device_buffer(&mut gpu_state.occupancy_buf, occupancy)?;
+    let positions_host = base.positions_host_u64(count);
+    let positions_buf = sync_device_buffer(&mut gpu_state.positions_buf, &positions_host)?;
+    let resources_buf =
+        sync_device_buffer(&mut gpu_state.resources_buf, &base.resources[..count])?;
+    let brain_kind_buf =
+        sync_device_buffer(&mut gpu_state.brain_kind_buf, &tensor.brain_kind[..count])?;
+
+    let layer1_weights_buf = sync_device_buffer_opt(
+        &mut gpu_state.layer1_weights_buf,
+        base.layer1_weights_slice(),
+    )?;
+    let layer1_biases_buf =
+        sync_device_buffer_opt(&mut gpu_state.layer1_biases_buf, base.layer1_biases_slice())?;
+    let multi_weights_buf =
+        sync_device_buffer_opt(&mut gpu_state.multi_weights_buf, base.multi_weights_slice())?;
+    let layer2_weights_buf = sync_device_buffer_opt(
+        &mut gpu_state.layer2_weights_buf,
+        base.layer2_weights_slice(),
+    )?;
+    let layer2_biases_buf =
+        sync_device_buffer_opt(&mut gpu_state.layer2_biases_buf, base.layer2_biases_slice())?;
+
+    let spatial_landmark_count_buf = sync_device_buffer(
+        &mut gpu_state.spatial_landmark_count_buf,
+        &tensor.spatial_landmark_count[..count],
+    )?;
+    let spatial_edge_count_buf = sync_device_buffer(
+        &mut gpu_state.spatial_edge_count_buf,
+        &tensor.spatial_edge_count[..count],
+    )?;
+    let spatial_edges_buf = sync_device_buffer(
+        &mut gpu_state.spatial_edges_buf,
+        &tensor.spatial_edges[..count * tensor.max_edges * 3],
+    )?;
+    let spatial_edge_weights_buf = sync_device_buffer(
+        &mut gpu_state.spatial_edge_weights_buf,
+        &tensor.spatial_edge_weights[..count * tensor.max_edges],
+    )?;
+    let spatial_readout_weights_buf = sync_device_buffer(
+        &mut gpu_state.spatial_readout_weights_buf,
+        &tensor.spatial_readout_weights[..count * tensor.max_readout_features * 2],
+    )?;
+    let spatial_readout_biases_buf = sync_device_buffer(
+        &mut gpu_state.spatial_readout_biases_buf,
+        &tensor.spatial_readout_biases[..count * 2],
+    )?;
+    let spatial_landmark_sectors_buf = sync_device_buffer(
+        &mut gpu_state.spatial_landmark_sectors_buf,
+        &tensor.spatial_landmark_sectors[..count * tensor.max_brain_nodes],
+    )?;
+    let spatial_learn_rate_buf = sync_device_buffer(
+        &mut gpu_state.spatial_learn_rate_buf,
+        &tensor.spatial_learn_rate[..count],
+    )?;
+    let spatial_message_passes_buf = sync_device_buffer(
+        &mut gpu_state.spatial_message_passes_buf,
+        &tensor.spatial_message_passes[..count],
+    )?;
+    let spatial_runtime_buf = sync_device_buffer(
+        &mut gpu_state.spatial_runtime_buf,
+        &tensor.spatial_runtime[..count * tensor.max_brain_nodes * crate::brain::EMBED_DIM],
+    )?;
+
+    let goo_node_count_buf =
+        sync_device_buffer(&mut gpu_state.goo_node_count_buf, &tensor.goo_node_count[..count])?;
+    let goo_ops_buf = sync_device_buffer(
+        &mut gpu_state.goo_ops_buf,
+        &tensor.goo_ops[..count * tensor.max_brain_nodes],
+    )?;
+    let goo_parent_count_buf = sync_device_buffer(
+        &mut gpu_state.goo_parent_count_buf,
+        &tensor.goo_parent_count[..count * tensor.max_brain_nodes],
+    )?;
+    let goo_parents_buf = sync_device_buffer(
+        &mut gpu_state.goo_parents_buf,
+        &tensor.goo_parents[..count * tensor.max_brain_nodes * crate::brain::gpu_pack::MAX_GOO_PARENTS],
+    )?;
+    let goo_params_buf = sync_device_buffer(
+        &mut gpu_state.goo_params_buf,
+        &tensor.goo_params[..count * tensor.max_goo_params],
+    )?;
+
+    let dish_neighbors_buf = if let Some(d) = dish {
+        let neighbors_i32: Vec<i32> = d
+            .neighbors_flat
+            .iter()
+            .map(|&n| n as i32)
+            .collect();
+        Some(sync_device_buffer(
+            &mut gpu_state.dish_neighbors_buf,
+            &neighbors_i32,
+        )?)
+    } else {
+        None
+    };
+
+    let mut decision_host = vec![DecisionRowGpu::default(); count];
+    let decision_buf = sync_device_buffer(&mut gpu_state.decision_buf, &decision_host)?;
+
+    unsafe {
         launch!(
             function<<<
                 ((count as u32 + 127) / 128).max(1),
@@ -535,78 +682,95 @@ fn run_tensor_kernel_gpu(
                 stream
             >>>(
                 usize_to_i32(count),
-                usize_to_i32(width),
+                usize_to_i32(cell_count),
+                usize_to_i32(grid_width.max(1)),
+                usize_to_i32(grid_height.max(1)),
+                grid_topology,
                 env_buf.as_device_ptr(),
                 occupancy_buf.as_device_ptr(),
-                config.nn_use_occupancy,
                 config.movement_cost_factor,
-                tensor.nodes as i32,
-                tensor.inputs as i32,
-                tensor.nodes2 as i32,
-                tensor.layers,
-                row_seeds_buf.as_device_ptr(),
-                usize_to_i32(tensor.layer1_stride),
-                usize_to_i32(tensor.multi_stride),
-                usize_to_i32(tensor.layer2_weights_stride),
-                usize_to_i32(tensor.layer2_bias_stride),
-                ids_buf.as_device_ptr(),
+                base.nodes as i32,
+                base.inputs as i32,
+                base.nodes2 as i32,
+                base.layers,
+                usize_to_i32(base.layer1_stride()),
+                usize_to_i32(base.multi_stride()),
+                usize_to_i32(base.layer2_weights_stride()),
+                usize_to_i32(base.layer2_bias_stride()),
+                usize_to_i32(tensor.max_brain_nodes),
+                usize_to_i32(tensor.max_edges),
+                usize_to_i32(tensor.max_goo_params),
+                usize_to_i32(tensor.max_readout_features),
+                brain_kind_buf.as_device_ptr(),
                 positions_buf.as_device_ptr(),
                 resources_buf.as_device_ptr(),
-                ages_buf.as_device_ptr(),
-                device_ptr_or_null(layer1_weights_buf.as_ref()),
-                device_ptr_or_null(layer1_biases_buf.as_ref()),
-                device_ptr_or_null(multi_weights_buf.as_ref()),
-                device_ptr_or_null(layer2_weights_buf.as_ref()),
-                device_ptr_or_null(layer2_biases_buf.as_ref()),
-                device_ptr_or_null(hidden_buf_dev.as_ref()),
-                device_ptr_or_null(out2_buf_dev.as_ref()),
-                last_spend_buf.as_device_ptr(),
-                last_delta_buf.as_device_ptr(),
-                last_movers_buf.as_device_ptr()
+                device_ptr_or_null(layer1_weights_buf),
+                device_ptr_or_null(layer1_biases_buf),
+                device_ptr_or_null(multi_weights_buf),
+                device_ptr_or_null(layer2_weights_buf),
+                device_ptr_or_null(layer2_biases_buf),
+                spatial_landmark_count_buf.as_device_ptr(),
+                spatial_edge_count_buf.as_device_ptr(),
+                spatial_edges_buf.as_device_ptr(),
+                spatial_edge_weights_buf.as_device_ptr(),
+                spatial_readout_weights_buf.as_device_ptr(),
+                spatial_readout_biases_buf.as_device_ptr(),
+                spatial_landmark_sectors_buf.as_device_ptr(),
+                spatial_learn_rate_buf.as_device_ptr(),
+                spatial_message_passes_buf.as_device_ptr(),
+                spatial_runtime_buf.as_device_ptr(),
+                goo_node_count_buf.as_device_ptr(),
+                goo_ops_buf.as_device_ptr(),
+                goo_parent_count_buf.as_device_ptr(),
+                goo_parents_buf.as_device_ptr(),
+                goo_params_buf.as_device_ptr(),
+                device_ptr_or_null(dish_neighbors_buf),
+                decision_buf.as_device_ptr()
             )
-        )
-    } {
-        eprintln!("tensor_step_kernel launch failed inside helper: {}", err);
-        return Err(err.into());
+        )?;
     }
 
-    if let Err(err) = stream.synchronize() {
-        eprintln!("tensor_step_kernel stream sync failed: {}", err);
-        return Err(err.into());
-    }
+    stream.synchronize()?;
+    decision_buf.copy_to(&mut decision_host)?;
+    spatial_runtime_buf.copy_to(
+        &mut tensor.spatial_runtime[..count * tensor.max_brain_nodes * crate::brain::EMBED_DIM],
+    )?;
 
-    ids_buf.copy_to(&mut tensor.ids[..count])?;
-    resources_buf.copy_to(&mut tensor.resources[..count])?;
-    ages_buf.copy_to(&mut tensor.ages[..count])?;
-    positions_buf.copy_to(&mut positions_host)?;
-    for (slot, &value) in tensor
-        .positions
-        .iter_mut()
-        .take(count)
-        .zip(positions_host.iter())
-    {
-        *slot = value as usize;
-    }
-    last_spend_buf.copy_to(&mut last_spend[..count])?;
-    last_delta_buf.copy_to(&mut last_delta[..count])?;
-    let mut last_movers_host = [0i32];
-    last_movers_buf.copy_to(&mut last_movers_host)?;
-    *last_movers = last_movers_host[0].max(0) as usize;
+    gpu_state.capacity = gpu_state.capacity.max(count);
+    Ok(decision_host.into_iter().map(DecisionRow::from).collect())
+}
 
-    if let Some(buf) = hidden_buf_dev {
-        buf.copy_to(hidden_buf)?;
+fn sync_device_buffer<'a, T: DeviceCopy>(
+    slot: &'a mut Option<DeviceBuffer<T>>,
+    data: &[T],
+) -> Result<&'a DeviceBuffer<T>, TensorKernelGpuError> {
+    if data.is_empty() {
+        return Err(TensorKernelGpuError::Init("empty device buffer upload".into()));
     }
-    if let Some(buf) = out2_buf_dev {
-        buf.copy_to(out2_buf)?;
+    let needs_alloc = slot.as_ref().map(|b| b.len() != data.len()).unwrap_or(true);
+    if needs_alloc {
+        *slot = Some(DeviceBuffer::from_slice(data)?);
+    } else if let Some(buf) = slot.as_mut() {
+        buf.copy_from(data)?;
     }
+    Ok(slot.as_ref().unwrap())
+}
 
-    Ok(())
+fn sync_device_buffer_opt<'a, T: DeviceCopy>(
+    slot: &'a mut Option<DeviceBuffer<T>>,
+    data: &[T],
+) -> Result<Option<&'a DeviceBuffer<T>>, TensorKernelGpuError> {
+    if data.is_empty() {
+        Ok(None)
+    } else {
+        sync_device_buffer(slot, data).map(Some)
+    }
 }
 
 #[derive(Debug)]
 enum TensorKernelGpuError {
     MissingPtx,
-    InsufficientSeeds { requested: usize, available: usize },
+    Init(String),
     Cuda(CudaError),
 }
 
@@ -620,14 +784,7 @@ impl fmt::Display for TensorKernelGpuError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TensorKernelGpuError::MissingPtx => write!(f, "TENSOR_KERNEL_PTX is not set"),
-            TensorKernelGpuError::InsufficientSeeds {
-                requested,
-                available,
-            } => write!(
-                f,
-                "{} seeds requested but only {} precomputed",
-                requested, available
-            ),
+            TensorKernelGpuError::Init(msg) => write!(f, "CUDA init failed: {}", msg),
             TensorKernelGpuError::Cuda(e) => write!(f, "CUDA error: {}", e),
         }
     }
@@ -644,16 +801,6 @@ fn tensor_kernel_ptx_path() -> Result<PathBuf, TensorKernelGpuError> {
         Ok(fallback)
     } else {
         Err(TensorKernelGpuError::MissingPtx)
-    }
-}
-
-fn optional_device_buffer<T: DeviceCopy>(
-    slice: &[T],
-) -> cust::error::CudaResult<Option<DeviceBuffer<T>>> {
-    if slice.is_empty() {
-        Ok(None)
-    } else {
-        DeviceBuffer::from_slice(slice).map(Some)
     }
 }
 

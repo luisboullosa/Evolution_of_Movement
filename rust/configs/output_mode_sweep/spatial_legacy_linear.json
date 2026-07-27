@@ -1,0 +1,5 @@
+{
+  "spatial_blob_layout": "legacy_graph",
+  "movement_output_mode": "linear_readout",
+  "output_run_dir": "output/output_mode_sweep/spatial_legacy_linear"
+}

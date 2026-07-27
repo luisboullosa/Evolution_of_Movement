@@ -1,0 +1,18 @@
+{
+  "grid_topology": "hex_2d",
+  "grid_width": 40,
+  "architecture_policy": "evolve_goo",
+  "architecture_mutation_rate": 0.005,
+  "max_brain_nodes": 24,
+  "nn_nodes": 1,
+  "nn_layers": 1,
+  "nn_inputs": 8,
+  "movement_speed": "medium",
+  "initial_population": 300,
+  "max_population": 800,
+  "steps": 10000,
+  "mutation_rate": 0.01,
+  "export_cladogram": true,
+  "write_snapshot": true,
+  "write_outputs": false
+}

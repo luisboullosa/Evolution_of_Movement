@@ -99,6 +99,16 @@ impl Perlin {
             .map(|i| Self::sample_2d_time(i as f64, 0.0, time_offset, seed, spatial_scale, time_scale))
             .collect()
     }
+
+    /// Stretch Perlin samples away from 0.5 so rich/poor patches contrast more.
+    /// `contrast` = 1 leaves the sample unchanged; values > 1 sharpen the landscape.
+    pub fn shape_resource_contrast(raw: f64, contrast: f64) -> f64 {
+        let r = raw.clamp(0.0, 1.0);
+        if contrast <= 1.0 + 1e-9 {
+            return r;
+        }
+        (0.5 + (r - 0.5) * contrast).clamp(0.0, 1.0)
+    }
 }
 
 #[cfg(test)]
@@ -124,5 +134,15 @@ mod tests {
         let a = Perlin::sample_2d_time(8.0, 1.0, 2.0, 7, 0.05, 0.1);
         let b = Perlin::sample_2d_time(8.0, 9.0, 2.0, 7, 0.05, 0.1);
         assert!((a - b).abs() > 1e-9);
+    }
+
+    #[test]
+    fn resource_contrast_spreads_around_midpoint() {
+        let flat = Perlin::shape_resource_contrast(0.5, 1.4);
+        assert!((flat - 0.5).abs() < 1e-9);
+        let rich = Perlin::shape_resource_contrast(0.7, 1.4);
+        let poor = Perlin::shape_resource_contrast(0.3, 1.4);
+        assert!(rich > 0.7);
+        assert!(poor < 0.3);
     }
 }

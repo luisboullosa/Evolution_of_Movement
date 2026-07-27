@@ -1,0 +1,656 @@
+//! Headless batch simulation CLI (shared by architecture-specific binaries).
+use crate::build_info;
+use crate::config::{ArchitecturePolicy, Config, GridTopology, MovementOutputMode, MovementSpeed};
+use crate::run_record::RunRecordContext;
+use crate::simulation::Simulation;
+use std::env;
+use std::ffi::OsStr;
+use std::path::Path;
+
+fn sanitize_basename(p: &str) -> String {
+    let path = Path::new(p);
+    if path.is_absolute() {
+        if let Some(b) = path.file_name().and_then(OsStr::to_str) {
+            return b.to_string();
+        }
+    }
+    p.to_string()
+}
+
+fn print_version() {
+    println!("evo-movement headless {}", build_info::VERSION_LABEL);
+}
+
+fn print_help() {
+    println!("evo-movement headless {} — usage:", build_info::VERSION_LABEL);
+    println!("  --config-file=PATH            Load config overrides from PATH (JSON)");
+    println!("  --env-perlin-spatial-scale=N  Perlin spatial scale (double)");
+    println!("  --env-perlin-time-scale=N     Perlin temporal scale (double)");
+    println!("  --env-time-speed=N            Perlin time speed (double)");
+    println!("  --env-time-amplitude=N        Perlin time amplitude (double)");
+    println!("  --env-change-rate=N           Gaussian env noise sigma (double)");
+    println!("  (Perlin temporal evolution always enabled)");
+    println!("  --seed=N                      RNG seed (unsigned)");
+    println!("  --steps=N                     Number of timesteps to run (int)");
+    println!("  --radiate=N                   Apply N× mutation_rate to initial population (int, default 0)");
+    println!("  --report-interval=N           Reporting interval (int)");
+    println!("  --initial-population=N        Starting population size (int)");
+    println!("  --max-population=N            Hard population cap (0 = unlimited)");
+    println!("  --reproduction-threshold=N    Min resources to reproduce (double)");
+    println!("  --reproduction-cost=N         Resource cost per birth (double)");
+    println!("  --basal-metabolic-cost=N      Per-step basal metabolic drain (double)");
+    println!("  --movement-interval=N         Min steps between hex moves when moving (int)");
+    println!("  --movement-speed=SPEED        fast|medium|slow — interval + ecology preset");
+    println!("  --movement-output-mode=MODE   separate_readout|linear_readout|hidden_sum|hex_compass|split_channels");
+    println!("  --show-progress / --no-progress  Show progress (updates every report_interval, ~50 max)");
+    println!("  --print-frames / --no-print-frames  Print ASCII frames to stdout");
+    println!("  --replay-snapshot=PATH        Initialize from snapshot CBOR at PATH (instead of new population)");
+    println!("  --replay-env-seed=N           Override environment seed while replaying (int, default -1)");
+    println!("  --replay-randomize-start-positions / --replay-no-randomize-start-positions");
+    println!(
+        "                                 Shuffle or preserve positions when replaying a snapshot"
+    );
+    println!(
+        "  --write-individual-deltas / --no-write-individual-deltas  Write individuals.delta.jsonl"
+    );
+    println!("  --delta-full-interval=N       Full resync frame every N steps (for delta mode)");
+    println!(
+        "  --output-budget-mb=N          Max allowed output size in MiB (<=0 disables budget)"
+    );
+    println!("  --output-budget-warn-fraction=F  Warn fraction of budget (0..1, default 0.8)");
+    println!("  --output-budget-hard-stop     Abort if projected outputs exceed budget");
+    println!("  --debug-buffered-output-logs / --no-debug-buffered-output-logs  Toggle buffered output budget logging");
+    println!("  --output-run-dir=PATH         Write outputs into this exact directory (no simXXXX auto-dir)");
+    println!("  --config-out=PATH             Write resolved config to PATH inside sim dir");
+    println!("  --architecture-policy=POLICY   perceptron_only|evolve_mlp|evolve_spatial_graph|evolve_goo");
+    println!("  --grid-topology=TOPO           ring_1d|hex_2d");
+    println!("  --hex-dish-torus / --no-hex-dish-torus  Wrap hex-dish edge moves (headless batch)");
+    println!("  --export-cladogram / --no-export-cladogram  Write cladogram.json and architecture_lineage.jsonl");
+    println!("  --use-gpu-step / --no-use-gpu-step  GPU brain forward + CPU apply (default off)");
+    println!("  --max-brain-nodes=N            Cap on evolvable brain complexity");
+    println!("  --help, -h                    Show this help message");
+    println!("  --version, -V                 Show build version and exit");
+}
+
+fn parse_arg_value<T: std::str::FromStr>(arg: &str, flag: &str) -> Option<T> {
+    if arg.starts_with(flag) && arg.len() > flag.len() && arg.as_bytes()[flag.len()] == b'=' {
+        return arg[flag.len() + 1..].parse::<T>().ok();
+    }
+    None
+}
+
+fn parse_architecture_policy(s: &str) -> ArchitecturePolicy {
+    match s.to_lowercase().as_str() {
+        "evolve_mlp" | "mlp" => ArchitecturePolicy::EvolveMlp,
+        "evolve_spatial_graph" | "spatial" => ArchitecturePolicy::EvolveSpatialGraph,
+        "evolve_goo" | "goo" => ArchitecturePolicy::EvolveGoo,
+        _ => ArchitecturePolicy::PerceptronOnly,
+    }
+}
+
+fn parse_movement_output_mode(s: &str) -> Option<MovementOutputMode> {
+    match s.to_lowercase().as_str() {
+        "separate_readout" | "separate" => Some(MovementOutputMode::SeparateReadout),
+        "linear_readout" | "linear" => Some(MovementOutputMode::LinearReadout),
+        "hidden_sum" | "hidden" | "sum" => Some(MovementOutputMode::HiddenSum),
+        "hex_compass" | "compass" => Some(MovementOutputMode::HexCompass),
+        "split_channels" | "split" => Some(MovementOutputMode::SplitChannels),
+        _ => None,
+    }
+}
+
+fn parse_grid_topology(s: &str) -> GridTopology {
+    match s.to_lowercase().as_str() {
+        "hex_2d" | "hex" => GridTopology::Hex2d,
+        _ => GridTopology::Ring1d,
+    }
+}
+
+pub fn run(default_policy: Option<ArchitecturePolicy>) {
+    let mut args = env::args().skip(1);
+    let mut cfg: Option<Config> = None;
+    let mut config_file_path: Option<String> = None;
+
+    // first pass: capture explicit --config-file if provided
+    let mut remaining: Vec<String> = Vec::new();
+    while let Some(a) = args.next() {
+        if a == "--help" || a == "-h" {
+            print_help();
+            return;
+        }
+        if a == "--version" || a == "-V" {
+            print_version();
+            return;
+        }
+        if a.starts_with("--config-file") {
+            if let Some(p) = if a.contains('=') {
+                a.split_once('=').map(|x| x.1.to_string())
+            } else {
+                args.next()
+            } {
+                match Config::from_file(&p) {
+                    Ok(c) => {
+                        cfg = Some(c);
+                        config_file_path = Some(p);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to load config from {}: {}", p, e);
+                        return;
+                    }
+                }
+            }
+            continue;
+        }
+        remaining.push(a);
+    }
+
+    // start with loaded or default config
+    let mut cfg = cfg.unwrap_or_default();
+    let explicit_arch = remaining
+        .iter()
+        .any(|a| a.starts_with("--architecture-policy"));
+    if !explicit_arch {
+        if let Some(policy) = default_policy {
+            cfg.architecture_policy = policy;
+        }
+    }
+
+    // re-parse remaining args to apply overrides
+    let mut it = remaining.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--help" || a == "-h" {
+            print_help();
+            return;
+        }
+        if a == "--version" || a == "-V" {
+            print_version();
+            return;
+        }
+
+        if a.starts_with("--env-perlin-spatial-scale") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--env-perlin-spatial-scale") {
+                cfg.env_perlin_spatial_scale = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.env_perlin_spatial_scale = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--env-perlin-time-scale") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--env-perlin-time-scale") {
+                cfg.env_perlin_time_scale = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.env_perlin_time_scale = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--env-time-speed") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--env-time-speed") {
+                cfg.env_time_speed = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.env_time_speed = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--env-time-amplitude") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--env-time-amplitude") {
+                cfg.env_time_amplitude = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.env_time_amplitude = v;
+                    continue;
+                }
+            }
+        }
+
+        // --env-change-rate removed (additive noise no longer used)
+
+        if a.starts_with("--movement-cost-factor") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--movement-cost-factor") {
+                cfg.movement_cost_factor = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.movement_cost_factor = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--movement-interval") {
+            if let Some(v) = parse_arg_value::<u32>(&a, "--movement-interval") {
+                cfg.movement_interval = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<u32>() {
+                    cfg.movement_interval = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--movement-speed") {
+            let speed_str = if let Some(v) = parse_arg_value::<String>(&a, "--movement-speed") {
+                v
+            } else if let Some(p) = it.next() {
+                p
+            } else {
+                continue;
+            };
+            let speed = match speed_str.to_lowercase().as_str() {
+                "fast" => MovementSpeed::Fast,
+                "medium" => MovementSpeed::Medium,
+                "slow" => MovementSpeed::Slow,
+                _ => {
+                    eprintln!("Unknown movement speed: {}", speed_str);
+                    continue;
+                }
+            };
+            cfg.movement_speed = Some(speed);
+            continue;
+        }
+
+        if a.starts_with("--movement-output-mode") {
+            let mode_str = if let Some(v) = parse_arg_value::<String>(&a, "--movement-output-mode") {
+                v
+            } else if let Some(p) = it.next() {
+                p
+            } else {
+                continue;
+            };
+            if let Some(mode) = parse_movement_output_mode(&mode_str) {
+                cfg.movement_output_mode = Some(mode);
+            } else {
+                eprintln!("Unknown movement output mode: {}", mode_str);
+            }
+            continue;
+        }
+
+        if a.starts_with("--maintenance-cost-per-node") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--maintenance-cost-per-node") {
+                cfg.maintenance_cost_per_node = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.maintenance_cost_per_node = v;
+                    continue;
+                }
+            }
+        }
+
+        // Perlin temporal evolution is always enabled; flags removed.
+        if a == "--no-progress" {
+            cfg.show_progress = false;
+            continue;
+        }
+        if a == "--show-progress" {
+            cfg.show_progress = true;
+            continue;
+        }
+
+        if a == "--no-write-outputs" {
+            cfg.write_outputs = false;
+            continue;
+        }
+        if a == "--write-outputs" {
+            cfg.write_outputs = true;
+            continue;
+        }
+
+        if a == "--debug-buffered-output-logs" {
+            cfg.debug_buffered_output_logs = true;
+            continue;
+        }
+        if a == "--no-debug-buffered-output-logs" {
+            cfg.debug_buffered_output_logs = false;
+            continue;
+        }
+
+        if a.starts_with("--radiate") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--radiate") {
+                cfg.radiate = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.radiate = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--seed") {
+            if let Some(v) = parse_arg_value::<u32>(&a, "--seed") {
+                cfg.seed = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<u32>() {
+                    cfg.seed = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--steps") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--steps") {
+                cfg.steps = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.steps = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--report-interval") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--report-interval") {
+                cfg.report_interval = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.report_interval = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--initial-population") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--initial-population") {
+                cfg.initial_population = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.initial_population = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--max-population") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--max-population") {
+                cfg.max_population = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.max_population = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--reproduction-threshold") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--reproduction-threshold") {
+                cfg.reproduction_threshold = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.reproduction_threshold = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--reproduction-cost") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--reproduction-cost") {
+                cfg.reproduction_cost = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.reproduction_cost = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--basal-metabolic-cost") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--basal-metabolic-cost") {
+                cfg.basal_metabolic_cost = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.basal_metabolic_cost = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--death-risk") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--death-risk") {
+                cfg.death_risk = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.death_risk = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--config-out") {
+            cfg.write_config = true;
+            if a.contains('=') {
+                if let Some(v) = a.split_once('=').map(|x| x.1) {
+                    cfg.config_out_path = sanitize_basename(v);
+                }
+            } else if let Some(p) = it.next() {
+                cfg.config_out_path = sanitize_basename(&p);
+            }
+            continue;
+        }
+
+        if a.starts_with("--replay-snapshot") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--replay-snapshot") {
+                cfg.replay_snapshot_path = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.replay_snapshot_path = p;
+                continue;
+            }
+        }
+
+        if a.starts_with("--replay-env-seed") {
+            if let Some(v) = parse_arg_value::<i64>(&a, "--replay-env-seed") {
+                cfg.replay_env_seed = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i64>() {
+                    cfg.replay_env_seed = v;
+                    continue;
+                }
+            }
+        }
+
+        if a == "--replay-randomize-start-positions" {
+            cfg.replay_randomize_start_positions = true;
+            continue;
+        }
+        if a == "--replay-no-randomize-start-positions" {
+            cfg.replay_randomize_start_positions = false;
+            continue;
+        }
+
+        if a == "--write-individual-deltas" {
+            cfg.write_individual_deltas = true;
+            continue;
+        }
+        if a == "--no-write-individual-deltas" {
+            cfg.write_individual_deltas = false;
+            continue;
+        }
+
+        if a.starts_with("--delta-full-interval") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--delta-full-interval") {
+                cfg.delta_full_interval = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.delta_full_interval = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--output-budget-mb") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--output-budget-mb") {
+                cfg.output_budget_mb = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.output_budget_mb = v;
+                    continue;
+                }
+            }
+        }
+
+        if a.starts_with("--output-budget-warn-fraction") {
+            if let Some(v) = parse_arg_value::<f64>(&a, "--output-budget-warn-fraction") {
+                cfg.output_budget_warn_fraction = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<f64>() {
+                    cfg.output_budget_warn_fraction = v;
+                    continue;
+                }
+            }
+        }
+
+        if a == "--output-budget-hard-stop" {
+            cfg.output_budget_hard_stop = true;
+            continue;
+        }
+
+        if a.starts_with("--output-run-dir") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--output-run-dir") {
+                cfg.output_run_dir = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.output_run_dir = p;
+                continue;
+            }
+        }
+
+        if a.starts_with("--architecture-policy") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--architecture-policy") {
+                cfg.architecture_policy = parse_architecture_policy(&v);
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.architecture_policy = parse_architecture_policy(&p);
+                continue;
+            }
+        }
+
+        if a.starts_with("--grid-topology") {
+            if let Some(v) = parse_arg_value::<String>(&a, "--grid-topology") {
+                cfg.grid_topology = parse_grid_topology(&v);
+                continue;
+            } else if let Some(p) = it.next() {
+                cfg.grid_topology = parse_grid_topology(&p);
+                continue;
+            }
+        }
+
+        if a == "--hex-dish-torus" {
+            cfg.hex_dish_torus = true;
+            continue;
+        }
+        if a == "--no-hex-dish-torus" {
+            cfg.hex_dish_torus = false;
+            continue;
+        }
+
+        if a.starts_with("--max-brain-nodes") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--max-brain-nodes") {
+                cfg.max_brain_nodes = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.max_brain_nodes = v;
+                    continue;
+                }
+            }
+        }
+
+        if a == "--export-cladogram" {
+            cfg.export_cladogram = true;
+            continue;
+        }
+        if a == "--no-export-cladogram" {
+            cfg.export_cladogram = false;
+            continue;
+        }
+
+        if a == "--use-gpu-step" {
+            cfg.use_gpu_step = true;
+            continue;
+        }
+        if a == "--no-use-gpu-step" {
+            cfg.use_gpu_step = false;
+            continue;
+        }
+
+        if a.starts_with("--burn-in") {
+            if let Some(v) = parse_arg_value::<i32>(&a, "--burn-in") {
+                cfg.burn_in = v;
+                continue;
+            } else if let Some(p) = it.next() {
+                if let Ok(v) = p.parse::<i32>() {
+                    cfg.burn_in = v;
+                    continue;
+                }
+            }
+        }
+
+        if a == "--print-frames" {
+            cfg.print_frames = true;
+            continue;
+        }
+        if a == "--no-print-frames" {
+            cfg.print_frames = false;
+            continue;
+        }
+
+        // Try parse as seed if arg is numeric
+        if let Ok(v) = a.parse::<u32>() {
+            cfg.seed = v;
+            continue;
+        }
+        // otherwise ignore unknown flag
+    }
+
+    // validate config
+    cfg.finalize();
+    cfg.validate();
+
+    print_version();
+
+    // create and run simulation
+    let mut sim = Simulation::new(&cfg);
+
+    if !cfg.replay_snapshot_path.is_empty() {
+        if let Err(e) = sim.load_snapshot_from_path(&cfg.replay_snapshot_path) {
+            eprintln!(
+                "Failed to load snapshot from {}: {}",
+                cfg.replay_snapshot_path, e
+            );
+            return;
+        }
+    } else {
+        sim.init_population(cfg.initial_population as usize);
+    }
+    let record_ctx = RunRecordContext {
+        config_file: config_file_path,
+    };
+    sim.run_with_context(&record_ctx);
+}

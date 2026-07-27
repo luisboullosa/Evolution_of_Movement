@@ -1,0 +1,22 @@
+{
+  "_comment": "Plateau-80 ecology profile: smaller pops, longer runs, ~80% of max_pop at equilibrium.",
+  "_profile": "ecology_profile: plateau80 + movement_speed",
+  "targets": {
+    "equilibrium_fraction_of_cap": 0.8,
+    "fast": { "initial_population": 800, "max_population": 5000, "target_equilibrium": 4000 },
+    "medium": { "initial_population": 700, "max_population": 4500, "target_equilibrium": 3600 },
+    "slow": { "initial_population": 600, "max_population": 4000, "target_equilibrium": 3200 }
+  },
+  "metabolism_vs_standard_fast": {
+    "maintenance_cost_per_node": "0.018 (was 0.042, −57%)",
+    "basal_metabolic_cost": "0.092 (was 0.095)",
+    "resource_scale": "0.48 (was 0.58)",
+    "reproduction_threshold": "43 (was 40)"
+  },
+  "notes": [
+    "Spatial macromolecule blob (hex_edge) gets gentler plateau80 trim than legacy spatial graph.",
+    "Blob offsets: +5% resource, −10% maintenance; speed-tuned cap trim (fast 0.92 … slow 0.96).",
+    "100k spatial speed sweep: configs/ecology_plateau80/spatial_100k/ + scripts/run_spatial_100k_speeds.ps1",
+    "Steps are set by scripts/run_ecology_plateau80_8hr.ps1 from wall-clock budget."
+  ]
+}

@@ -154,7 +154,7 @@ impl NeuralNetwork {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
                     acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                out2_buf[j] = Self::activate(acc);
+                *o = Self::activate(acc);
             }
             Self::decode_outputs_from_layer(&out2_buf[..self.nodes2])
         } else {
@@ -216,7 +216,7 @@ impl NeuralNetwork {
                     let idx = i.saturating_mul(nodes2).saturating_add(j);
                     acc += self.weights2.get(idx).copied().unwrap_or(0.0) * h;
                 }
-                out2_buf[j] = Self::activate(acc);
+                *o = Self::activate(acc);
             }
             Self::decode_outputs_from_layer(&out2_buf[..nodes2])
         } else {
