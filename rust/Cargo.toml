@@ -70,5 +70,9 @@ name = "evo_fitness_landscape"
 path = "src/bin/evo_fitness_landscape.rs"
 required-features = ["sqlite"]
 
+[[bin]]
+name = "evo_probe_timeline"
+path = "src/bin/evo_probe_timeline.rs"
+
 [package.metadata]
 build_script = true

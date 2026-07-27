@@ -193,7 +193,11 @@
       font-size: 0.8rem;
       color: var(--warn);
     }
-    .hex-probe-card { display: flex; flex-direction: column; gap: 10px; }
+    .panel-collapsible.hex-probe-card .panel-collapsible-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
     canvas.hex-probe-canvas {
       display: block;
       width: 100%;
@@ -236,8 +240,55 @@
     .probe-decision .gather { color: var(--accent2); }
     .probe-decision .move { color: var(--accent); }
     .probe-response-box { height: 160px; position: relative; }
+    .probe-response-box.timeline-active { height: 240px; }
+    .probe-timeline-note { font-size: 0.72rem; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+    .probe-response-status {
+      font-size: 0.75rem;
+      color: var(--muted);
+      min-height: 1.1em;
+    }
+    .probe-response-status.warn { color: var(--warn); }
     .probe-wasm-note { font-size: 0.75rem; color: var(--warn); }
     .probe-stats { font-size: 0.78rem; }
+    .panel-collapsible { padding: 0; overflow: hidden; }
+    .panel-collapsible:not([open]) > .panel-collapsible-body { display: none; }
+    .panel-collapsible > summary {
+      padding: 12px;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      user-select: none;
+      border-radius: 10px;
+    }
+    .panel-collapsible[open] > summary {
+      border-bottom: 1px solid var(--border);
+      border-radius: 10px 10px 0 0;
+    }
+    .panel-collapsible > summary::-webkit-details-marker { display: none; }
+    .panel-collapsible > summary::before {
+      content: '▸';
+      margin-right: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .panel-collapsible[open] > summary::before { content: '▾'; }
+    .panel-collapsible > summary h3 { margin: 0; }
+    .panel-collapsible-body { padding: 0 12px 12px; }
+    .trajectory-chart-wrap {
+      height: 220px;
+      position: relative;
+      margin-top: 4px;
+    }
+    .metric-export-banner {
+      margin: 0 0 16px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(240, 180, 41, 0.08);
+      color: #e8d090;
+      font-size: 0.88rem;
+    }
   </style>
 </head>
 <body>
@@ -264,15 +315,19 @@
           Mean complexity
           <span class="help-tip" tabindex="0" id="complexity-help" data-tip="">?</span>
         </button>
+        <button type="button" data-metric="fecundity">
+          Fecundity
+          <span class="help-tip" tabindex="0" id="fecundity-help" data-tip="Top individual duplication count at run end — requires fecundity_matrix from sweep export.">?</span>
+        </button>
       </div>
     </div>
     <button type="button" id="compare-seeds-btn" title="Overlay neutral vs random trajectories for selected cell">Compare seed modes</button>
+    <button type="button" id="rebuild-timelines-btn" title="Rebuild probe_timelines/ from snapshots (requires scripts/serve_fitness_landscape.py, not plain http.server)">Rebuild probe timelines</button>
     <button type="button" id="live-btn" class="active" title="Poll fitness_landscape.sqlite for new runs while sweep is active">Live updates</button>
     <button type="button" id="load-db-btn" title="Load fitness_landscape.sqlite (for file:// or custom paths)">Load database…</button>
     <input type="file" id="db-file-input" accept=".sqlite,.db,.sqlite3" hidden/>
   </div>
   <main id="root"></main>
-  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
   <script id="landscape-data" type="application/json">__LANDSCAPE_JSON__</script>
   <script>
   let DATA = null;
@@ -288,13 +343,90 @@
   let wasmProbe = null;
   let wasmProbeError = '';
   const hexProbes = new Map();
+  let timelineManifest = null;
+  let timelineManifestError = '';
+  let timelineManifestPromise = null;
+  const timelineCache = new Map();
+  const TIMELINE_STYLES = {
+    0: { label: 't=0 founder', color: '#9aa6bd', dash: [6, 4] },
+    10000: { label: 't=10K best', color: '#6ea8fe', dash: [] },
+    50000: { label: 't=50K best', color: '#7ee787', dash: [] },
+  };
   const HEX_PROBE_RADIUS = 5; // diameter 10 (axial disk)
+  let sqlJsPromise = null;
+
+  const SQLJS_BASE = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/';
+
+  function setMetaStatus(msg) {
+    const el = document.getElementById('meta-line');
+    if (el) el.textContent = msg;
+  }
+
+  function loadSqlJsModule() {
+    if (sqlJsPromise) return sqlJsPromise;
+    sqlJsPromise = new Promise((resolve, reject) => {
+      if (typeof initSqlJs === 'function') {
+        initSqlJs({ locateFile: file => `${SQLJS_BASE}${file}` }).then(resolve).catch(reject);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = `${SQLJS_BASE}sql-wasm.js`;
+      script.async = true;
+      script.onload = () => {
+        if (typeof initSqlJs !== 'function') {
+          reject(new Error('sql.js loaded but initSqlJs missing'));
+          return;
+        }
+        initSqlJs({ locateFile: file => `${SQLJS_BASE}${file}` }).then(resolve).catch(reject);
+      };
+      script.onerror = () => reject(new Error('failed to load sql.js from CDN'));
+      document.head.appendChild(script);
+    });
+    return sqlJsPromise;
+  }
 
   const metricMatrixKey = {
     fitness: 'fitness_matrix',
     pop_ratio: 'pop_ratio_matrix',
     complexity: 'complexity_matrix',
+    fecundity: 'fecundity_matrix',
   };
+
+  function metricAxisLabel(m) {
+    if (m === 'fitness') return 'Fitness score';
+    if (m === 'pop_ratio') return 'Population ratio';
+    if (m === 'complexity') return 'Mean complexity';
+    if (m === 'fecundity') return 'Top individual duplications';
+    return m;
+  }
+
+  function heatmapMatrix(hm, m) {
+    const key = metricMatrixKey[m];
+    const mat = hm[key];
+    if (mat) return mat;
+    return hm.y_labels.map(() => hm.x_labels.map(() => null));
+  }
+
+  function fecundityDataAvailable(heatmaps) {
+    return heatmaps.some(hm =>
+      hm.fecundity_matrix?.some(row => row.some(v => v !== null && v !== undefined))
+    );
+  }
+
+  function setProbeResponseStatus(arch, message, tone = 'muted') {
+    const panel = document.getElementById(`side-${arch}`);
+    const el = panel?.querySelector('.probe-response-status');
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.display = message ? 'block' : 'none';
+    el.classList.toggle('warn', tone === 'warn');
+  }
+
+  function responseSweepAxisLabel(axis) {
+    if (axis === 'stores') return 'internal stores';
+    if (axis === 'competition') return 'local competition';
+    return 'center resource';
+  }
 
   const ARCH_DISPLAY = {
     'Perceptron': 'Perceptron',
@@ -333,14 +465,14 @@
     const xOrder = hm.x_labels.map((_, i) => i);
     xOrder.sort((i, j) => compareAxisLabels(hm.x_labels[i], hm.x_labels[j]));
     hm.x_labels = xOrder.map(i => hm.x_labels[i]);
-    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fitness_na_matrix']) {
+    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fecundity_matrix', 'fitness_na_matrix']) {
       if (!hm[key]) continue;
       hm[key] = hm[key].map(row => xOrder.map(i => row[i]));
     }
     const yOrder = hm.y_labels.map((_, i) => i);
     yOrder.sort((i, j) => compareAxisLabels(hm.y_labels[i], hm.y_labels[j]));
     hm.y_labels = yOrder.map(i => hm.y_labels[i]);
-    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fitness_na_matrix']) {
+    for (const key of ['fitness_matrix', 'pop_ratio_matrix', 'complexity_matrix', 'fecundity_matrix', 'fitness_na_matrix']) {
       if (!hm[key]) continue;
       hm[key] = yOrder.map(i => hm[key][i]);
     }
@@ -399,6 +531,168 @@
 
   function cellKey(arch, x, y, founder) {
     return `${arch}|${x}|${y}|${founder}`;
+  }
+
+  function sanitizeFilenamePart(s) {
+    return String(s).replace(/[^A-Za-z0-9\-_=]/g, '_');
+  }
+
+  function timelineFilename(arch, x, y, founder, seed) {
+    return `${sanitizeFilenamePart(arch)}__${sanitizeFilenamePart(x)}__${sanitizeFilenamePart(y)}__${sanitizeFilenamePart(founder)}__seed${seed}.json`;
+  }
+
+  function timelineMatchesCell(entry, arch, x, y, founder) {
+    return entry.architecture === arch
+      && entry.x_label === x
+      && entry.y_label === y
+      && entry.founder_mode === founder;
+  }
+
+  async function ensureTimelineManifest() {
+    if (timelineManifest && !timelineManifestPromise) return timelineManifest;
+    if (timelineManifestError && !timelineManifestPromise) return null;
+    if (!timelineManifestPromise) {
+      timelineManifestPromise = fetch(`probe_timelines/manifest.json?_=${Date.now()}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+          return r.json();
+        })
+        .then(data => {
+          timelineManifest = data;
+          timelineManifestError = '';
+          return data;
+        })
+        .catch(e => {
+          timelineManifestError = e.message || String(e);
+          timelineManifest = null;
+          return null;
+        })
+        .finally(() => {
+          timelineManifestPromise = null;
+        });
+    }
+    return timelineManifestPromise;
+  }
+
+  function resetTimelineCache() {
+    timelineManifest = null;
+    timelineManifestError = '';
+    timelineManifestPromise = null;
+    timelineCache.clear();
+  }
+
+  async function reloadProbeTimelinesForSelection() {
+    resetTimelineCache();
+    await ensureTimelineManifest();
+    if (!selected) return;
+    const panel = document.getElementById(`side-${selected.arch}`);
+    if (panel) {
+      await initHexProbe(selected.arch, selected.x, selected.y, selected.founder, findCell(selected.arch, selected.x, selected.y, selected.founder), panel);
+    }
+  }
+
+  async function rebuildProbeTimelines() {
+    const btn = document.getElementById('rebuild-timelines-btn');
+    const prev = btn?.textContent;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Rebuilding timelines…';
+    }
+    setMetaStatus('Rebuilding probe timelines from snapshots…');
+    try {
+      const r = await fetch('/api/rebuild-probe-timelines', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        const hint = r.status === 404
+          ? 'Use: python scripts/serve_fitness_landscape.py (plain http.server cannot run rebuilds)'
+          : (data.error || `${r.status} ${r.statusText}`);
+        setMetaStatus(`Probe timeline rebuild failed — ${hint}`);
+        return;
+      }
+      const s = data.summary;
+      const msg = s
+        ? `Probe timelines rebuilt — wrote ${s.written}, skipped ${s.skipped}.`
+        : 'Probe timelines rebuilt.';
+      setMetaStatus(msg);
+      await reloadProbeTimelinesForSelection();
+    } catch (e) {
+      setMetaStatus(`Probe timeline rebuild failed — ${e.message || e}. Use python scripts/serve_fitness_landscape.py`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = prev || 'Rebuild probe timelines';
+      }
+    }
+  }
+
+  async function probeTimelineApiAvailable() {
+    try {
+      const r = await fetch('/api/health');
+      if (!r.ok) return false;
+      const data = await r.json();
+      return !!data.rebuild_probe_timelines;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchTimelineJson(filename) {
+    if (timelineCache.has(filename)) return timelineCache.get(filename);
+    try {
+      const r = await fetch(`probe_timelines/${encodeURIComponent(filename)}?_=${Date.now()}`);
+      if (!r.ok) return null;
+      const data = await r.json();
+      timelineCache.set(filename, data);
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadTimelineForCell(arch, x, y, founder, seed) {
+    const manifest = await ensureTimelineManifest();
+    if (!manifest?.entries?.length) return null;
+    const entry = manifest.entries.find(e =>
+      timelineMatchesCell(e, arch, x, y, founder) && e.seed === seed
+    );
+    if (!entry) return null;
+    return fetchTimelineJson(entry.file);
+  }
+
+  function timelineSeedsForCell(arch, x, y, founder) {
+    if (!timelineManifest?.entries?.length) return [];
+    return timelineManifest.entries
+      .filter(e => timelineMatchesCell(e, arch, x, y, founder))
+      .map(e => e.seed)
+      .sort((a, b) => a - b);
+  }
+
+  function populateTimelineSeedSelect(panel, arch, x, y, founder) {
+    const sel = panel?.querySelector('.probe-timeline-seed');
+    if (!sel) return null;
+    const seeds = timelineSeedsForCell(arch, x, y, founder);
+    const runSeeds = runsForCell(arch, x, y, founder).map(r => r.seed);
+    const merged = [...new Set([...seeds, ...runSeeds])].sort((a, b) => a - b);
+    const prev = Number(sel.value);
+    sel.innerHTML = '';
+    if (!merged.length) {
+      sel.disabled = true;
+      const o = document.createElement('option');
+      o.value = '';
+      o.textContent = 'No timeline data';
+      sel.appendChild(o);
+      return null;
+    }
+    sel.disabled = false;
+    for (const seed of merged) {
+      const o = document.createElement('option');
+      o.value = String(seed);
+      o.textContent = `seed ${seed}${seeds.includes(seed) ? '' : ' (no timeline)'}`;
+      sel.appendChild(o);
+    }
+    const preferred = seeds.includes(prev) ? prev : (seeds[0] ?? merged[0]);
+    sel.value = String(preferred);
+    return preferred;
   }
 
   function findCell(arch, x, y, founder) {
@@ -506,14 +800,22 @@
   }
 
   function buildResourceMap(meta) {
+    const coords = hexDisk(HEX_PROBE_RADIUS);
+    const maxRes = Number(meta.resource_scale) > 0 ? Number(meta.resource_scale) : 10;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const xByKey = new Map();
+    for (const { q, r } of coords) {
+      const { x } = axialToPixel(q, r, 1);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      xByKey.set(hexKey(q, r), x);
+    }
     const map = new Map();
-    for (const { q, r } of hexDisk(HEX_PROBE_RADIUS)) {
-      const raw = perlinSample2dTime(
-        q, r, 0, meta.resource_seed,
-        meta.env_perlin_spatial_scale,
-        meta.env_perlin_time_scale,
-      );
-      map.set(hexKey(q, r), scaledResource(raw, meta.resource_scale, meta.resource_contrast));
+    for (const { q, r } of coords) {
+      const x = xByKey.get(hexKey(q, r));
+      const t = maxX > minX ? (x - minX) / (maxX - minX) : 0.5;
+      map.set(hexKey(q, r), t * maxRes);
     }
     return map;
   }
@@ -708,18 +1010,14 @@
     await updateResponseCurve(arch, probe);
   }
 
-  async function updateResponseCurve(arch, probe) {
-    const chartCanvas = document.querySelector(`#side-${arch} canvas.probe-response-chart`);
-    if (!chartCanvas || !probe?.state?.brainJson) return;
+  async function runResponseSweep(probeState, axis, brainJson) {
     const wasm = await ensureWasmProbe();
-    if (!wasm) return;
-
-    const axis = probe.sweepAxis || 'stores';
+    if (!wasm || !brainJson) return null;
     const steps = 25;
     const moveSignals = [];
     const directions = [];
     const labels = [];
-    const saved = { ...probe.state };
+    const saved = { ...probeState };
 
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -737,8 +1035,21 @@
         const base = resourceMap.get(centerKey) ?? 0;
         resourceMap.set(centerKey, base * factor);
       }
-      probe.state = { ...saved, competition, internalStores, resourceMap };
-      const d = await runForwardProbe(probe.state);
+      const state = { ...saved, competition, internalStores, resourceMap };
+      const pos = state.coords.findIndex(c => c.q === state.agentQ && c.r === state.agentR);
+      const center = resourceMap.get(hexKey(state.agentQ, state.agentR)) ?? 0;
+      const edges = edgeResourcesAt(resourceMap, state.agentQ, state.agentR);
+      const raw = wasm.forward_probe_json(
+        brainJson,
+        JSON.stringify(edges),
+        center,
+        state.competition,
+        state.internalStores,
+        Math.max(0, pos),
+        state.probeMeta.movement_output_mode,
+        state.probeMeta.movement_cost_factor,
+      );
+      const d = parseProbeResult(raw);
       labels.push(
         axis === 'stores' ? internalStores.toFixed(1)
           : axis === 'competition' ? String(competition)
@@ -747,18 +1058,122 @@
       moveSignals.push(d?.move_signal ?? 0);
       directions.push(d?.direction_degrees ?? 0);
     }
-    probe.state = saved;
+    return { labels, moveSignals, directions };
+  }
 
+  async function updateResponseCurve(arch, probe) {
+    const panel = document.getElementById(`side-${arch}`);
+    const chartCanvas = panel?.querySelector('canvas.probe-response-chart');
+    const responseBox = panel?.querySelector('.probe-response-box');
+    const timelineNote = panel?.querySelector('.probe-timeline-note');
+    if (!chartCanvas) return;
+    if (!probe?.state?.brainJson) {
+      setProbeResponseStatus(arch, 'Response sweep unavailable — probe brain not in database.', 'warn');
+      responseBox?.classList.remove('timeline-active');
+      if (timelineNote) timelineNote.textContent = '';
+      return;
+    }
+    const wasm = await ensureWasmProbe();
+    if (!wasm) {
+      setProbeResponseStatus(
+        arch,
+        `Response sweep unavailable — WASM: ${wasmProbeError || 'failed to load'}`,
+        'warn',
+      );
+      return;
+    }
+
+    const axis = probe.sweepAxis || 'stores';
+    setProbeResponseStatus(arch, 'Computing response sweep…');
+
+    const timeline = probe.timeline;
     const chartId = `probe-${arch}`;
     if (charts.has(chartId)) charts.get(chartId).destroy();
+
+    if (timeline?.timepoints?.length) {
+      const datasets = [];
+      let labels = null;
+      for (const tp of timeline.timepoints) {
+        if (tp.missing || !tp.brain_json) continue;
+        const style = TIMELINE_STYLES[tp.steps] || {
+          label: tp.label || `t=${tp.steps}`,
+          color: '#c5d0e6',
+          dash: [],
+        };
+        const sweep = await runResponseSweep(probe.state, axis, tp.brain_json);
+        if (!sweep) continue;
+        labels = sweep.labels;
+        datasets.push({
+          label: style.label,
+          data: sweep.moveSignals,
+          borderColor: style.color,
+          backgroundColor: style.color + '1a',
+          borderDash: style.dash,
+          tension: 0.25,
+          pointRadius: 0,
+          yAxisID: 'y',
+        });
+      }
+
+      if (datasets.length) {
+        responseBox?.classList.add('timeline-active');
+        if (timelineNote) {
+          timelineNote.textContent =
+            'Response sweep curves use best-by-resources individuals at each timepoint; hex map uses founder reference brain.';
+        }
+        charts.set(chartId, new Chart(chartCanvas, {
+          type: 'line',
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#c5d0e6', boxWidth: 10, font: { size: 10 } } } },
+            scales: {
+              x: {
+                title: {
+                  display: true,
+                  text: axis === 'stores' ? 'Internal stores' : axis === 'competition' ? 'Local competition' : 'Center resource',
+                  color: '#9aa6bd',
+                  font: { size: 10 },
+                },
+                ticks: { color: '#9aa6bd', maxTicksLimit: 8, font: { size: 9 } },
+                grid: { color: 'rgba(255,255,255,0.05)' },
+              },
+              y: {
+                position: 'left',
+                title: { display: true, text: 'Move signal', color: '#9aa6bd', font: { size: 10 } },
+                ticks: { color: '#9aa6bd', font: { size: 9 } },
+                grid: { color: 'rgba(255,255,255,0.05)' },
+              },
+            },
+          },
+        }));
+
+        const pending = timeline.timepoints
+          .filter(tp => tp.steps > 0 && (tp.missing || !tp.brain_json))
+          .map(tp => `${tp.steps / 1000}K`);
+        const status = pending.length
+          ? `Timeline probe (${responseSweepAxisLabel(axis)}): best by resources · pending: ${pending.join(', ')}`
+          : `Timeline probe (${responseSweepAxisLabel(axis)}): t=0 / 10K / 50K best by resources.`;
+        setProbeResponseStatus(arch, status);
+        return;
+      }
+    }
+
+    responseBox?.classList.remove('timeline-active');
+    if (timelineNote) timelineNote.textContent = '';
+
+    const sweep = await runResponseSweep(probe.state, axis, probe.state.brainJson);
+    if (!sweep) return;
+
     charts.set(chartId, new Chart(chartCanvas, {
       type: 'line',
       data: {
-        labels,
+        labels: sweep.labels,
         datasets: [
           {
             label: 'move signal',
-            data: moveSignals,
+            data: sweep.moveSignals,
             borderColor: '#6ea8fe',
             backgroundColor: 'rgba(110,168,254,0.12)',
             tension: 0.25,
@@ -767,7 +1182,7 @@
           },
           {
             label: 'direction °',
-            data: directions,
+            data: sweep.directions,
             borderColor: '#f0b429',
             borderDash: [4, 3],
             tension: 0.25,
@@ -808,6 +1223,17 @@
         },
       },
     }));
+
+    const flat = sweep.moveSignals.every(v => v === 0) && sweep.directions.every(v => v === 0);
+    if (flat) {
+      setProbeResponseStatus(
+        arch,
+        `Response sweep flat on ${responseSweepAxisLabel(axis)} — brain may not respond on this axis.`,
+        'warn',
+      );
+    } else {
+      setProbeResponseStatus(arch, `Response sweep ready (${responseSweepAxisLabel(axis)}).`);
+    }
   }
 
   function wireHexProbePanel(arch, panel) {
@@ -817,20 +1243,34 @@
     const competition = panel.querySelector('.probe-competition');
     const stores = panel.querySelector('.probe-stores');
     const sweepAxis = panel.querySelector('.probe-sweep-axis');
+    const timelineSeed = panel.querySelector('.probe-timeline-seed');
     if (!canvas) return;
 
-    const onChange = () => {
+    const onChange = async () => {
       const probe = hexProbes.get(arch);
       if (!probe?.state) return;
       probe.state.competition = Number(competition.value);
       probe.state.internalStores = Number(stores.value);
       probe.sweepAxis = sweepAxis.value;
+      if (timelineSeed && probe.cellRef) {
+        const seed = Number(timelineSeed.value);
+        if (Number.isFinite(seed)) {
+          probe.timeline = await loadTimelineForCell(
+            probe.cellRef.arch,
+            probe.cellRef.x,
+            probe.cellRef.y,
+            probe.cellRef.founder,
+            seed,
+          );
+        }
+      }
       refreshHexProbe(arch);
     };
 
     competition?.addEventListener('input', onChange);
     stores?.addEventListener('input', onChange);
     sweepAxis?.addEventListener('change', onChange);
+    timelineSeed?.addEventListener('change', onChange);
 
     canvas.addEventListener('click', evt => {
       const probe = hexProbes.get(arch);
@@ -849,8 +1289,17 @@
     const wasmNote = panel.querySelector('.probe-wasm-note');
     const canvas = panel.querySelector('canvas.hex-probe-canvas');
 
+    await ensureTimelineManifest();
+    const timelineSeed = populateTimelineSeedSelect(panel, arch, x, y, founder);
+    let timeline = null;
+    if (timelineSeed != null) {
+      timeline = await loadTimelineForCell(arch, x, y, founder, timelineSeed);
+    }
+
     if (!cell) {
       if (statsEl) statsEl.textContent = 'No data for this cell.';
+      setProbeResponseStatus(arch, 'Select a heatmap cell to run response sweep.');
+      hexProbes.set(arch, { canvas, sweepAxis: 'stores', state: null, timeline: null, cellRef: null, lastDecision: null });
       return;
     }
 
@@ -865,9 +1314,35 @@
     }
 
     if (!diag?.brain_json || !diag?.probe_meta) {
+      if (timeline?.probe_meta && timeline.timepoints?.some(tp => !tp.missing && tp.brain_json)) {
+        const probeMeta = timeline.probe_meta;
+        const resourceMap = buildResourceMap(probeMeta);
+        const coords = hexDisk(HEX_PROBE_RADIUS);
+        hexProbes.set(arch, {
+          canvas,
+          sweepAxis: panel.querySelector('.probe-sweep-axis')?.value || 'stores',
+          state: {
+            brainJson: timeline.timepoints.find(tp => !tp.missing && tp.brain_json)?.brain_json || '',
+            probeMeta,
+            resourceMap,
+            coords,
+            agentQ: 0,
+            agentR: 0,
+            competition: Number(panel.querySelector('.probe-competition')?.value || 1),
+            internalStores: Number(panel.querySelector('.probe-stores')?.value || 10),
+          },
+          timeline,
+          cellRef: { arch, x, y, founder },
+          lastDecision: null,
+        });
+        wireHexProbePanel(arch, panel);
+        await refreshHexProbe(arch);
+        return;
+      }
       if (wasmNote) {
         wasmNote.textContent = 'Probe brain not in database — re-run sweep to export founder weights.';
       }
+      setProbeResponseStatus(arch, 'Response sweep unavailable — probe brain not in database.', 'warn');
       return;
     }
 
@@ -875,7 +1350,10 @@
     if (wasmNote) {
       wasmNote.textContent = wasmProbeError
         ? `WASM probe unavailable (${wasmProbeError}). Serve via HTTP with brain_playground_wasm/ beside the HTML.`
-        : 'Click hex to move agent · sliders adjust competition & internal stores';
+        : 'Deterministic left→right resource gradient · click hex to move agent';
+    }
+    if (wasmProbeError) {
+      setProbeResponseStatus(arch, `Response sweep unavailable — WASM: ${wasmProbeError}`, 'warn');
     }
 
     const probeMeta = diag.probe_meta;
@@ -894,6 +1372,8 @@
         competition: Number(panel.querySelector('.probe-competition')?.value || 1),
         internalStores: Number(panel.querySelector('.probe-stores')?.value || 10),
       },
+      timeline,
+      cellRef: { arch, x, y, founder },
       lastDecision: null,
     });
     wireHexProbePanel(arch, panel);
@@ -1010,15 +1490,6 @@
       }
     } else {
       const yKey = metric === 'complexity' ? 'avg_complexity' : metric === 'pop_ratio' ? 'pop_ratio' : 'fitness';
-      datasets.push({
-        label: 'mean trajectory',
-        data: (cell.trajectory_mean || []).map(p => ({ x: p.step, y: p[yKey] })),
-        borderColor: '#6ea8fe',
-        backgroundColor: 'rgba(110,168,254,0.15)',
-        tension: 0.2,
-        pointRadius: 1,
-        borderWidth: 2,
-      });
       for (const run of runsForCell(arch, x, y, founder)) {
         datasets.push({
           label: `seed ${run.seed}`,
@@ -1032,35 +1503,37 @@
       }
     }
 
-    charts.set(chartId, new Chart(chartCanvas, {
-      type: 'line',
-      data: { datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        parsing: false,
-        scales: {
-          x: {
-            type: 'linear',
-            title: { display: true, text: 'Step', color: '#9aa6bd' },
-            ticks: { color: '#9aa6bd' },
-            grid: { color: 'rgba(255,255,255,0.06)' },
-          },
-          y: {
-            title: {
-              display: true,
-              text: metric === 'fitness' ? 'Fitness score' : metric === 'pop_ratio' ? 'Population ratio' : 'Mean complexity',
-              color: '#9aa6bd',
+    if (chartCanvas) {
+      charts.set(chartId, new Chart(chartCanvas, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: false,
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: 'Step', color: '#9aa6bd' },
+              ticks: { color: '#9aa6bd' },
+              grid: { color: 'rgba(255,255,255,0.06)' },
             },
-            ticks: { color: '#9aa6bd' },
-            grid: { color: 'rgba(255,255,255,0.06)' },
+            y: {
+              title: {
+                display: true,
+                text: metricAxisLabel(metric),
+                color: '#9aa6bd',
+              },
+              ticks: { color: '#9aa6bd' },
+              grid: { color: 'rgba(255,255,255,0.06)' },
+            },
+          },
+          plugins: {
+            legend: { labels: { color: '#c5d0e6', boxWidth: 12 } },
           },
         },
-        plugins: {
-          legend: { labels: { color: '#c5d0e6', boxWidth: 12 } },
-        },
-      },
-    }));
+      }));
+    }
 
     const diag = findDiagram(arch, x, y);
     renderBrainDiagram(brainCanvas, diag?.diagram);
@@ -1077,7 +1550,7 @@
 
   function renderHeatmapSection(hm) {
     const founder = document.getElementById('founder-filter').value;
-    const matrix = hm[metricMatrixKey[metric]];
+    const matrix = heatmapMatrix(hm, metric);
     const naMatrix = metric === 'fitness' ? hm.fitness_na_matrix : null;
     const [min, max] = matrixRange(matrix, naMatrix);
     const section = document.createElement('section');
@@ -1097,40 +1570,55 @@
           <table class="heatmap"></table>
         </div>
         <div class="side-panel" id="side-${hm.architecture}">
-          <div class="panel-card hex-probe-card">
-            <h3>Environment probe</h3>
-            <div class="probe-stats empty-hint">Click a heatmap cell to explore local resources and NN decisions.</div>
-            <div class="probe-wasm-note"></div>
-            <canvas class="hex-probe-canvas"></canvas>
-            <div class="probe-controls">
-              <label>Local competition
-                <input type="range" class="probe-competition" min="1" max="8" step="1" value="1"/>
-              </label>
-              <label>Internal stores
-                <input type="range" class="probe-stores" min="0" max="30" step="0.5" value="10"/>
-              </label>
-              <label style="grid-column: 1 / -1">Response sweep
-                <select class="probe-sweep-axis">
-                  <option value="stores">move signal vs internal stores</option>
-                  <option value="competition">move signal vs competition</option>
-                  <option value="center">move signal vs center resource</option>
-                </select>
-              </label>
+          <details class="panel-card panel-collapsible hex-probe-card">
+            <summary><h3>Environment probe</h3></summary>
+            <div class="panel-collapsible-body">
+              <div class="probe-stats empty-hint">Click a heatmap cell to explore local resources and NN decisions.</div>
+              <div class="probe-wasm-note"></div>
+              <canvas class="hex-probe-canvas"></canvas>
+              <div class="probe-controls">
+                <label>Local competition
+                  <input type="range" class="probe-competition" min="1" max="8" step="1" value="1"/>
+                </label>
+                <label>Internal stores
+                  <input type="range" class="probe-stores" min="0" max="30" step="0.5" value="10"/>
+                </label>
+                <label style="grid-column: 1 / -1">Response sweep
+                  <select class="probe-sweep-axis">
+                    <option value="stores">move signal vs internal stores</option>
+                    <option value="competition">move signal vs competition</option>
+                    <option value="center">move signal vs center resource</option>
+                  </select>
+                </label>
+                <label style="grid-column: 1 / -1">Timeline replicate
+                  <select class="probe-timeline-seed" disabled>
+                    <option value="">No timeline data</option>
+                  </select>
+                </label>
+              </div>
+              <div class="probe-decision">Decision vector appears after probe loads.</div>
+              <div class="panel-card chart-box probe-response-box" style="padding:8px;margin:0">
+                <canvas class="probe-response-chart"></canvas>
+              </div>
+              <div class="probe-timeline-note"></div>
+              <div class="probe-response-status" style="display:none"></div>
             </div>
-            <div class="probe-decision">Decision vector appears after probe loads.</div>
-            <div class="panel-card chart-box probe-response-box" style="padding:8px;margin:0">
-              <canvas class="probe-response-chart"></canvas>
+          </details>
+          <details class="panel-card panel-collapsible trajectory-panel">
+            <summary><h3>Fitness through time</h3></summary>
+            <div class="panel-collapsible-body">
+              <div class="trajectory-chart-wrap">
+                <canvas class="trajectory-chart"></canvas>
+              </div>
+              <div class="convergence-note"></div>
             </div>
-            <div class="convergence-note"></div>
-          </div>
-          <div class="panel-card chart-box">
-            <h3>Fitness through time</h3>
-            <canvas class="trajectory-chart"></canvas>
-          </div>
-          <div class="panel-card">
-            <h3>Brain topology</h3>
-            <canvas class="brain-canvas"></canvas>
-          </div>
+          </details>
+          <details class="panel-card panel-collapsible">
+            <summary><h3>Brain topology</h3></summary>
+            <div class="panel-collapsible-body">
+              <canvas class="brain-canvas"></canvas>
+            </div>
+          </details>
         </div>
       </div>
     `;
@@ -1188,7 +1676,31 @@
     if (sel) {
       setTimeout(() => updateSidePanel(hm.architecture, sel.x, sel.y, founder), 0);
     }
+
+    section.querySelectorAll('.panel-collapsible').forEach(el => {
+      el.addEventListener('toggle', () => {
+        if (!el.open) return;
+        const arch = hm.architecture;
+        if (el.classList.contains('trajectory-panel')) {
+          charts.get(`chart-${arch}`)?.resize();
+        }
+        if (el.classList.contains('hex-probe-card')) {
+          charts.get(`probe-${arch}`)?.resize();
+        }
+      });
+    });
+
     return section;
+  }
+
+  function updateFecundityBanner(heatmaps) {
+    const root = document.getElementById('root');
+    root.querySelector('.metric-export-banner')?.remove();
+    if (metric !== 'fecundity' || fecundityDataAvailable(heatmaps)) return;
+    const banner = document.createElement('p');
+    banner.className = 'metric-export-banner';
+    banner.textContent = 'Fecundity not in database yet — needs fecundity_matrix from a future sweep export.';
+    root.prepend(banner);
   }
 
   function renderAll() {
@@ -1203,7 +1715,9 @@
       root.innerHTML = '<p class="empty-hint">No heatmaps for this founder mode.</p>';
       return;
     }
+    updateFecundityBanner(heatmaps);
     heatmaps.forEach(hm => root.appendChild(renderHeatmapSection(hm)));
+    updateSweepProgressHint();
   }
 
   function metaValue(db, key, fallback = '') {
@@ -1297,25 +1811,34 @@
   }
 
   async function openSqliteBuffer(buffer) {
-    const SQL = await initSqlJs({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${file}`,
-    });
+    const SQL = await loadSqlJsModule();
     return new SQL.Database(new Uint8Array(buffer));
   }
 
   async function loadLandscapeFromBuffer(buffer, sourceLabel) {
-    const db = await openSqliteBuffer(buffer);
-    const next = buildDataFromDb(db);
-    const changed = !DATA || next.updated_at_ms !== lastUpdatedAtMs || next.run_count !== DATA.run_count;
-    DATA = next;
-    lastUpdatedAtMs = next.updated_at_ms || 0;
-    window.__landscapeSource = sourceLabel;
-    if (!viewerBooted || changed) {
-      bootViewer();
-    } else {
-      updateMetaLine();
+    try {
+      const db = await openSqliteBuffer(buffer);
+      const next = buildDataFromDb(db);
+      db.close();
+      const changed = !DATA || next.updated_at_ms !== lastUpdatedAtMs || next.run_count !== DATA.run_count;
+      DATA = next;
+      lastUpdatedAtMs = next.updated_at_ms || 0;
+      window.__landscapeSource = sourceLabel;
+      if (!viewerBooted || changed) {
+        bootViewer();
+      } else {
+        updateMetaLine();
+      }
+      syncLivePolling();
+    } catch (err) {
+      console.error('loadLandscapeFromBuffer', err);
+      if (DATA?.heatmaps?.length) {
+        setMetaStatus(`Heatmaps loaded · database refresh failed (${err.message})`);
+        syncLivePolling();
+        return;
+      }
+      throw err;
     }
-    syncLivePolling();
   }
 
   function progressLabel() {
@@ -1364,27 +1887,52 @@
     if (btn) btn.classList.toggle('active', liveEnabled);
   }
 
+  function parseEmbeddedLandscape() {
+    const raw = document.getElementById('landscape-data')?.textContent?.trim();
+    if (!raw || raw === 'null' || raw === '__LANDSCAPE_JSON__') return null;
+    try {
+      const parsed = JSON.parse(raw);
+      parsed.status = parsed.status || 'complete';
+      parsed.run_count = Number(parsed.run_count ?? 0);
+      parsed.total_runs = Number(parsed.total_runs ?? 0);
+      parsed.updated_at_ms = Number(parsed.updated_at_ms ?? 0);
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   async function loadLandscapeData() {
     const params = new URLSearchParams(location.search);
     dbUrl = params.get('db') || 'fitness_landscape.sqlite';
     if (params.get('live') === '0') liveEnabled = false;
+
+    setMetaStatus('Reading embedded heatmaps…');
+
+    const embedded = parseEmbeddedLandscape();
+    if (embedded?.heatmaps?.length) {
+      DATA = embedded;
+      window.__landscapeSource = 'embedded JSON (heatmaps)';
+      bootViewer();
+    }
+
     try {
+      setMetaStatus(DATA?.heatmaps?.length
+        ? 'Loading database for cell diagrams and live updates…'
+        : 'Loading fitness_landscape.sqlite…');
       const resp = await fetch(`${dbUrl}?t=${Date.now()}`, { cache: 'no-store' });
       if (!resp.ok) throw new Error(`fetch failed (${resp.status})`);
       const buf = await resp.arrayBuffer();
       await loadLandscapeFromBuffer(buf, dbUrl);
       return;
     } catch (fetchErr) {
-      const embedded = document.getElementById('landscape-data')?.textContent?.trim();
-      if (embedded && embedded !== 'null' && embedded !== '__LANDSCAPE_JSON__') {
-        DATA = JSON.parse(embedded);
-        DATA.status = 'complete';
-        window.__landscapeSource = 'embedded JSON';
-        bootViewer();
+      console.error('loadLandscapeData', fetchErr);
+      if (DATA?.heatmaps?.length) {
+        setMetaStatus(`Heatmaps ready · ${fetchErr.message} (retrying every 2s)`);
+        syncLivePolling();
         return;
       }
-      document.getElementById('meta-line').textContent =
-        `Could not load ${dbUrl} — serve this folder over HTTP or use “Load database…”. (${fetchErr.message})`;
+      setMetaStatus(`Could not load ${dbUrl} — serve this folder over HTTP or use “Load database…”. (${fetchErr.message})`);
       document.getElementById('root').innerHTML =
         '<p class="empty-hint">Waiting for fitness_landscape.sqlite. Start a sweep or click Load database… — live updates poll every 2s once the DB appears.</p>';
       syncLivePolling();
@@ -1433,8 +1981,10 @@
 
     if (!DATA.heatmaps?.length) {
       const prog = DATA.run_count > 0
-        ? `${DATA.run_count} run(s) in database — waiting for heatmap skeleton`
-        : `waiting for sweep to start (${DATA.run_count}/${DATA.total_runs || '?'} runs)`;
+        ? `${DATA.run_count} run(s) completed — heatmap skeleton missing from export`
+        : DATA.total_runs > 0
+          ? `0/${DATA.total_runs} runs — waiting for sweep output`
+          : 'waiting for sweep metadata';
       document.getElementById('root').innerHTML =
         `<p class="empty-hint">Sweep in progress — ${prog}.</p>`;
       syncLivePolling();
@@ -1443,6 +1993,28 @@
 
     renderAll();
     syncLivePolling();
+    probeTimelineApiAvailable().then(ok => {
+      const btn = document.getElementById('rebuild-timelines-btn');
+      if (!btn) return;
+      btn.title = ok
+        ? 'Rebuild probe_timelines/ from stage snapshots (runs build_probe_timelines.ps1 -SweepOutputModes)'
+        : 'Rebuild requires: python scripts/serve_fitness_landscape.py (plain http.server cannot run rebuilds)';
+    });
+  }
+
+  function updateSweepProgressHint() {
+    const root = document.getElementById('root');
+    root.querySelector('.sweep-progress-hint')?.remove();
+    if (metric === 'fecundity' || DATA?.status !== 'running' || !(DATA.total_runs > 0) || !DATA.heatmaps?.length) return;
+    const pending = DATA.heatmaps.reduce((n, hm) => {
+      const m = heatmapMatrix(hm, metric);
+      return n + m.flat().filter(v => v === null || v === undefined).length;
+    }, 0);
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint sweep-progress-hint';
+    hint.style.margin = '0 16px 12px';
+    hint.textContent = `${pending} cell(s) still pending · ${DATA.run_count}/${DATA.total_runs} runs finished`;
+    root.prepend(hint);
   }
 
   function wireControlsOnce() {
@@ -1463,6 +2035,9 @@
         ? 'Showing seed comparison'
         : 'Compare seed modes';
       if (selected) updateSidePanel(selected.arch, selected.x, selected.y, selected.founder);
+    });
+    document.getElementById('rebuild-timelines-btn').addEventListener('click', () => {
+      rebuildProbeTimelines();
     });
     document.getElementById('load-db-btn').addEventListener('click', () => {
       document.getElementById('db-file-input').click();

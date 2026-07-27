@@ -14,6 +14,8 @@ pub mod cladogram;
 pub mod hex_simulation;
 pub mod ecology_presets;
 #[cfg(not(feature = "playground"))]
+pub mod fitness_landscape;
+#[cfg(not(feature = "playground"))]
 pub mod environment;
 #[cfg(all(not(feature = "playground"), feature = "cuda"))]
 pub mod gpu_resource;

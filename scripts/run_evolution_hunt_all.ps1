@@ -68,6 +68,8 @@ try {
     Write-Host "Done in $([math]::Round($elapsed.TotalHours, 2)) hours" -ForegroundColor Green
     Write-Host "Combined: $OutDir\fitness_landscape_heatmap.html" -ForegroundColor Yellow
     Write-Host "Stage reports: $OutDir\stage_10000\promotion_report.txt (etc.)" -ForegroundColor Yellow
+    Write-Host "Probe timelines (optional, while sweep runs): pwsh scripts/build_probe_timelines.ps1 -OutDir $OutDir" -ForegroundColor DarkGray
+    Write-Host "Viewer + rebuild button: python scripts/serve_fitness_landscape.py $OutDir" -ForegroundColor DarkGray
 }
 finally {
     Stop-Transcript | Out-Null

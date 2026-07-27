@@ -2,7 +2,13 @@ use evo_movement_rust::brain::goo_graph::GooGraphBrain;
 use evo_movement_rust::brain::{BrainGenome, BrainInner, FounderWeightMode};
 use evo_movement_rust::brain_diagram::{diagram_from_brain, BrainDiagram};
 use evo_movement_rust::build_info;
-use evo_movement_rust::config::{ArchitecturePolicy, Config, MovementOutputMode};
+use evo_movement_rust::config::{ArchitecturePolicy, Config};
+use evo_movement_rust::fitness_landscape::{
+    architecture_label, build_cells_to_sweep, build_heatmaps_for_live, build_heatmaps_from_cells,
+    cells_to_grid_specs, escape_json_for_script_embed, expand_output_mode_cells, inject_live_meta,
+    slim_for_html_embed, CellAggregate, HeatmapData, LiveMeta, SweepCell, SweepProfile,
+    TrajectoryPoint,
+};
 use evo_movement_rust::simulation::Simulation;
 use evo_movement_rust::snapshot::PopulationSnapshot;
 use rand::rngs::StdRng;
@@ -15,15 +21,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TrajectoryPoint {
-    step: i32,
-    fitness: f64,
-    pop_ratio: f64,
-    avg_complexity: f64,
-    population: usize,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RunMetric {
@@ -45,35 +42,6 @@ struct RunMetric {
     #[serde(default)]
     immediate_extinction: bool,
     trajectory: Vec<TrajectoryPoint>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CellAggregate {
-    architecture: String,
-    x_label: String,
-    y_label: String,
-    founder_mode: String,
-    replicates: usize,
-    fitness_mean: f64,
-    fitness_std: f64,
-    pop_ratio_mean: f64,
-    complexity_mean: f64,
-    #[serde(default)]
-    data_na: bool,
-    trajectory_mean: Vec<TrajectoryPoint>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct HeatmapData {
-    architecture: String,
-    founder_mode: String,
-    x_labels: Vec<String>,
-    y_labels: Vec<String>,
-    fitness_matrix: Vec<Vec<Option<f64>>>,
-    #[serde(default)]
-    fitness_na_matrix: Vec<Vec<bool>>,
-    pop_ratio_matrix: Vec<Vec<Option<f64>>>,
-    complexity_matrix: Vec<Vec<Option<f64>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -148,95 +116,11 @@ struct StagedSweepState {
 
 const DEFAULT_SWEEP_STAGES: &[i32] = &[10_000, 50_000, 100_000, 200_000];
 
-#[derive(Clone, Copy)]
-struct LiveMeta {
-    status: &'static str,
-    run_count: usize,
-    total_runs: usize,
-}
-
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-fn build_expected_heatmaps(
-    cells_to_sweep: &[SweepCell],
-    founder_modes: &[String],
-) -> Vec<HeatmapData> {
-    let mut by_arch: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-    for cell in cells_to_sweep {
-        let arch = architecture_label(&cell.cfg);
-        by_arch
-            .entry(arch)
-            .or_default()
-            .push((cell.x_label.clone(), cell.y_label.clone()));
-    }
-    let mut out = Vec::new();
-    for (arch, coords) in by_arch {
-        let mut x_labels: Vec<String> = coords.iter().map(|(x, _)| x.clone()).collect();
-        sort_axis_labels(&mut x_labels);
-        x_labels.dedup();
-        let mut y_labels: Vec<String> = coords.iter().map(|(_, y)| y.clone()).collect();
-        sort_axis_labels(&mut y_labels);
-        y_labels.dedup();
-        let n_x = x_labels.len();
-        let n_y = y_labels.len();
-        for founder in founder_modes {
-            out.push(HeatmapData {
-                architecture: arch.clone(),
-                founder_mode: founder.clone(),
-                x_labels: x_labels.clone(),
-                y_labels: y_labels.clone(),
-                fitness_matrix: vec![vec![None; n_x]; n_y],
-                fitness_na_matrix: vec![vec![false; n_x]; n_y],
-                pop_ratio_matrix: vec![vec![None; n_x]; n_y],
-                complexity_matrix: vec![vec![None; n_x]; n_y],
-            });
-        }
-    }
-    out
-}
-
-fn overlay_cell_aggregates(heatmaps: &mut [HeatmapData], cells: &[CellAggregate]) {
-    for c in cells {
-        let Some(hm) = heatmaps
-            .iter_mut()
-            .find(|h| h.architecture == c.architecture && h.founder_mode == c.founder_mode)
-        else {
-            continue;
-        };
-        let Some(xi) = hm.x_labels.iter().position(|x| x == &c.x_label) else {
-            continue;
-        };
-        let Some(yi) = hm.y_labels.iter().position(|y| y == &c.y_label) else {
-            continue;
-        };
-        hm.fitness_na_matrix[yi][xi] = c.data_na;
-        hm.fitness_matrix[yi][xi] = if c.data_na {
-            None
-        } else {
-            Some(c.fitness_mean)
-        };
-        hm.pop_ratio_matrix[yi][xi] = Some(c.pop_ratio_mean);
-        hm.complexity_matrix[yi][xi] = Some(c.complexity_mean);
-    }
-}
-
-fn build_heatmaps_for_live(
-    cells: &[CellAggregate],
-    expected_grid: Option<&[SweepCell]>,
-    founder_modes: &[String],
-) -> Vec<HeatmapData> {
-    if let Some(grid) = expected_grid {
-        let mut heatmaps = build_expected_heatmaps(grid, founder_modes);
-        overlay_cell_aggregates(&mut heatmaps, cells);
-        heatmaps
-    } else {
-        build_heatmaps(cells)
-    }
 }
 
 fn landscape_output_from_runs(
@@ -248,7 +132,12 @@ fn landscape_output_from_runs(
     expected_grid: Option<&[SweepCell]>,
 ) -> LandscapeOutput {
     let cells = aggregate_cells(runs);
-    let heatmaps = build_heatmaps_for_live(&cells, expected_grid, founder_modes);
+    let grid_specs = expected_grid.map(cells_to_grid_specs);
+    let heatmaps = build_heatmaps_for_live(
+        &cells,
+        grid_specs.as_deref(),
+        founder_modes,
+    );
     LandscapeOutput {
         version: build_info::CRATE_VERSION.to_string(),
         build_id: build_info::BUILD_ID.to_string(),
@@ -263,6 +152,15 @@ fn landscape_output_from_runs(
         heatmaps,
         cell_diagrams: cell_diagrams.to_vec(),
     }
+}
+
+fn heatmaps_for_scope(
+    cells: &[CellAggregate],
+    cells_to_sweep: &[SweepCell],
+    founder_modes: &[String],
+) -> Vec<HeatmapData> {
+    let specs = cells_to_grid_specs(cells_to_sweep);
+    build_heatmaps_for_live(cells, Some(&specs), founder_modes)
 }
 
 fn flush_live_snapshot(
@@ -284,7 +182,9 @@ fn flush_live_snapshot(
         expected_grid,
     );
     let db_path = out_dir.join("fitness_landscape.sqlite");
-    write_sqlite_atomic(&db_path, &out, Some(live))
+    let html_path = out_dir.join("fitness_landscape_heatmap.html");
+    write_sqlite_atomic(&db_path, &out, Some(live))?;
+    write_html(&html_path, &out, Some(live))
 }
 
 fn flush_staged_live(
@@ -339,6 +239,7 @@ fn print_help() {
     println!("  --resume-from=PATH          Continue sweep from checkpoint JSON (skips completed runs)");
     println!("  --resume                    Resume from OUTPUT_DIR/fitness_landscape_checkpoint.json");
     println!("  --html-from-json=PATH       Regenerate HTML dashboard from existing JSON (no sims)");
+    println!("  --refresh-skeleton          Rewrite live sqlite/html with full pending grid (no sims)");
     println!("  Live viewer: HTML polls fitness_landscape.sqlite every 2s while status=running");
     println!("  --help, -h                  Show help");
 }
@@ -564,38 +465,8 @@ fn write_landscape_outputs(
     fs::write(json_path, serde_json::to_string_pretty(payload)?)?;
     write_csv(&csv_path, &payload.cells)?;
     write_sqlite_atomic(&db_path, payload, live)?;
-    write_html(&html_path, payload)?;
+    write_html(&html_path, payload, live)?;
     Ok(())
-}
-
-fn architecture_label(cfg: &Config) -> String {
-    let base = match cfg.architecture_policy {
-        ArchitecturePolicy::EvolveSpatialGraph if cfg.uses_legacy_spatial_graph() => {
-            "Spatial graph (SG)".to_string()
-        }
-        ArchitecturePolicy::EvolveSpatialGraph => {
-            let layout = cfg.spatial_blob_layout.to_ascii_lowercase();
-            if layout == "hex_edge" || layout.is_empty() {
-                "Spatial macromolecule blob".to_string()
-            } else {
-                format!("Spatial macromolecule blob ({layout})")
-            }
-        }
-        other => other.label().to_string(),
-    };
-    let mode = cfg.resolved_movement_output_mode();
-    let is_default = match cfg.architecture_policy {
-        ArchitecturePolicy::EvolveSpatialGraph => {
-            mode == MovementOutputMode::SeparateReadout
-        }
-        ArchitecturePolicy::EvolveGoo => mode == MovementOutputMode::HiddenSum,
-        _ => true,
-    };
-    if is_default {
-        base
-    } else {
-        format!("{base} ({})", mode.label())
-    }
 }
 
 fn is_spatial_architecture(arch: &str) -> bool {
@@ -1056,77 +927,6 @@ fn aggregate_cells(runs: &[RunMetric]) -> Vec<CellAggregate> {
         .collect()
 }
 
-fn cmp_axis_labels(a: &str, b: &str) -> std::cmp::Ordering {
-    fn key(label: &str) -> (String, Option<u64>) {
-        if let Some((prefix, rest)) = label.split_once('=') {
-            if let Ok(n) = rest.parse::<u64>() {
-                return (prefix.to_string(), Some(n));
-            }
-        }
-        (label.to_string(), None)
-    }
-    let (pa, na) = key(a);
-    let (pb, nb) = key(b);
-    match pa.cmp(&pb) {
-        std::cmp::Ordering::Equal => match (na, nb) {
-            (Some(a), Some(b)) => a.cmp(&b),
-            (None, None) => a.cmp(b),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-        },
-        other => other,
-    }
-}
-
-fn sort_axis_labels(labels: &mut [String]) {
-    labels.sort_by(|a, b| cmp_axis_labels(a, b));
-}
-
-fn build_heatmaps(cells: &[CellAggregate]) -> Vec<HeatmapData> {
-    let mut by_key: BTreeMap<(String, String), Vec<&CellAggregate>> = BTreeMap::new();
-    for c in cells {
-        by_key
-            .entry((c.architecture.clone(), c.founder_mode.clone()))
-            .or_default()
-            .push(c);
-    }
-    let mut out = Vec::new();
-    for ((arch, founder), vals) in by_key {
-        let mut x_labels: Vec<String> = vals.iter().map(|v| v.x_label.clone()).collect();
-        sort_axis_labels(&mut x_labels);
-        x_labels.dedup();
-        let mut y_labels: Vec<String> = vals.iter().map(|v| v.y_label.clone()).collect();
-        sort_axis_labels(&mut y_labels);
-        y_labels.dedup();
-
-        let mut fit = vec![vec![None; x_labels.len()]; y_labels.len()];
-        let mut fit_na = vec![vec![false; x_labels.len()]; y_labels.len()];
-        let mut pop = vec![vec![None; x_labels.len()]; y_labels.len()];
-        let mut cplx = vec![vec![None; x_labels.len()]; y_labels.len()];
-
-        for v in vals {
-            let xi = x_labels.iter().position(|x| x == &v.x_label).unwrap();
-            let yi = y_labels.iter().position(|y| y == &v.y_label).unwrap();
-            fit_na[yi][xi] = v.data_na;
-            fit[yi][xi] = if v.data_na { None } else { Some(v.fitness_mean) };
-            pop[yi][xi] = Some(v.pop_ratio_mean);
-            cplx[yi][xi] = Some(v.complexity_mean);
-        }
-
-        out.push(HeatmapData {
-            architecture: arch,
-            founder_mode: founder,
-            x_labels,
-            y_labels,
-            fitness_matrix: fit,
-            fitness_na_matrix: fit_na,
-            pop_ratio_matrix: pop,
-            complexity_matrix: cplx,
-        });
-    }
-    out
-}
-
 fn build_cell_diagrams(
     specs: &[(Config, String, String, usize, u64)],
 ) -> Vec<CellDiagram> {
@@ -1529,9 +1329,21 @@ fn load_viewer_template() -> io::Result<String> {
     Ok(VIEWER_TEMPLATE.to_string())
 }
 
-fn write_html(path: &Path, _out: &LandscapeOutput) -> io::Result<()> {
+fn viewer_json_payload(out: &LandscapeOutput, live: Option<LiveMeta>) -> io::Result<String> {
+    let val = serde_json::to_value(out).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let val = slim_for_html_embed(val);
+    let val = inject_live_meta(val, live, out.runs.len());
+    let mut val = val.as_object().cloned().unwrap_or_default();
+    val.insert("updated_at_ms".into(), serde_json::json!(now_ms()));
+    let json = serde_json::to_string(&val).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    Ok(escape_json_for_script_embed(&json))
+}
+
+fn write_html(path: &Path, out: &LandscapeOutput, live: Option<LiveMeta>) -> io::Result<()> {
     let template = load_viewer_template()?;
-    let html = template.replace("__LANDSCAPE_JSON__", "null");
+    let embed = viewer_json_payload(out, live)?;
+    // Replace only the <script id="landscape-data"> slot — not the JS sentinel in parseEmbeddedLandscape.
+    let html = template.replacen("__LANDSCAPE_JSON__", &embed, 1);
     fs::write(path, html)?;
     if let Some(out_dir) = path.parent() {
         copy_probe_wasm_bundle(out_dir);
@@ -1664,7 +1476,7 @@ fn regenerate_html_from_json(json_path: &Path, probe_opts: Option<(PathBuf, Swee
             backfill_probe_diagrams(&mut out, &base_root, profile, sweep_output_modes)?;
         }
     }
-    out.heatmaps = build_heatmaps(&out.cells);
+    out.heatmaps = build_heatmaps_from_cells(&out.cells);
     out.complexity_help = complexity_help();
     out.fitness_help = fitness_help();
     out.architecture_labels = architecture_labels();
@@ -1672,52 +1484,10 @@ fn regenerate_html_from_json(json_path: &Path, probe_opts: Option<(PathBuf, Swee
     let db_path = out_dir.join("fitness_landscape.sqlite");
     write_sqlite_atomic(&db_path, &out, None)?;
     let html_path = out_dir.join("fitness_landscape_heatmap.html");
-    write_html(&html_path, &out)?;
+    write_html(&html_path, &out, None)?;
     println!("sqlite: {}", db_path.display());
     println!("html: {}", html_path.display());
     Ok(())
-}
-
-#[derive(Clone)]
-struct SweepCell {
-    cfg: Config,
-    x_label: String,
-    y_label: String,
-    goo_generate_nodes: usize,
-    diagram_seed: u64,
-}
-
-fn expand_output_mode_cells(cells: Vec<SweepCell>) -> Vec<SweepCell> {
-    let mut out = Vec::new();
-    for cell in cells {
-        let modes: Option<&[MovementOutputMode]> = match cell.cfg.architecture_policy {
-            ArchitecturePolicy::EvolveSpatialGraph => Some(MovementOutputMode::spatial_sweep_modes()),
-            ArchitecturePolicy::EvolveGoo => Some(MovementOutputMode::goo_sweep_modes()),
-            _ => None,
-        };
-        if let Some(modes) = modes {
-            for &mode in modes {
-                let mut cfg = cell.cfg.clone();
-                cfg.movement_output_mode = Some(mode);
-                out.push(SweepCell {
-                    cfg,
-                    x_label: cell.x_label.clone(),
-                    y_label: cell.y_label.clone(),
-                    goo_generate_nodes: cell.goo_generate_nodes,
-                    diagram_seed: cell.diagram_seed,
-                });
-            }
-        } else {
-            out.push(cell);
-        }
-    }
-    out
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SweepProfile {
-    Full,
-    EvolutionHunt,
 }
 
 fn parse_sweep_profile(raw: &str) -> Option<SweepProfile> {
@@ -1726,114 +1496,6 @@ fn parse_sweep_profile(raw: &str) -> Option<SweepProfile> {
         "evolution_hunt" | "evolution-hunt" | "hunt" => Some(SweepProfile::EvolutionHunt),
         _ => None,
     }
-}
-
-fn build_spatial_cells(base_spatial: &Config, profile: SweepProfile) -> Vec<SweepCell> {
-    let (spatial_layers, spatial_caps): (&[usize], &[usize]) = match profile {
-        SweepProfile::Full => (&[1, 2, 4, 8, 12, 16], &[16, 24, 32, 48]),
-        SweepProfile::EvolutionHunt => (&[1, 2, 4, 8], &[32, 48]),
-    };
-    let mut cells = Vec::new();
-    for (xi, layers) in spatial_layers.iter().enumerate() {
-        for (yi, cap) in spatial_caps.iter().enumerate() {
-            let mut cfg = base_spatial.clone();
-            cfg.nn_nodes = *layers as i32;
-            cfg.max_brain_nodes = *cap as i32;
-            let x_label = if cfg.uses_legacy_spatial_graph() {
-                format!("landmarks={layers}")
-            } else {
-                format!("layers={layers}")
-            };
-            cells.push(SweepCell {
-                cfg,
-                x_label,
-                y_label: format!("max_brain_nodes={cap}"),
-                goo_generate_nodes: 1,
-                diagram_seed: (xi * 23 + yi) as u64,
-            });
-        }
-    }
-    cells
-}
-
-fn build_goo_cells(base_goo: &Config, profile: SweepProfile) -> Vec<SweepCell> {
-    let (goo_gen_nodes, goo_caps): (&[usize], &[usize]) = match profile {
-        SweepProfile::Full => (&[1, 2, 4, 8, 12], &[16, 24, 32, 48]),
-        SweepProfile::EvolutionHunt => (&[1, 2, 4, 8], &[32, 48]),
-    };
-    let mut cells = Vec::new();
-    for (xi, gn) in goo_gen_nodes.iter().enumerate() {
-        for (yi, cap) in goo_caps.iter().enumerate() {
-            let mut cfg = base_goo.clone();
-            cfg.max_brain_nodes = *cap as i32;
-            cells.push(SweepCell {
-                cfg,
-                x_label: format!("goo_nodes={gn}"),
-                y_label: format!("max_brain_nodes={cap}"),
-                goo_generate_nodes: *gn,
-                diagram_seed: (xi * 29 + yi) as u64,
-            });
-        }
-    }
-    cells
-}
-
-fn build_cells_to_sweep(
-    base_perceptron: &Config,
-    base_mlp: &Config,
-    spatial_bases: &[Config],
-    base_goo: &Config,
-    profile: SweepProfile,
-) -> Vec<SweepCell> {
-    let mut cells_to_sweep: Vec<SweepCell> = Vec::new();
-
-    let perceptron_nodes = [1, 2, 4, 8, 12, 16, 24, 32];
-    for (xi, n) in perceptron_nodes.iter().enumerate() {
-        let mut cfg = base_perceptron.clone();
-        cfg.nn_nodes = *n;
-        cells_to_sweep.push(SweepCell {
-            cfg,
-            x_label: format!("nodes={n}"),
-            y_label: "baseline".to_string(),
-            goo_generate_nodes: 1,
-            diagram_seed: xi as u64,
-        });
-    }
-
-    let mlp_nodes = [1, 2, 4, 8, 12];
-    let mlp_nodes2 = [0, 2, 4, 8];
-    for (xi, n1) in mlp_nodes.iter().enumerate() {
-        for (yi, n2) in mlp_nodes2.iter().enumerate() {
-            let mut cfg = base_mlp.clone();
-            cfg.nn_nodes = *n1;
-            if *n2 > 0 {
-                cfg.nn_layers = 2;
-                cfg.nn_nodes2 = *n2;
-            } else {
-                cfg.nn_layers = 1;
-                cfg.nn_nodes2 = 0;
-            }
-            cells_to_sweep.push(SweepCell {
-                cfg,
-                x_label: format!("L1={n1}"),
-                y_label: format!("L2={n2}"),
-                goo_generate_nodes: 1,
-                diagram_seed: (xi * 17 + yi) as u64,
-            });
-        }
-    }
-
-    for base_spatial in spatial_bases {
-        let mut spatial_cells = build_spatial_cells(base_spatial, profile);
-        for c in &mut spatial_cells {
-            c.diagram_seed ^= base_spatial.seed as u64;
-        }
-        cells_to_sweep.extend(spatial_cells);
-    }
-
-    cells_to_sweep.extend(build_goo_cells(base_goo, profile));
-
-    cells_to_sweep
 }
 
 fn load_landscape_for_merge(path: &Path) -> io::Result<LandscapeOutput> {
@@ -1869,7 +1531,7 @@ fn merge_spatial_into_landscape(
         .retain(|d| !is_spatial_architecture(&d.architecture));
     base.cell_diagrams.extend(spatial_diagrams);
     base.cells = aggregate_cells(&base.runs);
-    base.heatmaps = build_heatmaps(&base.cells);
+    base.heatmaps = build_heatmaps_from_cells(&base.cells);
     base.steps = steps;
     base.replicates = replicates;
     base.founder_modes = founder_modes
@@ -2030,7 +1692,7 @@ fn run_staged_sweep(
                 architecture_labels: architecture_labels(),
                 runs: stage_runs.clone(),
                 cells: stage_cells.clone(),
-                heatmaps: build_heatmaps(&stage_cells),
+                heatmaps: heatmaps_for_scope(&stage_cells, cells_to_sweep, founder_mode_labels),
                 cell_diagrams: cell_diagrams.to_vec(),
             };
             write_landscape_outputs(
@@ -2062,7 +1724,7 @@ fn run_staged_sweep(
                 architecture_labels: architecture_labels(),
                 runs: combined_runs,
                 cells: combined_cells.clone(),
-                heatmaps: build_heatmaps(&combined_cells),
+                heatmaps: heatmaps_for_scope(&combined_cells, cells_to_sweep, founder_mode_labels),
                 cell_diagrams: cell_diagrams.to_vec(),
             };
             write_landscape_outputs(
@@ -2124,6 +1786,7 @@ fn main() -> io::Result<()> {
     let mut cap_multiplier = 1.8f64;
     let mut founder_modes = vec![FounderWeightMode::Neutral, FounderWeightMode::RandomUniform];
     let mut html_from_json: Option<PathBuf> = None;
+    let mut refresh_skeleton = false;
     let mut arch_filter: Vec<SweepArch> = Vec::new();
     let mut sweep_output_modes = false;
     let mut sweep_profile = SweepProfile::Full;
@@ -2201,6 +1864,10 @@ fn main() -> io::Result<()> {
         }
         if let Some(v) = parse_arg_value::<String>(&arg, "--html-from-json") {
             html_from_json = Some(PathBuf::from(v));
+            continue;
+        }
+        if arg == "--refresh-skeleton" {
+            refresh_skeleton = true;
             continue;
         }
     }
@@ -2314,6 +1981,42 @@ fn main() -> io::Result<()> {
 
     let founder_mode_labels: Vec<String> = founder_modes.iter().map(|m| m.label().to_string()).collect();
 
+    if refresh_skeleton {
+        let stages = sweep_stages.clone().unwrap_or_else(|| DEFAULT_SWEEP_STAGES.to_vec());
+        let grand_total = cells_to_sweep.len() * founder_modes.len() * replicates * stages.len();
+        let mut all_runs = runs;
+        if let Ok(raw) = fs::read_to_string(out_dir.join("staged_sweep_state.json")) {
+            if let Ok(state) = serde_json::from_str::<StagedSweepState>(&raw) {
+                all_runs = state.all_runs;
+                println!(
+                    "refresh skeleton: loaded {} runs from staged_sweep_state.json",
+                    all_runs.len()
+                );
+            }
+        }
+        flush_staged_live(
+            &out_dir,
+            &all_runs,
+            &cell_diagrams,
+            &cells_to_sweep,
+            &stages,
+            replicates,
+            &founder_mode_labels,
+            grand_total,
+        )?;
+        let combined = combined_latest_runs(&all_runs);
+        let cells = aggregate_cells(&combined);
+        let hm_count =
+            heatmaps_for_scope(&cells, &cells_to_sweep, &founder_mode_labels).len();
+        println!(
+            "refreshed live viewer: {} architecture tables · {} sweep cells · {} runs in state",
+            hm_count,
+            cells_to_sweep.len(),
+            all_runs.len()
+        );
+        return Ok(());
+    }
+
     if staged_sweep {
         let stages = sweep_stages.unwrap_or_else(|| DEFAULT_SWEEP_STAGES.to_vec());
         let mut start_replicate_idx = 0usize;
@@ -2374,18 +2077,6 @@ fn main() -> io::Result<()> {
             stages
         );
         let grand_total = cells_to_sweep.len() * founder_modes.len() * replicates * stages.len();
-        let html_path = out_dir.join("fitness_landscape_heatmap.html");
-        write_html(
-            &html_path,
-            &landscape_output_from_runs(
-                &combined_latest_runs(&all_runs),
-                &cell_diagrams,
-                *stages.last().unwrap_or(&10_000),
-                replicates,
-                &founder_mode_labels,
-                Some(&cells_to_sweep),
-            ),
-        )?;
         flush_staged_live(
             &out_dir,
             &all_runs,
@@ -2396,6 +2087,7 @@ fn main() -> io::Result<()> {
             &founder_mode_labels,
             grand_total,
         )?;
+        let html_path = out_dir.join("fitness_landscape_heatmap.html");
         println!("html (live): {}", html_path.display());
         println!(
             "sqlite (live): {} · {} / {} runs in DB so far",
@@ -2432,18 +2124,6 @@ fn main() -> io::Result<()> {
     );
 
     let html_path = out_dir.join("fitness_landscape_heatmap.html");
-    write_html(
-        &html_path,
-        &landscape_output_from_runs(
-            &runs,
-            &cell_diagrams,
-            steps,
-            replicates,
-            &founder_mode_labels,
-            Some(&cells_to_sweep),
-        ),
-    )?;
-    println!("html (live): {}", html_path.display());
     flush_live_snapshot(
         &out_dir,
         &runs,
@@ -2458,6 +2138,7 @@ fn main() -> io::Result<()> {
             total_runs,
         },
     )?;
+    println!("html (live): {}", html_path.display());
     println!("sqlite (live): {}", out_dir.join("fitness_landscape.sqlite").display());
 
     let mut runs = runs;
@@ -2549,7 +2230,7 @@ fn main() -> io::Result<()> {
     }
 
     let cells = aggregate_cells(&runs);
-    let heatmaps = build_heatmaps(&cells);
+    let heatmaps = build_heatmaps_from_cells(&cells);
     let payload = if let Some(merge_path) = merge_json {
         let base = load_landscape_for_merge(&merge_path)?;
         println!("merging {} new runs into {}", runs.len(), merge_path.display());
@@ -2595,7 +2276,15 @@ fn main() -> io::Result<()> {
             total_runs,
         }),
     )?;
-    write_html(&html_path, &payload)?;
+    write_html(
+        &html_path,
+        &payload,
+        Some(LiveMeta {
+            status: "complete",
+            run_count: payload.runs.len(),
+            total_runs,
+        }),
+    )?;
 
     println!("evo-fitness-landscape {}", build_info::VERSION_LABEL);
     println!("runs: {}", payload.runs.len());
