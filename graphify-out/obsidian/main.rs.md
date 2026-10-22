@@ -1,0 +1,17 @@
+---
+source_file: "rust/src/main.rs"
+type: "code"
+community: "Community 84"
+location: "L1"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_84
+---
+
+# main.rs
+
+## Connections
+- [[main()_39]] - `contains` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_84

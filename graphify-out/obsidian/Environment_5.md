@@ -1,0 +1,21 @@
+---
+source_file: ""
+type: "code"
+community: "Community 23"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_23
+---
+
+# Environment
+
+## Connections
+- [[apply_decision()]] - `references` [EXTRACTED]
+- [[apply_decisions_sequential()]] - `references` [EXTRACTED]
+- [[apply_gather_at()]] - `references` [EXTRACTED]
+- [[edge_resources_for_position()]] - `references` [EXTRACTED]
+- [[gather_amount_for_decision()]] - `references` [EXTRACTED]
+- [[step_individuals_cpu()]] - `references` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_23

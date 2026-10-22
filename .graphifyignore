@@ -1,0 +1,77 @@
+# Build & target artifacts
+build/
+**/build/**
+target/
+**/target/**
+rust/target/
+rust/brain_playground_wasm/target/
+Testing/
+
+# Binaries & libraries
+*.exe
+*.dll
+*.pdb
+*.so
+*.dylib
+*.o
+*.a
+*.lib
+*.wasm
+
+# Python virtual environments & caches
+.venv/
+venv/
+**/__pycache__/**
+.pytest_cache/
+.ruff_cache/
+*.pyc
+
+# IDE & Editor artifacts
+.vscode/
+.cursor/
+.workspace_tmp/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Simulation runs, benchmarks & generated output data
+output/
+**/output/**
+temp_outputs/
+**/temp_outputs/**
+rust/output/
+rust/temp_outputs/
+webviewer/sim*/
+rust/webviewer/sim*/
+build/tests_out/
+out.txt
+tmp_push_repo/
+tmp_*.rs
+
+# Datasets, state dumps, tables and logs
+input/
+references/
+rust/assets/
+*.tsv
+*.jsonl
+*.log
+*.cbor
+simulation_state*.json
+**/simulation_state*.json
+
+# Secrets, environment & local sensitive files
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.pfx
+
+# Graphify output itself
+graphify-out/
+
+# Archived legacy code
+archive/
+**/archive/**
+

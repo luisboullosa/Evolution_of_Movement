@@ -1,0 +1,1298 @@
+{
+  "compare_outputs.py": {
+    "mtime": 1785145951.745706,
+    "seen": 1792680209.442428,
+    "ast_hash": "0d8be2561ab14fc48b0ca256d5dedf71",
+    "semantic_hash": "0d8be2561ab14fc48b0ca256d5dedf71"
+  },
+  "diff_temp_outputs.py": {
+    "mtime": 1785145951.7464597,
+    "seen": 1792680209.4424336,
+    "ast_hash": "9cc85552957da3aa787e9a1777bf3da4",
+    "semantic_hash": "9cc85552957da3aa787e9a1777bf3da4"
+  },
+  "rust/Cargo.toml": {
+    "mtime": 1785147505.694431,
+    "seen": 1792680209.442442,
+    "ast_hash": "1dbf9a5031882d72f3a5d3e03cab7a38",
+    "semantic_hash": "1dbf9a5031882d72f3a5d3e03cab7a38"
+  },
+  "rust/brain_playground_wasm/Cargo.toml": {
+    "mtime": 1785147505.6974566,
+    "seen": 1792680209.4424427,
+    "ast_hash": "bb74f3c09a3bdd6ca321389216de7565",
+    "semantic_hash": "bb74f3c09a3bdd6ca321389216de7565"
+  },
+  "rust/brain_playground_wasm/src/lib.rs": {
+    "mtime": 1785147505.6980312,
+    "seen": 1792680209.4424436,
+    "ast_hash": "2e0cec6a42911c0abc8ef20f33fa2c70",
+    "semantic_hash": "2e0cec6a42911c0abc8ef20f33fa2c70"
+  },
+  "rust/build.rs": {
+    "mtime": 1785147505.6980312,
+    "seen": 1792680209.4424446,
+    "ast_hash": "2aac95e03391a6b1292c4878d5d8e55a",
+    "semantic_hash": "2aac95e03391a6b1292c4878d5d8e55a"
+  },
+  "rust/configs/arch_compare_evolve_goo.json": {
+    "mtime": 1785147505.699038,
+    "seen": 1792680209.4424453,
+    "ast_hash": "0f703e8bfd469c6a20da8f7cb2e3db9b",
+    "semantic_hash": "0f703e8bfd469c6a20da8f7cb2e3db9b"
+  },
+  "rust/configs/arch_compare_evolve_mlp.json": {
+    "mtime": 1785147505.699038,
+    "seen": 1792680209.442446,
+    "ast_hash": "5e513f34f8367e21d73e4dd876ccc394",
+    "semantic_hash": "5e513f34f8367e21d73e4dd876ccc394"
+  },
+  "rust/configs/arch_compare_perceptron_only.json": {
+    "mtime": 1785147505.700037,
+    "seen": 1792680209.4424472,
+    "ast_hash": "d668e8ad45ee13627463467af86723f5",
+    "semantic_hash": "d668e8ad45ee13627463467af86723f5"
+  },
+  "rust/configs/arch_compare_spatial_graph.json": {
+    "mtime": 1785147505.700037,
+    "seen": 1792680209.442448,
+    "ast_hash": "2526b4dbd53a343fa1adc032d34a1b77",
+    "semantic_hash": "2526b4dbd53a343fa1adc032d34a1b77"
+  },
+  "rust/configs/ecology/_base_fields.json": {
+    "mtime": 1785147505.700037,
+    "seen": 1792680209.4424486,
+    "ast_hash": "f74a0d47c79b97dd187136211d1e179e",
+    "semantic_hash": "f74a0d47c79b97dd187136211d1e179e"
+  },
+  "rust/configs/ecology/goo_fast.json": {
+    "mtime": 1785147505.7010374,
+    "seen": 1792680209.4424493,
+    "ast_hash": "0a2f7cfe6a26d148ce842fea8f5a0a29",
+    "semantic_hash": "0a2f7cfe6a26d148ce842fea8f5a0a29"
+  },
+  "rust/configs/ecology/goo_medium.json": {
+    "mtime": 1785147505.7010374,
+    "seen": 1792680209.4424503,
+    "ast_hash": "8bfef3cde0ab29ab5d6e32aa9e3a7e6d",
+    "semantic_hash": "8bfef3cde0ab29ab5d6e32aa9e3a7e6d"
+  },
+  "rust/configs/ecology/goo_slow.json": {
+    "mtime": 1785147505.7010374,
+    "seen": 1792680209.4424512,
+    "ast_hash": "1fca75fd4df7335809b924f063ceaca9",
+    "semantic_hash": "1fca75fd4df7335809b924f063ceaca9"
+  },
+  "rust/configs/ecology/mlp_fast.json": {
+    "mtime": 1785147505.7020388,
+    "seen": 1792680209.442452,
+    "ast_hash": "7c5c43557cb7ae13b7864a52bdb5ce9d",
+    "semantic_hash": "7c5c43557cb7ae13b7864a52bdb5ce9d"
+  },
+  "rust/configs/ecology/mlp_medium.json": {
+    "mtime": 1785147505.7020388,
+    "seen": 1792680209.4424524,
+    "ast_hash": "2161052d35bd3be5e12be0285f7ded3b",
+    "semantic_hash": "2161052d35bd3be5e12be0285f7ded3b"
+  },
+  "rust/configs/ecology/mlp_slow.json": {
+    "mtime": 1785147505.7093234,
+    "seen": 1792680209.4424539,
+    "ast_hash": "11d19f5ef1dcbabe1daef8fd6b6a936c",
+    "semantic_hash": "11d19f5ef1dcbabe1daef8fd6b6a936c"
+  },
+  "rust/configs/ecology/perceptron_fast.json": {
+    "mtime": 1785147505.7093234,
+    "seen": 1792680209.4424546,
+    "ast_hash": "ec33f8be85cd0d6b037adf7af0f5b793",
+    "semantic_hash": "ec33f8be85cd0d6b037adf7af0f5b793"
+  },
+  "rust/configs/ecology/perceptron_medium.json": {
+    "mtime": 1785147505.7103295,
+    "seen": 1792680209.4424553,
+    "ast_hash": "a087ae24786d588ef717bb7d168f2890",
+    "semantic_hash": "a087ae24786d588ef717bb7d168f2890"
+  },
+  "rust/configs/ecology/perceptron_slow.json": {
+    "mtime": 1785147505.711332,
+    "seen": 1792680209.442456,
+    "ast_hash": "c2d8d48eb1ec8db6820623b673471521",
+    "semantic_hash": "c2d8d48eb1ec8db6820623b673471521"
+  },
+  "rust/configs/ecology/spatial_graph_fast.json": {
+    "mtime": 1785147505.711332,
+    "seen": 1792680209.4424567,
+    "ast_hash": "fbf63b7906c7dfee391381ff12c718c9",
+    "semantic_hash": "fbf63b7906c7dfee391381ff12c718c9"
+  },
+  "rust/configs/ecology/spatial_graph_medium.json": {
+    "mtime": 1785147505.711332,
+    "seen": 1792680209.4424577,
+    "ast_hash": "e87de59e55d53ddfed98b594d5d1f1c9",
+    "semantic_hash": "e87de59e55d53ddfed98b594d5d1f1c9"
+  },
+  "rust/configs/ecology/spatial_graph_slow.json": {
+    "mtime": 1785147505.71233,
+    "seen": 1792680209.4424584,
+    "ast_hash": "9260ee2ed4cef88099a9483d645de252",
+    "semantic_hash": "9260ee2ed4cef88099a9483d645de252"
+  },
+  "rust/configs/ecology_plateau80/_tuning.json": {
+    "mtime": 1785147505.714357,
+    "seen": 1792680209.442459,
+    "ast_hash": "3e6c843e487a3eda85811f22e89bbcb6",
+    "semantic_hash": "3e6c843e487a3eda85811f22e89bbcb6"
+  },
+  "rust/configs/ecology_plateau80/evolution_hunt/goo.json": {
+    "mtime": 1785147505.714357,
+    "seen": 1792680209.4424598,
+    "ast_hash": "314836ef81c786557b7236b32878fbe8",
+    "semantic_hash": "314836ef81c786557b7236b32878fbe8"
+  },
+  "rust/configs/ecology_plateau80/evolution_hunt/mlp.json": {
+    "mtime": 1785147505.714357,
+    "seen": 1792680209.4424608,
+    "ast_hash": "c028682e4efb39d80df0c837e9bfd888",
+    "semantic_hash": "c028682e4efb39d80df0c837e9bfd888"
+  },
+  "rust/configs/ecology_plateau80/evolution_hunt/perceptron.json": {
+    "mtime": 1785147505.715363,
+    "seen": 1792680209.4424615,
+    "ast_hash": "5c8c6add3081e86ef29d81b3bb991a23",
+    "semantic_hash": "5c8c6add3081e86ef29d81b3bb991a23"
+  },
+  "rust/configs/ecology_plateau80/evolution_hunt/spatial_cardinal.json": {
+    "mtime": 1785147505.715363,
+    "seen": 1792680209.4424622,
+    "ast_hash": "265daa692939c819334fad49d5ff370a",
+    "semantic_hash": "265daa692939c819334fad49d5ff370a"
+  },
+  "rust/configs/ecology_plateau80/evolution_hunt/spatial_graph.json": {
+    "mtime": 1785147505.7161088,
+    "seen": 1792680209.442463,
+    "ast_hash": "c272537d77cd68467533abf8f0b49b8f",
+    "semantic_hash": "c272537d77cd68467533abf8f0b49b8f"
+  },
+  "rust/configs/ecology_plateau80/goo_fast.json": {
+    "mtime": 1785147505.7161088,
+    "seen": 1792680209.4424634,
+    "ast_hash": "02e6f79a600f5302d190c8ffb088c303",
+    "semantic_hash": "02e6f79a600f5302d190c8ffb088c303"
+  },
+  "rust/configs/ecology_plateau80/goo_medium.json": {
+    "mtime": 1785147505.7161088,
+    "seen": 1792680209.4424646,
+    "ast_hash": "468a927016156581be8b1a062043cb9f",
+    "semantic_hash": "468a927016156581be8b1a062043cb9f"
+  },
+  "rust/configs/ecology_plateau80/goo_slow.json": {
+    "mtime": 1785147505.717116,
+    "seen": 1792680209.4424653,
+    "ast_hash": "4997289f1ff056028ad2fe6fec6d5cec",
+    "semantic_hash": "4997289f1ff056028ad2fe6fec6d5cec"
+  },
+  "rust/configs/ecology_plateau80/medium_100k/goo.json": {
+    "mtime": 1785147505.7182221,
+    "seen": 1792680209.442466,
+    "ast_hash": "87466ba575516794dca9ef4cab79d08e",
+    "semantic_hash": "87466ba575516794dca9ef4cab79d08e"
+  },
+  "rust/configs/ecology_plateau80/medium_100k/mlp.json": {
+    "mtime": 1785147505.7182221,
+    "seen": 1792680209.4424667,
+    "ast_hash": "b5258071e42ba6e167c77ff142725b10",
+    "semantic_hash": "b5258071e42ba6e167c77ff142725b10"
+  },
+  "rust/configs/ecology_plateau80/medium_100k/perceptron.json": {
+    "mtime": 1785147505.718791,
+    "seen": 1792680209.4424677,
+    "ast_hash": "1def55342587f7dbe8975b4904231d87",
+    "semantic_hash": "1def55342587f7dbe8975b4904231d87"
+  },
+  "rust/configs/ecology_plateau80/medium_100k/spatial_graph.json": {
+    "mtime": 1785147505.718791,
+    "seen": 1792680209.4424684,
+    "ast_hash": "7e6de5579c43f2903a52c8674f26dcd3",
+    "semantic_hash": "7e6de5579c43f2903a52c8674f26dcd3"
+  },
+  "rust/configs/ecology_plateau80/medium_2k/goo.json": {
+    "mtime": 1785147505.718791,
+    "seen": 1792680209.4424691,
+    "ast_hash": "586f39bcd9f06c8d7becb0f285246688",
+    "semantic_hash": "586f39bcd9f06c8d7becb0f285246688"
+  },
+  "rust/configs/ecology_plateau80/medium_2k/mlp.json": {
+    "mtime": 1785147505.718791,
+    "seen": 1792680209.4424703,
+    "ast_hash": "0f70f41654f3019c628e16a842e4a979",
+    "semantic_hash": "0f70f41654f3019c628e16a842e4a979"
+  },
+  "rust/configs/ecology_plateau80/medium_2k/perceptron.json": {
+    "mtime": 1785147505.7203035,
+    "seen": 1792680209.4424713,
+    "ast_hash": "a43bbc31af5fe2853ccb48372b92ec1e",
+    "semantic_hash": "a43bbc31af5fe2853ccb48372b92ec1e"
+  },
+  "rust/configs/ecology_plateau80/medium_2k/spatial_graph.json": {
+    "mtime": 1785147505.7203035,
+    "seen": 1792680209.4424722,
+    "ast_hash": "425d9a883981693141326a0dd7ffd92a",
+    "semantic_hash": "425d9a883981693141326a0dd7ffd92a"
+  },
+  "rust/configs/ecology_plateau80/mlp_1m_10k.json": {
+    "mtime": 1785147505.7203035,
+    "seen": 1792680209.4424732,
+    "ast_hash": "77370bd54129388633d09e567acafd9b",
+    "semantic_hash": "77370bd54129388633d09e567acafd9b"
+  },
+  "rust/configs/ecology_plateau80/mlp_1m_10k_evolve.json": {
+    "mtime": 1785147505.7213118,
+    "seen": 1792680209.442474,
+    "ast_hash": "c4487a564e4ca33ecfb4288f5ae1b33a",
+    "semantic_hash": "c4487a564e4ca33ecfb4288f5ae1b33a"
+  },
+  "rust/configs/ecology_plateau80/mlp_fast.json": {
+    "mtime": 1785147505.7213118,
+    "seen": 1792680209.4424913,
+    "ast_hash": "ef4dcce7f2ecbd2bb132251bd7f63ce4",
+    "semantic_hash": "ef4dcce7f2ecbd2bb132251bd7f63ce4"
+  },
+  "rust/configs/ecology_plateau80/mlp_medium.json": {
+    "mtime": 1785147505.7213118,
+    "seen": 1792680209.4424925,
+    "ast_hash": "9109b378d499ecaa8d33f256ac325f0e",
+    "semantic_hash": "9109b378d499ecaa8d33f256ac325f0e"
+  },
+  "rust/configs/ecology_plateau80/mlp_slow.json": {
+    "mtime": 1785147505.7223105,
+    "seen": 1792680209.4424932,
+    "ast_hash": "168827adf46c3fdb367c51d02ccede2f",
+    "semantic_hash": "168827adf46c3fdb367c51d02ccede2f"
+  },
+  "rust/configs/ecology_plateau80/perceptron_fast.json": {
+    "mtime": 1785147505.7223105,
+    "seen": 1792680209.442494,
+    "ast_hash": "28d899034b7ffef03942ca1c4a4ea835",
+    "semantic_hash": "28d899034b7ffef03942ca1c4a4ea835"
+  },
+  "rust/configs/ecology_plateau80/perceptron_focus.json": {
+    "mtime": 1785147505.7223105,
+    "seen": 1792680209.4424946,
+    "ast_hash": "dbd2c0a204dc263006ecfca0ec15fb0f",
+    "semantic_hash": "dbd2c0a204dc263006ecfca0ec15fb0f"
+  },
+  "rust/configs/ecology_plateau80/perceptron_medium.json": {
+    "mtime": 1785147505.7223105,
+    "seen": 1792680209.4424956,
+    "ast_hash": "91d9912def2f3362a298a706ba217673",
+    "semantic_hash": "91d9912def2f3362a298a706ba217673"
+  },
+  "rust/configs/ecology_plateau80/perceptron_slow.json": {
+    "mtime": 1785147505.7238183,
+    "seen": 1792680209.4424965,
+    "ast_hash": "e5afd66980f6cb194403faf3ffb7068c",
+    "semantic_hash": "e5afd66980f6cb194403faf3ffb7068c"
+  },
+  "rust/configs/ecology_plateau80/spatial_100k/spatial_fast.json": {
+    "mtime": 1785147505.7243392,
+    "seen": 1792680209.4424973,
+    "ast_hash": "c66db134321912e8b69e93848dd9331c",
+    "semantic_hash": "c66db134321912e8b69e93848dd9331c"
+  },
+  "rust/configs/ecology_plateau80/spatial_100k/spatial_medium.json": {
+    "mtime": 1785147505.7243392,
+    "seen": 1792680209.442498,
+    "ast_hash": "9f5942356496715b1764900a2e743f7d",
+    "semantic_hash": "9f5942356496715b1764900a2e743f7d"
+  },
+  "rust/configs/ecology_plateau80/spatial_100k/spatial_slow.json": {
+    "mtime": 1785147505.7243392,
+    "seen": 1792680209.442499,
+    "ast_hash": "64cc3d3c4f4214bd1b287b1c87c919ee",
+    "semantic_hash": "64cc3d3c4f4214bd1b287b1c87c919ee"
+  },
+  "rust/configs/ecology_plateau80/spatial_graph_fast.json": {
+    "mtime": 1785147505.7243392,
+    "seen": 1792680209.4424996,
+    "ast_hash": "093e2d4d7f359e16ad0f5dab1913e920",
+    "semantic_hash": "093e2d4d7f359e16ad0f5dab1913e920"
+  },
+  "rust/configs/ecology_plateau80/spatial_graph_medium.json": {
+    "mtime": 1785147505.7243392,
+    "seen": 1792680209.4425004,
+    "ast_hash": "90e864cf327f906eb289623379ce4bd0",
+    "semantic_hash": "90e864cf327f906eb289623379ce4bd0"
+  },
+  "rust/configs/ecology_plateau80/spatial_graph_slow.json": {
+    "mtime": 1785147505.7258625,
+    "seen": 1792680209.4425015,
+    "ast_hash": "26562cd246efc8b32d60bfba7e29a83c",
+    "semantic_hash": "26562cd246efc8b32d60bfba7e29a83c"
+  },
+  "rust/configs/goo_dish_1k.json": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425025,
+    "ast_hash": "35171bf9212773ae74422db98db30c60",
+    "semantic_hash": "35171bf9212773ae74422db98db30c60"
+  },
+  "rust/configs/goo_gpu_demo.json": {
+    "mtime": 1785147505.7258625,
+    "seen": 1792680209.4425032,
+    "ast_hash": "5b98200a58427b51540e31252e8c3d70",
+    "semantic_hash": "5b98200a58427b51540e31252e8c3d70"
+  },
+  "rust/configs/output_mode_sweep/_base_goo.json": {
+    "mtime": 1785147505.726925,
+    "seen": 1792680209.442504,
+    "ast_hash": "f488e7f7bdda14e423982b7e438ff7a7",
+    "semantic_hash": "f488e7f7bdda14e423982b7e438ff7a7"
+  },
+  "rust/configs/output_mode_sweep/_base_spatial.json": {
+    "mtime": 1785147505.727442,
+    "seen": 1792680209.442505,
+    "ast_hash": "827f41ef0f95c3197e648cd7fb38cc47",
+    "semantic_hash": "827f41ef0f95c3197e648cd7fb38cc47"
+  },
+  "rust/configs/output_mode_sweep/goo_hidden_sum.json": {
+    "mtime": 1785147505.727442,
+    "seen": 1792680209.4425058,
+    "ast_hash": "539ff893eda41a849ae8a51abefbc123",
+    "semantic_hash": "539ff893eda41a849ae8a51abefbc123"
+  },
+  "rust/configs/output_mode_sweep/goo_split_channels.json": {
+    "mtime": 1785147505.7280746,
+    "seen": 1792680209.4425066,
+    "ast_hash": "a2a823fea7b10df280d94890984b992a",
+    "semantic_hash": "a2a823fea7b10df280d94890984b992a"
+  },
+  "rust/configs/output_mode_sweep/spatial_hex_compass.json": {
+    "mtime": 1785147505.7285933,
+    "seen": 1792680209.4425073,
+    "ast_hash": "d1889398dff3f345583194f6e5561200",
+    "semantic_hash": "d1889398dff3f345583194f6e5561200"
+  },
+  "rust/configs/output_mode_sweep/spatial_hidden_sum.json": {
+    "mtime": 1785147505.729789,
+    "seen": 1792680209.442508,
+    "ast_hash": "33ea2f82bfe87cfcce972eb5f2585d3c",
+    "semantic_hash": "33ea2f82bfe87cfcce972eb5f2585d3c"
+  },
+  "rust/configs/output_mode_sweep/spatial_legacy_linear.json": {
+    "mtime": 1785147505.7303092,
+    "seen": 1792680209.4425087,
+    "ast_hash": "c25a13d8e4068c830b8727c40a99aa48",
+    "semantic_hash": "c25a13d8e4068c830b8727c40a99aa48"
+  },
+  "rust/configs/output_mode_sweep/spatial_linear_readout.json": {
+    "mtime": 1785147505.7303092,
+    "seen": 1792680209.4425097,
+    "ast_hash": "0d99d2c3f474188b3ff6951be05fda84",
+    "semantic_hash": "0d99d2c3f474188b3ff6951be05fda84"
+  },
+  "rust/configs/output_mode_sweep/spatial_separate_readout.json": {
+    "mtime": 1785147505.7303092,
+    "seen": 1792680209.4425104,
+    "ast_hash": "a9be6efcef7faaff5219e68c75f538b0",
+    "semantic_hash": "a9be6efcef7faaff5219e68c75f538b0"
+  },
+  "rust/configs/pipeline_100k/goo.json": {
+    "mtime": 1785147505.730837,
+    "seen": 1792680209.442511,
+    "ast_hash": "1a95373ff84d5dadb663eab694807d81",
+    "semantic_hash": "1a95373ff84d5dadb663eab694807d81"
+  },
+  "rust/configs/pipeline_100k/mlp.json": {
+    "mtime": 1785147505.7314463,
+    "seen": 1792680209.4425118,
+    "ast_hash": "a93a1d9ce001abc3b65d8faff61f8206",
+    "semantic_hash": "a93a1d9ce001abc3b65d8faff61f8206"
+  },
+  "rust/configs/pipeline_100k/perceptron.json": {
+    "mtime": 1785147505.7314463,
+    "seen": 1792680209.4425123,
+    "ast_hash": "28ae9f3843e28fc7bd433d66b6d1dcfb",
+    "semantic_hash": "28ae9f3843e28fc7bd433d66b6d1dcfb"
+  },
+  "rust/configs/pipeline_100k/spatial_graph.json": {
+    "mtime": 1785147505.7314463,
+    "seen": 1792680209.4425132,
+    "ast_hash": "3200939cb75531f7137c811e5b69be74",
+    "semantic_hash": "3200939cb75531f7137c811e5b69be74"
+  },
+  "rust/configs/pipeline_goo_evolved/goo.json": {
+    "mtime": 1785675424.013448,
+    "seen": 1792680209.4425142,
+    "ast_hash": "7bbae1fb93033399a442ace18a3881ce",
+    "semantic_hash": "7bbae1fb93033399a442ace18a3881ce"
+  },
+  "rust/configs/pipeline_native/goo.json": {
+    "mtime": 1785147505.7324517,
+    "seen": 1792680209.442515,
+    "ast_hash": "c8212b257d807cd785cc7cffdce1b2ff",
+    "semantic_hash": "c8212b257d807cd785cc7cffdce1b2ff"
+  },
+  "rust/configs/pipeline_native/mlp.json": {
+    "mtime": 1785147505.7324517,
+    "seen": 1792680209.4425156,
+    "ast_hash": "e91158e2156fc266c9886fa82b3ecaaa",
+    "semantic_hash": "e91158e2156fc266c9886fa82b3ecaaa"
+  },
+  "rust/configs/pipeline_native/perceptron.json": {
+    "mtime": 1785147505.7324517,
+    "seen": 1792680209.4425166,
+    "ast_hash": "23f633ca6d985f28f538b7d2fb064550",
+    "semantic_hash": "23f633ca6d985f28f538b7d2fb064550"
+  },
+  "rust/configs/pipeline_native/spatial_graph.json": {
+    "mtime": 1785147505.7334518,
+    "seen": 1792680209.4425175,
+    "ast_hash": "dd38b8cf568437ec493eae7ad0fc95fb",
+    "semantic_hash": "dd38b8cf568437ec493eae7ad0fc95fb"
+  },
+  "rust/configs/pipeline_smoke/goo.json": {
+    "mtime": 1785147505.7334518,
+    "seen": 1792680209.4425182,
+    "ast_hash": "23383a2aab6a3827dac4f18185c52523",
+    "semantic_hash": "23383a2aab6a3827dac4f18185c52523"
+  },
+  "rust/configs/pipeline_smoke/mlp.json": {
+    "mtime": 1785147505.733956,
+    "seen": 1792680209.4425192,
+    "ast_hash": "281af8f7c46e9463c840e3c4952ebd46",
+    "semantic_hash": "281af8f7c46e9463c840e3c4952ebd46"
+  },
+  "rust/configs/pipeline_smoke/perceptron.json": {
+    "mtime": 1785147505.733956,
+    "seen": 1792680209.44252,
+    "ast_hash": "36e711c5789eb37e3a0b22fc6eaa5af1",
+    "semantic_hash": "36e711c5789eb37e3a0b22fc6eaa5af1"
+  },
+  "rust/configs/pipeline_smoke/spatial_graph.json": {
+    "mtime": 1785147505.73447,
+    "seen": 1792680209.442521,
+    "ast_hash": "176d5b2474765c8b5d5c3d1fef8b403c",
+    "semantic_hash": "176d5b2474765c8b5d5c3d1fef8b403c"
+  },
+  "rust/cuda/brain_step_kernel.cu": {
+    "mtime": 1785147505.73447,
+    "seen": 1792680209.4425218,
+    "ast_hash": "50d21c7811d2871a2715e0e69f22a30f",
+    "semantic_hash": "50d21c7811d2871a2715e0e69f22a30f"
+  },
+  "rust/cuda/tensor_kernel.cu": {
+    "mtime": 1785145952.1381,
+    "seen": 1792680209.4425235,
+    "ast_hash": "fd8a4519cfd21ca4fcf31d9e018dfbf9",
+    "semantic_hash": "fd8a4519cfd21ca4fcf31d9e018dfbf9"
+  },
+  "rust/interactive_config.json": {
+    "mtime": 1785147505.73447,
+    "seen": 1792680209.4425242,
+    "ast_hash": "59e47dca847b5a6d33645a4cf11da0df",
+    "semantic_hash": "59e47dca847b5a6d33645a4cf11da0df"
+  },
+  "rust/longer_config.json": {
+    "mtime": 1769340226.0582855,
+    "seen": 1792680209.442525,
+    "ast_hash": "d49e550fa5829f8301b1fd73040a8ff7",
+    "semantic_hash": "d49e550fa5829f8301b1fd73040a8ff7"
+  },
+  "rust/minimal_cuda_test.json": {
+    "mtime": 1785145952.1381,
+    "seen": 1792680209.4425256,
+    "ast_hash": "55f72b1867a9a53611d94f2430e93df6",
+    "semantic_hash": "55f72b1867a9a53611d94f2430e93df6"
+  },
+  "rust/prod_run.json": {
+    "mtime": 1769340226.0582855,
+    "seen": 1792680209.4425268,
+    "ast_hash": "684fd4a0ce9c13146ce8a0f0d44fe88f",
+    "semantic_hash": "684fd4a0ce9c13146ce8a0f0d44fe88f"
+  },
+  "rust/scripts/run_output_mode_sweep.ps1": {
+    "mtime": 1785147505.7354753,
+    "seen": 1792680209.4425275,
+    "ast_hash": "8bb2adf05bf3837409c8fb56f5ca5aec",
+    "semantic_hash": "8bb2adf05bf3837409c8fb56f5ca5aec"
+  },
+  "rust/src/architecture_lineage.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425282,
+    "ast_hash": "a488cb9f3ccfbf1faca0c0c33d287b13",
+    "semantic_hash": "a488cb9f3ccfbf1faca0c0c33d287b13"
+  },
+  "rust/src/bin/evo_fitness_landscape.rs": {
+    "mtime": 1785147505.7354753,
+    "seen": 1792680209.442529,
+    "ast_hash": "42164dc4c1b80e1dd0a09c752765ea3c",
+    "semantic_hash": "42164dc4c1b80e1dd0a09c752765ea3c"
+  },
+  "rust/src/bin/evo_movement_goo.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425297,
+    "ast_hash": "62db18a99d28cafc7f4f3dcd04ed273b",
+    "semantic_hash": "62db18a99d28cafc7f4f3dcd04ed273b"
+  },
+  "rust/src/bin/evo_movement_mlp.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425306,
+    "ast_hash": "c036dfaefd14867431c7d784b85f49cf",
+    "semantic_hash": "c036dfaefd14867431c7d784b85f49cf"
+  },
+  "rust/src/bin/evo_movement_perceptron.rs": {
+    "mtime": 1785675423.94892,
+    "seen": 1792680209.4425313,
+    "ast_hash": "f9cdec6accaa1afe167e88eac304e1a7",
+    "semantic_hash": "f9cdec6accaa1afe167e88eac304e1a7"
+  },
+  "rust/src/bin/evo_movement_rust.rs": {
+    "mtime": 1785147505.737985,
+    "seen": 1792680209.442532,
+    "ast_hash": "8ce73f205c0b9f263e301f623fad7eb1",
+    "semantic_hash": "8ce73f205c0b9f263e301f623fad7eb1"
+  },
+  "rust/src/bin/evo_movement_spatial.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425325,
+    "ast_hash": "f70f24da06f85f979ef8a05c424d747d",
+    "semantic_hash": "f70f24da06f85f979ef8a05c424d747d"
+  },
+  "rust/src/bin/evo_probe_timeline.rs": {
+    "mtime": 1785147505.7384903,
+    "seen": 1792680209.442534,
+    "ast_hash": "081f01adc1b5ab6a3d5fcbcb5cddb872",
+    "semantic_hash": "081f01adc1b5ab6a3d5fcbcb5cddb872"
+  },
+  "rust/src/bin/import_snapshots.rs": {
+    "mtime": 1785675424.215079,
+    "seen": 1792680209.4425352,
+    "ast_hash": "05b5526c7a5592dbbb30ec742004c5c2",
+    "semantic_hash": "05b5526c7a5592dbbb30ec742004c5c2"
+  },
+  "rust/src/bin/init_test.rs": {
+    "mtime": 1771536146.4602377,
+    "seen": 1792680209.4425359,
+    "ast_hash": "06d921facfa79ef1c9d675b60b67085b",
+    "semantic_hash": "06d921facfa79ef1c9d675b60b67085b"
+  },
+  "rust/src/bin/interactive.rs": {
+    "mtime": 1785148122.8543663,
+    "seen": 1792680209.4425366,
+    "ast_hash": "1e4e72ba54afc02efb40a2570198c12d",
+    "semantic_hash": "1e4e72ba54afc02efb40a2570198c12d"
+  },
+  "rust/src/bin/lab.rs": {
+    "mtime": 1785147505.7397752,
+    "seen": 1792680209.4425375,
+    "ast_hash": "610dd09207cd07d27dc708287ca1b33f",
+    "semantic_hash": "610dd09207cd07d27dc708287ca1b33f"
+  },
+  "rust/src/brain/genome.rs": {
+    "mtime": 1792682181.249897,
+    "seen": 1792685901.153477,
+    "ast_hash": "02cc151c3b4500bbeba113e275eaf48b",
+    "semantic_hash": "02cc151c3b4500bbeba113e275eaf48b"
+  },
+  "rust/src/brain/goo_graph.rs": {
+    "mtime": 1792682277.2197793,
+    "seen": 1792685901.1534796,
+    "ast_hash": "b9dd8b54c5369813cbf66f3a867b4ae9",
+    "semantic_hash": "b9dd8b54c5369813cbf66f3a867b4ae9"
+  },
+  "rust/src/brain/gpu_pack.rs": {
+    "mtime": 1785148061.5483403,
+    "seen": 1792680209.4425397,
+    "ast_hash": "acc68159fec9ff8c87e77a66d5a82ee5",
+    "semantic_hash": "acc68159fec9ff8c87e77a66d5a82ee5"
+  },
+  "rust/src/brain/mlp.rs": {
+    "mtime": 1792682226.6156647,
+    "seen": 1792685901.1535575,
+    "ast_hash": "7dbd10287d0f90e1c041f9d8e34422eb",
+    "semantic_hash": "7dbd10287d0f90e1c041f9d8e34422eb"
+  },
+  "rust/src/brain/mod.rs": {
+    "mtime": 1792682167.1478188,
+    "seen": 1792685901.1535587,
+    "ast_hash": "ef5a0bec5a266a969fd26991b3bac68f",
+    "semantic_hash": "ef5a0bec5a266a969fd26991b3bac68f"
+  },
+  "rust/src/brain/movement_output.rs": {
+    "mtime": 1792682215.8425627,
+    "seen": 1792685901.1535604,
+    "ast_hash": "70bdbbdfaf4fd667c2257246b59259f8",
+    "semantic_hash": "70bdbbdfaf4fd667c2257246b59259f8"
+  },
+  "rust/src/brain/mutation.rs": {
+    "mtime": 1785147505.7422845,
+    "seen": 1792680209.4425426,
+    "ast_hash": "6c128b8221f25e9ae575915a0ba6fe34",
+    "semantic_hash": "6c128b8221f25e9ae575915a0ba6fe34"
+  },
+  "rust/src/brain/perceptron.rs": {
+    "mtime": 1792682205.9291756,
+    "seen": 1792685901.1536357,
+    "ast_hash": "9bec6724329b3a9dd49a133ebfec5ec0",
+    "semantic_hash": "9bec6724329b3a9dd49a133ebfec5ec0"
+  },
+  "rust/src/brain/spatial_blob.rs": {
+    "mtime": 1792693349.9865787,
+    "seen": 1792694097.8722095,
+    "ast_hash": "8b28e1c02d734df170c8a901cb4369c3",
+    "semantic_hash": "8b28e1c02d734df170c8a901cb4369c3"
+  },
+  "rust/src/brain/spatial_graph.rs": {
+    "mtime": 1792682249.446056,
+    "seen": 1792685901.1536384,
+    "ast_hash": "1733cac4644accafd368449619758185",
+    "semantic_hash": "1733cac4644accafd368449619758185"
+  },
+  "rust/src/brain_diagram.rs": {
+    "mtime": 1785147505.7443104,
+    "seen": 1792680209.4425457,
+    "ast_hash": "128132ffaaa27a76d51baaf8cd13e099",
+    "semantic_hash": "128132ffaaa27a76d51baaf8cd13e099"
+  },
+  "rust/src/brain_playground.rs": {
+    "mtime": 1785147505.7443104,
+    "seen": 1792680209.4425464,
+    "ast_hash": "e5b97b2889c51bd6685dbc033ed55090",
+    "semantic_hash": "e5b97b2889c51bd6685dbc033ed55090"
+  },
+  "rust/src/build_info.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.442547,
+    "ast_hash": "05adf9db354d1e7900ef965a65e67645",
+    "semantic_hash": "05adf9db354d1e7900ef965a65e67645"
+  },
+  "rust/src/cladogram.rs": {
+    "mtime": 1785675424.0114489,
+    "seen": 1792680209.442548,
+    "ast_hash": "784dc0deb8932604d25bebdbcb4ed013",
+    "semantic_hash": "784dc0deb8932604d25bebdbcb4ed013"
+  },
+  "rust/src/config.rs": {
+    "mtime": 1792692804.109692,
+    "seen": 1792694097.8737216,
+    "ast_hash": "246bf1370cf7115a7e3be7db16777a27",
+    "semantic_hash": "246bf1370cf7115a7e3be7db16777a27"
+  },
+  "rust/src/ecology_presets.rs": {
+    "mtime": 1785147505.7458758,
+    "seen": 1792680209.4425495,
+    "ast_hash": "f6e3ed5b982950d6b7bdba73c1f25be0",
+    "semantic_hash": "f6e3ed5b982950d6b7bdba73c1f25be0"
+  },
+  "rust/src/environment.rs": {
+    "mtime": 1785147505.7458758,
+    "seen": 1792680209.4425502,
+    "ast_hash": "e04fbe8c91131acd540282f783d8d651",
+    "semantic_hash": "e04fbe8c91131acd540282f783d8d651"
+  },
+  "rust/src/example_config.rs": {
+    "mtime": 1769340226.0582855,
+    "seen": 1792680209.4425516,
+    "ast_hash": "75e075bb43c721a588c6439c477b4c1f",
+    "semantic_hash": "75e075bb43c721a588c6439c477b4c1f"
+  },
+  "rust/src/fitness_landscape/mod.rs": {
+    "mtime": 1785147505.746881,
+    "seen": 1792680209.4425523,
+    "ast_hash": "96ce7d83e0bd4a494232f960590ee7c1",
+    "semantic_hash": "96ce7d83e0bd4a494232f960590ee7c1"
+  },
+  "rust/src/fitness_landscape/probe_timeline.rs": {
+    "mtime": 1785147505.747577,
+    "seen": 1792680209.442553,
+    "ast_hash": "b1c437f629f945d165824e8ef6613beb",
+    "semantic_hash": "b1c437f629f945d165824e8ef6613beb"
+  },
+  "rust/src/fitness_landscape/skeleton.rs": {
+    "mtime": 1785147505.747577,
+    "seen": 1792680209.4425535,
+    "ast_hash": "2d037ea5754cb8438c79912c52a3a632",
+    "semantic_hash": "2d037ea5754cb8438c79912c52a3a632"
+  },
+  "rust/src/fitness_landscape/sweep_grid.rs": {
+    "mtime": 1785147505.7485838,
+    "seen": 1792680209.4425545,
+    "ast_hash": "3f4dfd090ae23d4feaafc7a25b05800d",
+    "semantic_hash": "3f4dfd090ae23d4feaafc7a25b05800d"
+  },
+  "rust/src/fitness_landscape/viewer_embed.rs": {
+    "mtime": 1785147505.7485838,
+    "seen": 1792680209.4425554,
+    "ast_hash": "508345a06f236721714a2ab70dad60f2",
+    "semantic_hash": "508345a06f236721714a2ab70dad60f2"
+  },
+  "rust/src/gpu_resource.rs": {
+    "mtime": 1771536146.4622383,
+    "seen": 1792680209.4425561,
+    "ast_hash": "85d3dfca70a3cd37aca790de8112f250",
+    "semantic_hash": "85d3dfca70a3cd37aca790de8112f250"
+  },
+  "rust/src/headless.rs": {
+    "mtime": 1785147505.7490919,
+    "seen": 1792680209.4425569,
+    "ast_hash": "063bcd76d396d08cc19c0933d1088599",
+    "semantic_hash": "063bcd76d396d08cc19c0933d1088599"
+  },
+  "rust/src/hex_dish.rs": {
+    "mtime": 1785147505.7496648,
+    "seen": 1792680209.442558,
+    "ast_hash": "8acfd4fc92ce82ef3590ee1ef61d963f",
+    "semantic_hash": "8acfd4fc92ce82ef3590ee1ef61d963f"
+  },
+  "rust/src/hex_grid.rs": {
+    "mtime": 1771536146.463239,
+    "seen": 1792680209.4425588,
+    "ast_hash": "d3c73bca6f945a918af1229be32cfd88",
+    "semantic_hash": "d3c73bca6f945a918af1229be32cfd88"
+  },
+  "rust/src/hex_simulation.rs": {
+    "mtime": 1792682349.34048,
+    "seen": 1792685901.1549363,
+    "ast_hash": "3818cc3f9d17058788ec26b545292626",
+    "semantic_hash": "3818cc3f9d17058788ec26b545292626"
+  },
+  "rust/src/individual.rs": {
+    "mtime": 1792692855.9264777,
+    "seen": 1792694097.876979,
+    "ast_hash": "86183c27f780e97427cfa57ce3698c04",
+    "semantic_hash": "86183c27f780e97427cfa57ce3698c04"
+  },
+  "rust/src/lab_dish.rs": {
+    "mtime": 1785147505.7506697,
+    "seen": 1792680209.442561,
+    "ast_hash": "01df6cb5bd189df26d8a10116e87eac5",
+    "semantic_hash": "01df6cb5bd189df26d8a10116e87eac5"
+  },
+  "rust/src/lib.rs": {
+    "mtime": 1785148079.9564495,
+    "seen": 1792680209.4425619,
+    "ast_hash": "57012e7625e8d7aabc610e4e2fd896f4",
+    "semantic_hash": "57012e7625e8d7aabc610e4e2fd896f4"
+  },
+  "rust/src/main.rs": {
+    "mtime": 1785675424.012447,
+    "seen": 1792680209.4425623,
+    "ast_hash": "7911e64a29e4df8d71d1c0a49e75051c",
+    "semantic_hash": "7911e64a29e4df8d71d1c0a49e75051c"
+  },
+  "rust/src/neural_network.rs": {
+    "mtime": 1785147505.752672,
+    "seen": 1792680209.442563,
+    "ast_hash": "712f88520efb6a3b351ef62831a1320a",
+    "semantic_hash": "712f88520efb6a3b351ef62831a1320a"
+  },
+  "rust/src/nn_viz.rs": {
+    "mtime": 1785147505.752672,
+    "seen": 1792680209.4425638,
+    "ast_hash": "f1934609381148b954ac1e0f269e2eff",
+    "semantic_hash": "f1934609381148b954ac1e0f269e2eff"
+  },
+  "rust/src/perlin.rs": {
+    "mtime": 1785147505.7536705,
+    "seen": 1792680209.4425647,
+    "ast_hash": "d431de90866c8f8f0d1a78af968b1233",
+    "semantic_hash": "d431de90866c8f8f0d1a78af968b1233"
+  },
+  "rust/src/population_dynamics.rs": {
+    "mtime": 1792692901.6352472,
+    "seen": 1792694097.8781617,
+    "ast_hash": "6c3a775da21051921776ad4254a48071",
+    "semantic_hash": "6c3a775da21051921776ad4254a48071"
+  },
+  "rust/src/population_tensor.rs": {
+    "mtime": 1785148007.5423706,
+    "seen": 1792680209.4425662,
+    "ast_hash": "bf16d930772446bac89c07e8abd129d7",
+    "semantic_hash": "bf16d930772446bac89c07e8abd129d7"
+  },
+  "rust/src/run_record.rs": {
+    "mtime": 1785675424.0934088,
+    "seen": 1792680209.4425669,
+    "ast_hash": "d20db7ca192690c7661dd640e37bcf20",
+    "semantic_hash": "d20db7ca192690c7661dd640e37bcf20"
+  },
+  "rust/src/save_state.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425673,
+    "ast_hash": "66403594be8586276edd128f0d98d33d",
+    "semantic_hash": "66403594be8586276edd128f0d98d33d"
+  },
+  "rust/src/simulation.rs": {
+    "mtime": 1792693592.4277053,
+    "seen": 1792694097.8787947,
+    "ast_hash": "3c6b4ba2b0fd21e2d6a4c6c5c1889130",
+    "semantic_hash": "3c6b4ba2b0fd21e2d6a4c6c5c1889130"
+  },
+  "rust/src/snapshot.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.442569,
+    "ast_hash": "4525ecf1d4ed21928b3577ca63e896ab",
+    "semantic_hash": "4525ecf1d4ed21928b3577ca63e896ab"
+  },
+  "rust/src/snapshot_registry.rs": {
+    "mtime": 1785675424.215079,
+    "seen": 1792680209.44257,
+    "ast_hash": "4a57195aa3f798ccab07eeda647e14bf",
+    "semantic_hash": "4a57195aa3f798ccab07eeda647e14bf"
+  },
+  "rust/src/step_engine.rs": {
+    "mtime": 1792692948.637311,
+    "seen": 1792694097.8791924,
+    "ast_hash": "daccdf3c163260d654d8f1a57270f8fa",
+    "semantic_hash": "daccdf3c163260d654d8f1a57270f8fa"
+  },
+  "rust/src/tensor.rs": {
+    "mtime": 1785675424.012447,
+    "seen": 1792680209.4425714,
+    "ast_hash": "2ececf8274e0607ed073f5c9c0ac3616",
+    "semantic_hash": "2ececf8274e0607ed073f5c9c0ac3616"
+  },
+  "rust/src/webviewer_writer.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425724,
+    "ast_hash": "813dc9b67bc49e59d45f472f6d04eded",
+    "semantic_hash": "813dc9b67bc49e59d45f472f6d04eded"
+  },
+  "rust/tests/fitness_landscape_evolution_hunt.rs": {
+    "mtime": 1785147505.7587976,
+    "seen": 1792680209.442573,
+    "ast_hash": "a43f3d9c917357a6d3a368547bc7aa66",
+    "semantic_hash": "a43f3d9c917357a6d3a368547bc7aa66"
+  },
+  "rust/tests/integration_basic.rs": {
+    "mtime": 1785675424.215079,
+    "seen": 1792680209.4425738,
+    "ast_hash": "d75faaf7fc1b7a41b32b75343464979b",
+    "semantic_hash": "d75faaf7fc1b7a41b32b75343464979b"
+  },
+  "rust/tests/interactive_pipeline.rs": {
+    "mtime": 1785147505.7598681,
+    "seen": 1792680209.4425752,
+    "ast_hash": "8eed98e41ab639704a7aca28d0db6e59",
+    "semantic_hash": "8eed98e41ab639704a7aca28d0db6e59"
+  },
+  "rust/tests/parity.rs": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.442576,
+    "ast_hash": "d4f74083f041d06f3221cd935e753fa5",
+    "semantic_hash": "d4f74083f041d06f3221cd935e753fa5"
+  },
+  "scripts/backfill_run_records_100k.ps1": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425972,
+    "ast_hash": "6e69d0f9bf90df3126cd862d2843218e",
+    "semantic_hash": "6e69d0f9bf90df3126cd862d2843218e"
+  },
+  "scripts/build_brain_playground_wasm.ps1": {
+    "mtime": 1785147505.760876,
+    "seen": 1792680209.4425979,
+    "ast_hash": "e72f9f3dc39d7737a4a75e6aca29409a",
+    "semantic_hash": "e72f9f3dc39d7737a4a75e6aca29409a"
+  },
+  "scripts/build_probe_timelines.ps1": {
+    "mtime": 1785147505.760876,
+    "seen": 1792680209.4425986,
+    "ast_hash": "5c9742e8fd71ded031295615cb799636",
+    "semantic_hash": "5c9742e8fd71ded031295615cb799636"
+  },
+  "scripts/compare_cuda_simulations.py": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4425995,
+    "ast_hash": "74bf2f54bb73ec4071dc7fe801d423db",
+    "semantic_hash": "74bf2f54bb73ec4071dc7fe801d423db"
+  },
+  "scripts/compute_sim_metrics.py": {
+    "mtime": 1785145952.1862056,
+    "seen": 1792680209.4426003,
+    "ast_hash": "36a047b7cd2cb902350a597c00e189fa",
+    "semantic_hash": "36a047b7cd2cb902350a597c00e189fa"
+  },
+  "scripts/evolution_analysis/classify_architecture_trajectories.py": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.442601,
+    "ast_hash": "915ccf5fdff093fe1d489c10ee1fd5b4",
+    "semantic_hash": "915ccf5fdff093fe1d489c10ee1fd5b4"
+  },
+  "scripts/evolution_analysis/compare_treatments.py": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4426014,
+    "ast_hash": "b815a22b84cbe7472f164fd1b79b7b34",
+    "semantic_hash": "b815a22b84cbe7472f164fd1b79b7b34"
+  },
+  "scripts/evolution_analysis/phylo_metrics.py": {
+    "mtime": 1785675424.0934088,
+    "seen": 1792680209.4426022,
+    "ast_hash": "b9f430e0351ee0299a9a511bb7c8f8b8",
+    "semantic_hash": "b9f430e0351ee0299a9a511bb7c8f8b8"
+  },
+  "scripts/evolution_analysis/visualize_lineages.py": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.442603,
+    "ast_hash": "3cb682b8eb115625348bbd37a125fda8",
+    "semantic_hash": "3cb682b8eb115625348bbd37a125fda8"
+  },
+  "scripts/generate_webviewer_outputs.ps1": {
+    "mtime": 1769340226.0740244,
+    "seen": 1792680209.4426038,
+    "ast_hash": "23d8dc414524cb8ae034290481a114a1",
+    "semantic_hash": "23d8dc414524cb8ae034290481a114a1"
+  },
+  "scripts/headless_sim_progress.ps1": {
+    "mtime": 1785147505.7638755,
+    "seen": 1792680209.4426045,
+    "ast_hash": "4d54617079275b018d53b0db5c0638d6",
+    "semantic_hash": "4d54617079275b018d53b0db5c0638d6"
+  },
+  "scripts/import_snapshots_to_registry.ps1": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4426053,
+    "ast_hash": "0b98c12c34c60732a044d4b79a76a933",
+    "semantic_hash": "0b98c12c34c60732a044d4b79a76a933"
+  },
+  "scripts/package_hostinger_dashboard.py": {
+    "mtime": 1785145952.1887307,
+    "seen": 1792680209.442606,
+    "ast_hash": "043886db5751cb242e27e71dd897bbb1",
+    "semantic_hash": "043886db5751cb242e27e71dd897bbb1"
+  },
+  "scripts/remote/continue_missing_pilots.py": {
+    "mtime": 1785145952.190091,
+    "seen": 1792680209.442607,
+    "ast_hash": "3018c7f35b079f8dc808625dc0bd053f",
+    "semantic_hash": "3018c7f35b079f8dc808625dc0bd053f"
+  },
+  "scripts/remote/remote_run_job.py": {
+    "mtime": 1785145952.1905975,
+    "seen": 1792680209.4426079,
+    "ast_hash": "96469fd5bb090cd2291a07c179f96df3",
+    "semantic_hash": "96469fd5bb090cd2291a07c179f96df3"
+  },
+  "scripts/remote_scan.ps1": {
+    "mtime": 1769340226.0740244,
+    "seen": 1792680209.4426086,
+    "ast_hash": "6026a9e9034ad7bb45494d5d0982d548",
+    "semantic_hash": "6026a9e9034ad7bb45494d5d0982d548"
+  },
+  "scripts/remote_scan_orchestrator.py": {
+    "mtime": 1785145952.191127,
+    "seen": 1792680209.4426093,
+    "ast_hash": "5a2551883fa2c209a4abf11f6aae39ce",
+    "semantic_hash": "5a2551883fa2c209a4abf11f6aae39ce"
+  },
+  "scripts/run_architecture_comparison.py": {
+    "mtime": 1785675424.2155995,
+    "seen": 1792680209.4426103,
+    "ast_hash": "a73a9fbfc4f338c9a65bb53530ecb1d3",
+    "semantic_hash": "a73a9fbfc4f338c9a65bb53530ecb1d3"
+  },
+  "scripts/run_ecology_8hr.ps1": {
+    "mtime": 1785147505.7653868,
+    "seen": 1792680209.4426112,
+    "ast_hash": "9535249eafd85759cfe61dfd71e079ff",
+    "semantic_hash": "9535249eafd85759cfe61dfd71e079ff"
+  },
+  "scripts/run_ecology_plateau80_8hr.ps1": {
+    "mtime": 1785147505.7659311,
+    "seen": 1792680209.442612,
+    "ast_hash": "b3a98546d4867405ec4051b0f2c653f9",
+    "semantic_hash": "b3a98546d4867405ec4051b0f2c653f9"
+  },
+  "scripts/run_evolution_hunt_all.ps1": {
+    "mtime": 1785147505.7659311,
+    "seen": 1792680209.4426124,
+    "ast_hash": "8e90cd5b45b3b487ba86f8097c86cfa5",
+    "semantic_hash": "8e90cd5b45b3b487ba86f8097c86cfa5"
+  },
+  "scripts/run_evolution_hunt_spatial_goo.ps1": {
+    "mtime": 1785147505.7659311,
+    "seen": 1792680209.4426136,
+    "ast_hash": "174c3926b8270c2fa4326f1d47853edc",
+    "semantic_hash": "174c3926b8270c2fa4326f1d47853edc"
+  },
+  "scripts/run_fitness_landscape_1m.ps1": {
+    "mtime": 1785147505.7669363,
+    "seen": 1792680209.4426143,
+    "ast_hash": "8b0fe61b25646195d2955ce766f095bf",
+    "semantic_hash": "8b0fe61b25646195d2955ce766f095bf"
+  },
+  "scripts/run_fitness_landscape_2d.ps1": {
+    "mtime": 1785147505.7669363,
+    "seen": 1792680209.442615,
+    "ast_hash": "1fc4e946ecb07adb785c170d6987b0a6",
+    "semantic_hash": "1fc4e946ecb07adb785c170d6987b0a6"
+  },
+  "scripts/run_fitness_landscape_medium.ps1": {
+    "mtime": 1785147505.7669363,
+    "seen": 1792680209.4426157,
+    "ast_hash": "bc7a252fd8373fbc2997601ac6961387",
+    "semantic_hash": "bc7a252fd8373fbc2997601ac6961387"
+  },
+  "scripts/run_fitness_landscape_spatial_goo_modes.ps1": {
+    "mtime": 1785147505.7679386,
+    "seen": 1792680209.4426165,
+    "ast_hash": "01b204882875c4a820188fa5a667b157",
+    "semantic_hash": "01b204882875c4a820188fa5a667b157"
+  },
+  "scripts/run_goo_evolved.ps1": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792680209.4426172,
+    "ast_hash": "13cb606296b2278a3e876e576c80b8b1",
+    "semantic_hash": "13cb606296b2278a3e876e576c80b8b1"
+  },
+  "scripts/run_pipeline_100k.ps1": {
+    "mtime": 1785147505.7679386,
+    "seen": 1792680209.4426181,
+    "ast_hash": "4c704526bdb8722b807bee89fe481058",
+    "semantic_hash": "4c704526bdb8722b807bee89fe481058"
+  },
+  "scripts/run_pipeline_native.ps1": {
+    "mtime": 1785147505.7679386,
+    "seen": 1792680209.4426188,
+    "ast_hash": "3e389c5f931bb2acf55bacae9fc01a13",
+    "semantic_hash": "3e389c5f931bb2acf55bacae9fc01a13"
+  },
+  "scripts/run_plateau80_medium_100k.ps1": {
+    "mtime": 1785147505.7679386,
+    "seen": 1792680209.4426196,
+    "ast_hash": "c5db02115bbd2f3e4822f6f04e69ec43",
+    "semantic_hash": "c5db02115bbd2f3e4822f6f04e69ec43"
+  },
+  "scripts/run_plateau80_medium_2k_8hr.ps1": {
+    "mtime": 1785147505.7694445,
+    "seen": 1792680209.4426205,
+    "ast_hash": "0624c08a51ac285026e9b50c783a019b",
+    "semantic_hash": "0624c08a51ac285026e9b50c783a019b"
+  },
+  "scripts/run_promising_deep.py": {
+    "mtime": 1785145952.1999197,
+    "seen": 1792680209.4426212,
+    "ast_hash": "c90d7892e831928957bfbe8b9196b307",
+    "semantic_hash": "c90d7892e831928957bfbe8b9196b307"
+  },
+  "scripts/run_spatial_100k_speeds.ps1": {
+    "mtime": 1785147505.7700162,
+    "seen": 1792680209.442622,
+    "ast_hash": "09da7d84a4d458f8a2e330d3a2da8b67",
+    "semantic_hash": "09da7d84a4d458f8a2e330d3a2da8b67"
+  },
+  "scripts/scan_rust_population_scan.py": {
+    "mtime": 1785145952.2013266,
+    "seen": 1792680209.4426227,
+    "ast_hash": "5c1b63ea8b0df9d40d0251f0e8a14aac",
+    "semantic_hash": "5c1b63ea8b0df9d40d0251f0e8a14aac"
+  },
+  "scripts/scan_rust_simple.py": {
+    "mtime": 1785145952.2013266,
+    "seen": 1792680209.4426234,
+    "ast_hash": "e56f8214066bd10b5e64e286849b6319",
+    "semantic_hash": "e56f8214066bd10b5e64e286849b6319"
+  },
+  "scripts/serve_fitness_landscape.py": {
+    "mtime": 1785147505.7700162,
+    "seen": 1792680209.4426246,
+    "ast_hash": "1110a694d862cd1a5699e1ae6f3da827",
+    "semantic_hash": "1110a694d862cd1a5699e1ae6f3da827"
+  },
+  "scripts/summarize_run_history.ps1": {
+    "mtime": 1785675424.215079,
+    "seen": 1792680209.4426253,
+    "ast_hash": "13f62c374cc4d20efb7c3e7940c59632",
+    "semantic_hash": "13f62c374cc4d20efb7c3e7940c59632"
+  },
+  "scripts/sync_viewer_html.py": {
+    "mtime": 1785147505.7705276,
+    "seen": 1792680209.442626,
+    "ast_hash": "3c939bba13cf2ff2d5e7241b212c8156",
+    "semantic_hash": "3c939bba13cf2ff2d5e7241b212c8156"
+  },
+  "scripts/tests/test_scan_manifest_writer.py": {
+    "mtime": 1785145952.20464,
+    "seen": 1792680209.4426267,
+    "ast_hash": "7c24de6b2cbc6f93e70b9bd4651bec7e",
+    "semantic_hash": "7c24de6b2cbc6f93e70b9bd4651bec7e"
+  },
+  "scripts/tests/test_sim_config_overrides.py": {
+    "mtime": 1785145952.2053392,
+    "seen": 1792680209.4426277,
+    "ast_hash": "3c907c0318d1ff3a841a26f790fc0ae2",
+    "semantic_hash": "3c907c0318d1ff3a841a26f790fc0ae2"
+  },
+  "scripts/webviewer_helpers.py": {
+    "mtime": 1785145952.2058446,
+    "seen": 1792680209.4426281,
+    "ast_hash": "90ba655acbed59108054895c6327db0c",
+    "semantic_hash": "90ba655acbed59108054895c6327db0c"
+  },
+  "scripts/worker_pool.py": {
+    "mtime": 1785145952.2064047,
+    "seen": 1792680209.442629,
+    "ast_hash": "32f1a5df7f6061a2e880afaaf98c9dbe",
+    "semantic_hash": "32f1a5df7f6061a2e880afaaf98c9dbe"
+  },
+  "tools/check_scatter_positions.py": {
+    "mtime": 1761581404.7673953,
+    "seen": 1792680209.4426422,
+    "ast_hash": "1ec07ed5d7fe0a3c3bbd6e46a4674741",
+    "semantic_hash": "1ec07ed5d7fe0a3c3bbd6e46a4674741"
+  },
+  "tools/check_scatter_positions_verbose.py": {
+    "mtime": 1761581405.3569646,
+    "seen": 1792680209.442643,
+    "ast_hash": "291a789990db4bb9ed5057124973ad4b",
+    "semantic_hash": "291a789990db4bb9ed5057124973ad4b"
+  },
+  "tools/py_import_check.py": {
+    "mtime": 1760909282.8040462,
+    "seen": 1792680209.4426436,
+    "ast_hash": "38a8359c58c6f0c43a0b53672fffb025",
+    "semantic_hash": "38a8359c58c6f0c43a0b53672fffb025"
+  },
+  "tools/test_nn_plot.py": {
+    "mtime": 1760909253.75351,
+    "seen": 1792680209.4426446,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "webviewer/__init__.py": {
+    "mtime": 1785145952.2069242,
+    "seen": 1792680209.4426455,
+    "ast_hash": "e4604ac984f9bdc485142a2305ad5e76",
+    "semantic_hash": "e4604ac984f9bdc485142a2305ad5e76"
+  },
+  "webviewer/chk_config.json": {
+    "mtime": 1769340226.0923812,
+    "seen": 1792680209.4426465,
+    "ast_hash": "da9e8c953d63d165d47763718fc80e6b",
+    "semantic_hash": "da9e8c953d63d165d47763718fc80e6b"
+  },
+  "webviewer/clean_webviewer.py": {
+    "mtime": 1785145952.2069242,
+    "seen": 1792680209.4426472,
+    "ast_hash": "8b791b53767dedae430c74d78264015e",
+    "semantic_hash": "8b791b53767dedae430c74d78264015e"
+  },
+  "webviewer/demo_burnin0_config.json": {
+    "mtime": 1769340226.0933821,
+    "seen": 1792680209.4426482,
+    "ast_hash": "63da0ab439e5f7ade922eb538612ca4c",
+    "semantic_hash": "63da0ab439e5f7ade922eb538612ca4c"
+  },
+  "webviewer/demo_config.json": {
+    "mtime": 1769340226.0933821,
+    "seen": 1792680209.4426491,
+    "ast_hash": "d0465af114e8c651a60750aacfd31e9c",
+    "semantic_hash": "d0465af114e8c651a60750aacfd31e9c"
+  },
+  "webviewer/graph_coords.py": {
+    "mtime": 1785145952.208307,
+    "seen": 1792680209.4426498,
+    "ast_hash": "6f5a57bb555675c07b051326cda76036",
+    "semantic_hash": "6f5a57bb555675c07b051326cda76036"
+  },
+  "webviewer/graphs_env.py": {
+    "mtime": 1785145952.2088118,
+    "seen": 1792680209.4426506,
+    "ast_hash": "cd29fea9f9ae75bdf464bcd21eeba247",
+    "semantic_hash": "cd29fea9f9ae75bdf464bcd21eeba247"
+  },
+  "webviewer/graphs_nn.py": {
+    "mtime": 1785145952.2093334,
+    "seen": 1792680209.4426515,
+    "ast_hash": "e02581e94c79d073024a2225de281dc3",
+    "semantic_hash": "e02581e94c79d073024a2225de281dc3"
+  },
+  "webviewer/graphs_resp_fitness.py": {
+    "mtime": 1785145952.2103422,
+    "seen": 1792680209.4426522,
+    "ast_hash": "9ed05f0e47a32a93278f723c0d73c462",
+    "semantic_hash": "9ed05f0e47a32a93278f723c0d73c462"
+  },
+  "webviewer/hostinger_bundle_template/app.js": {
+    "mtime": 1785145952.2103422,
+    "seen": 1792680209.442653,
+    "ast_hash": "c650625c409c25eb4240798eb3009605",
+    "semantic_hash": "c650625c409c25eb4240798eb3009605"
+  },
+  "webviewer/interactive_dash.py": {
+    "mtime": 1785145952.2110279,
+    "seen": 1792680209.4426537,
+    "ast_hash": "7a623923c0d1a09e4d7e5661d4b6b47d",
+    "semantic_hash": "7a623923c0d1a09e4d7e5661d4b6b47d"
+  },
+  "webviewer/make_bundle.py": {
+    "mtime": 1785145952.2110279,
+    "seen": 1792680209.4426546,
+    "ast_hash": "4c874128d0c4ac78b6f47a519890baf9",
+    "semantic_hash": "4c874128d0c4ac78b6f47a519890baf9"
+  },
+  "webviewer/run_normal_config.json": {
+    "mtime": 1769340226.0973823,
+    "seen": 1792680209.4426556,
+    "ast_hash": "18289acbcf6f6e9736d8718925ce6e76",
+    "semantic_hash": "18289acbcf6f6e9736d8718925ce6e76"
+  },
+  "webviewer/select_and_visualize.py": {
+    "mtime": 1785145952.212036,
+    "seen": 1792680209.4426563,
+    "ast_hash": "147b39da8cc19f963f47976e7b04a5c2",
+    "semantic_hash": "147b39da8cc19f963f47976e7b04a5c2"
+  },
+  "webviewer/test_graphs_nn.py": {
+    "mtime": 1785145952.2130363,
+    "seen": 1792680209.442657,
+    "ast_hash": "8b1f64c231319cc29d57c44ea9dbe69e",
+    "semantic_hash": "8b1f64c231319cc29d57c44ea9dbe69e"
+  },
+  "webviewer/test_run_config.json": {
+    "mtime": 1769340226.0993824,
+    "seen": 1792680209.4426577,
+    "ast_hash": "83fa1f6830165d1db3ad1a98928087bb",
+    "semantic_hash": "83fa1f6830165d1db3ad1a98928087bb"
+  },
+  "webviewer/tests/test_playwright_plot_live.py": {
+    "mtime": 1785145952.2135417,
+    "seen": 1792680209.4426587,
+    "ast_hash": "ab5a88f64ae26608413d13a06bfb04f1",
+    "semantic_hash": "ab5a88f64ae26608413d13a06bfb04f1"
+  },
+  "webviewer/tests/test_plot_live_scan_html.py": {
+    "mtime": 1785145952.2140672,
+    "seen": 1792680209.4426594,
+    "ast_hash": "49c1d950cf6e02358813deac7a20610f",
+    "semantic_hash": "49c1d950cf6e02358813deac7a20610f"
+  },
+  "webviewer/visualize_individual.py": {
+    "mtime": 1785145952.2145844,
+    "seen": 1792680209.4426599,
+    "ast_hash": "2abbdd751c0f2826c7e38e163d25827a",
+    "semantic_hash": "2abbdd751c0f2826c7e38e163d25827a"
+  },
+  "webviewer/visualize_population.py": {
+    "mtime": 1785145952.2154696,
+    "seen": 1792680209.4426606,
+    "ast_hash": "ab1acd7689a85a35a9355a8cc05551c2",
+    "semantic_hash": "ab1acd7689a85a35a9355a8cc05551c2"
+  },
+  "rust/src/brain/types.rs": {
+    "mtime": 1792682155.2696147,
+    "seen": 1792685901.1536398,
+    "ast_hash": "e9043b16ca932e26baedeb6a1b1ebb40",
+    "semantic_hash": "e9043b16ca932e26baedeb6a1b1ebb40"
+  },
+  "scripts/plot_fitness_landscape.R": {
+    "mtime": 1785147505.7643802,
+    "seen": 1792685901.15792,
+    "ast_hash": "e25b16d5e7aa7da189b0157bda90b871",
+    "semantic_hash": "e25b16d5e7aa7da189b0157bda90b871"
+  },
+  "tools/export_obsidian_notes.py": {
+    "mtime": 1792686057.8518279,
+    "seen": 1792694097.8994832,
+    "ast_hash": "3bd20c9486f9879d92fb34109c9afdc6",
+    "semantic_hash": "3bd20c9486f9879d92fb34109c9afdc6"
+  }
+}

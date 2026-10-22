@@ -30,7 +30,8 @@ rust/webviewer/sim*/**
 build/tests_out/
 
 # IDE / editor
-.vscode/
+.vscode/*
+!.vscode/tasks.json
 .cursor/
 *.suo
 *.user
@@ -66,5 +67,9 @@ webviewer/**/*.jsonl
 # ignore generated sim directories (e.g., webviewer/sim0061)
 webviewer/sim*/
 output/**/sim*/
-tmp_push_repo/
 scripts/__pycache__/worker_pool.cpython-313.pyc
+
+# Local scratch and graphify caches
+scratch/
+graphify-out/cache/
+graphify-out/.graphify_analysis.json

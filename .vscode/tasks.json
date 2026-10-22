@@ -2,100 +2,305 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "CMake: Configure (Release)",
+      "label": "Simulation: Interactive Viewer (egui)",
       "type": "shell",
-      "command": "cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release",
-      "windows": {
-        "command": "cmake -S . -B build/Release -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Release"
+      "command": "cargo run --release --bin evo_movement_interactive -- ${input:interactiveMode} --config-file=${input:interactiveConfig}",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
       },
-      "problemMatcher": []
-    },
-    {
-      "label": "CMake: Configure (Debug)",
-      "type": "shell",
-      "command": "cmake -S . -B build/Debug -DCMAKE_BUILD_TYPE=Debug",
-      "windows": {
-        "command": "cmake -S . -B build/Debug -G \"MinGW Makefiles\" -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/mingw32-make.exe -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Debug"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "CMake: Build (Debug)",
-      "type": "shell",
-      "command": "cmake --build build/Debug",
-      "group": "build",
-      "problemMatcher": []
-    },
-    {
-      "label": "CMake: Build (Release)",
-      "type": "shell",
-      "command": "cmake --build build/Release",
-      "group": "build",
-      "problemMatcher": []
-    },
-    {
-      "label": "Run: exe (Debug)",
-      "type": "shell",
-      "command": "${workspaceFolder}/build/Debug/evo-movement-sim",
-      "windows": {
-        "command": "${workspaceFolder}/build/Debug/evo-movement-sim.exe"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Run: exe (Release)",
-      "type": "shell",
-      "command": "${workspaceFolder}/build/Release/evo-movement-sim",
-      "windows": {
-        "command": "${workspaceFolder}/build/Release/evo-movement-sim.exe"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Run CTest (Debug)",
-      "type": "shell",
-      "command": "ctest --output-on-failure -C Debug",
-      "options": { "cwd": "${workspaceFolder}/build/Debug" },
-      "presentation": { "reveal": "always", "panel": "shared" },
-      "problemMatcher": []
-    },
-    {
-      "label": "Run CTest (Release)",
-      "type": "shell",
-      "command": "ctest --test-dir build/Release --output-on-failure",
-      "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "reveal": "always", "panel": "shared" },
-      "problemMatcher": []
-    },
-    {
-      "label": "Cargo: build (debug)",
-      "type": "shell",
-      "command": "cargo build",
-      "options": { "cwd": "${workspaceFolder}/rust" },
       "problemMatcher": ["$rustc"],
-      "group": { "kind": "build", "isDefault": false }
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "new"
+      }
     },
     {
-      "label": "Cargo: build (release)",
+      "label": "Simulation: Lab Bench (egui)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_movement_lab",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Simulation: Headless Run (Prompted)",
+      "type": "shell",
+      "command": "cargo run ${input:buildProfile} --bin ${input:archSelect} -- --config-file=${input:configSelect} --steps=${input:stepsPrompt} --seed=${input:seedPrompt} --show-progress",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulation: Quick Smoke Run (Goo Graph)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_movement_goo -- --config-file=configs/pipeline_smoke/goo.json --steps=2000 --show-progress",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulation: Quick Smoke Run (Spatial Graph)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_movement_spatial -- --config-file=configs/pipeline_smoke/spatial_graph.json --steps=2000 --show-progress",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulation: Quick Smoke Run (MLP)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_movement_mlp -- --config-file=configs/pipeline_smoke/mlp.json --steps=2000 --show-progress",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulation: Quick Smoke Run (Perceptron)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_movement_perceptron -- --config-file=configs/pipeline_smoke/perceptron.json --steps=2000 --show-progress",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Fitness Landscape: Run Sweep (Prompted)",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_fitness_landscape -- --sweep-profile=${input:sweepProfile} --architectures=${input:sweepArchitectures} --replicates=${input:sweepReplicates} --steps=${input:sweepSteps} --output-dir=${input:sweepOutputDir}",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Fitness Landscape: Regenerate HTML Dashboard",
+      "type": "shell",
+      "command": "cargo run --release --bin evo_fitness_landscape -- --html-from-json=${input:checkpointJsonPath}",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Cargo: Build (Release)",
       "type": "shell",
       "command": "cargo build --release",
-      "options": { "cwd": "${workspaceFolder}/rust" },
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
       "problemMatcher": ["$rustc"],
-      "group": { "kind": "build", "isDefault": false }
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
     },
     {
-      "label": "Cargo: test",
+      "label": "Cargo: Test (All Tests)",
       "type": "shell",
       "command": "cargo test",
-      "options": { "cwd": "${workspaceFolder}/rust" },
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
+      "problemMatcher": ["$rustc"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Cargo: Check",
+      "type": "shell",
+      "command": "cargo check --all-targets",
+      "options": {
+        "cwd": "${workspaceFolder}/rust"
+      },
       "problemMatcher": ["$rustc"]
     },
     {
-      "label": "Rust: run (debug)",
+      "label": "Graphify: Update Knowledge Graph & Obsidian Notes",
       "type": "shell",
-      "command": "cargo run --bin evo_movement_rust",
-      "options": { "cwd": "${workspaceFolder}/rust" },
-      "problemMatcher": ["$rustc"]
+      "command": "graphify . --code-only --update --wiki; graphify cluster-only . --no-label --no-viz; graphify export wiki; python tools/export_obsidian_notes.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "interactiveMode",
+      "type": "pickString",
+      "description": "Choose interactive session mode",
+      "default": "",
+      "options": [
+        "",
+        "--sandbox",
+        "--arena"
+      ]
+    },
+    {
+      "id": "interactiveConfig",
+      "type": "pickString",
+      "description": "Initial configuration preset for the interactive viewer",
+      "default": "configs/goo_dish_1k.json",
+      "options": [
+        "configs/goo_dish_1k.json",
+        "configs/arch_compare_evolve_goo.json",
+        "configs/arch_compare_spatial_graph.json",
+        "configs/arch_compare_evolve_mlp.json",
+        "configs/arch_compare_perceptron_only.json",
+        "configs/ecology_plateau80/medium_100k/goo.json",
+        "configs/pipeline_smoke/goo.json"
+      ]
+    },
+    {
+      "id": "archSelect",
+      "type": "pickString",
+      "description": "Select neural architecture executable",
+      "default": "evo_movement_goo",
+      "options": [
+        "evo_movement_goo",
+        "evo_movement_spatial",
+        "evo_movement_mlp",
+        "evo_movement_perceptron"
+      ]
+    },
+    {
+      "id": "configSelect",
+      "type": "pickString",
+      "description": "Select configuration preset file",
+      "default": "configs/pipeline_smoke/goo.json",
+      "options": [
+        "configs/pipeline_smoke/goo.json",
+        "configs/pipeline_smoke/spatial_graph.json",
+        "configs/pipeline_smoke/mlp.json",
+        "configs/pipeline_smoke/perceptron.json",
+        "configs/arch_compare_evolve_goo.json",
+        "configs/arch_compare_spatial_graph.json",
+        "configs/arch_compare_evolve_mlp.json",
+        "configs/arch_compare_perceptron_only.json",
+        "configs/ecology_plateau80/medium_100k/goo.json",
+        "configs/ecology_plateau80/medium_100k/spatial_graph.json",
+        "configs/ecology_plateau80/medium_100k/mlp.json",
+        "configs/ecology_plateau80/medium_100k/perceptron.json",
+        "configs/ecology_plateau80/evolution_hunt/goo.json",
+        "configs/ecology_plateau80/evolution_hunt/spatial_cardinal.json",
+        "configs/output_mode_sweep/goo_split_channels.json",
+        "configs/output_mode_sweep/spatial_hex_compass.json"
+      ]
+    },
+    {
+      "id": "stepsPrompt",
+      "type": "promptString",
+      "description": "Number of simulation timesteps to run",
+      "default": "30000"
+    },
+    {
+      "id": "seedPrompt",
+      "type": "promptString",
+      "description": "Random seed for simulation environment & population",
+      "default": "42"
+    },
+    {
+      "id": "buildProfile",
+      "type": "pickString",
+      "description": "Cargo compilation mode",
+      "default": "--release",
+      "options": [
+        "--release",
+        ""
+      ]
+    },
+    {
+      "id": "sweepProfile",
+      "type": "pickString",
+      "description": "Fitness landscape sweep profile",
+      "default": "evolution_hunt",
+      "options": [
+        "evolution_hunt",
+        "full"
+      ]
+    },
+    {
+      "id": "sweepArchitectures",
+      "type": "pickString",
+      "description": "Subset of architectures to evaluate in the sweep",
+      "default": "all",
+      "options": [
+        "all",
+        "goo",
+        "spatial",
+        "mlp",
+        "perceptron"
+      ]
+    },
+    {
+      "id": "sweepReplicates",
+      "type": "promptString",
+      "description": "Number of replicates per landscape cell",
+      "default": "3"
+    },
+    {
+      "id": "sweepSteps",
+      "type": "promptString",
+      "description": "Steps per sweep run",
+      "default": "30000"
+    },
+    {
+      "id": "sweepOutputDir",
+      "type": "promptString",
+      "description": "Output folder for sweep metrics, SQLite db, and HTML reports",
+      "default": "output/fitness_landscape_medium"
+    },
+    {
+      "id": "checkpointJsonPath",
+      "type": "promptString",
+      "description": "Path to checkpoint JSON to render HTML dashboard from",
+      "default": "output/fitness_landscape_medium/fitness_landscape_checkpoint.json"
     }
   ]
 }
