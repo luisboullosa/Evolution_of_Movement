@@ -1,5 +1,4 @@
-use super::genome::{BrainOutput, SENSOR_DIM};
-use super::perceptron::{l2_slices, perturb_param};
+use super::types::{BrainOutput, SENSOR_DIM, l2_slices, perturb_param};
 use crate::neural_network::{NeuralNetwork, NNType};
 use rand::Rng;
 use serde::{Deserialize, Serialize};

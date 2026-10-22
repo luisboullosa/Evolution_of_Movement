@@ -1,6 +1,5 @@
-use super::genome::{BrainOutput, SENSOR_DIM, THOUGHT_DIM};
+use super::types::{BrainOutput, SENSOR_DIM, THOUGHT_DIM, l2_slices, perturb_param};
 use super::movement_output::{hidden_sum_output, split_channels_output};
-use super::perceptron::{l2_slices, perturb_param};
 use crate::config::MovementOutputMode;
 use rand::Rng;
 use serde::{Deserialize, Serialize};

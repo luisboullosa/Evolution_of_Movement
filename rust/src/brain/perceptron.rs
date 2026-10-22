@@ -1,4 +1,5 @@
-use super::genome::{BrainOutput, PERCEPTRON_SENSOR_DIM, SENSOR_DIM};
+use super::types::{BrainOutput, PERCEPTRON_SENSOR_DIM, SENSOR_DIM};
+pub use super::types::{l2_slices, perturb_param};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,23 +60,4 @@ impl PerceptronBrain {
     pub fn param_distance(&self, other: &Self) -> f64 {
         l2_slices(&self.flatten_params(), &other.flatten_params())
     }
-}
-
-pub fn l2_slices(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().max(b.len()).max(1);
-    let mut sum = 0.0;
-    for i in 0..n {
-        let da = a.get(i).copied().unwrap_or(0.0);
-        let db = b.get(i).copied().unwrap_or(0.0);
-        sum += (da - db).powi(2);
-    }
-    (sum / n as f64).sqrt()
-}
-
-pub fn perturb_param(v: f64, rng: &mut impl rand::Rng, sigma: f64) -> f64 {
-    use rand_distr::{Cauchy, Distribution};
-    if sigma <= 0.0 {
-        return v;
-    }
-    v + Cauchy::new(0.0, sigma).unwrap().sample(rng)
 }

@@ -3,14 +3,10 @@ use super::mlp::MlpBrain;
 use super::perceptron::PerceptronBrain;
 use super::spatial_blob::{SpatialBlobBrain, SpatialBlobLayout};
 use super::spatial_graph::SpatialGraphBrain;
-use crate::config::{ArchitecturePolicy, Config, MovementOutputMode};
+use crate::config::{ArchitecturePolicy, Config};
 use serde::{Deserialize, Serialize};
 
-pub const SENSOR_DIM: usize = 8;
-/// Perceptron uses current-cell sensors only (resource, competition, internal stores).
-pub const PERCEPTRON_SENSOR_DIM: usize = 3;
-pub const THOUGHT_DIM: usize = 8;
-pub const EMBED_DIM: usize = 8;
+pub use super::types::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,27 +43,6 @@ pub enum BrainInner {
 pub struct BrainGenome {
     pub kind: BrainKind,
     pub inner: BrainInner,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SpatialRuntime {
-    pub node_embeddings: Vec<Vec<f64>>,
-}
-
-#[derive(Debug)]
-pub struct ForwardContext<'a> {
-    pub sensors: [f64; SENSOR_DIM],
-    pub position: usize,
-    pub hidden_buf: &'a mut [f64],
-    pub out2_buf: &'a mut [f64],
-    pub spatial_runtime: Option<&'a mut SpatialRuntime>,
-    pub movement_output_mode: MovementOutputMode,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct BrainOutput {
-    pub move_signal: f64,
-    pub direction_signal: f64,
 }
 
 impl BrainGenome {

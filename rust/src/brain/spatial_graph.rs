@@ -1,7 +1,5 @@
-use super::genome::{BrainOutput, EMBED_DIM, SENSOR_DIM};
-use super::genome::SpatialRuntime;
+use super::types::{BrainOutput, EMBED_DIM, SENSOR_DIM, SpatialRuntime, l2_slices, perturb_param};
 use super::movement_output::{hidden_sum_output, hex_compass_output, readout_output, sector_mask_centroid_degrees};
-use super::perceptron::{l2_slices, perturb_param};
 use crate::config::MovementOutputMode;
 use rand::Rng;
 use serde::{Deserialize, Serialize};

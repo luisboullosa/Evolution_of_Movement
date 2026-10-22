@@ -1,5 +1,5 @@
 use crate::config::MovementOutputMode;
-use super::genome::BrainOutput;
+use super::types::BrainOutput;
 
 pub fn default_movement_output_mode(
     policy: crate::config::ArchitecturePolicy,

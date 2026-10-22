@@ -2,11 +2,6 @@ use crate::config::{Config, GridTopology};
 use crate::environment::Environment;
 use crate::hex_dish::HexDishLayout;
 use crate::hex_grid::HexCoord;
-use crate::individual::{ActionDecision, Individual};
-use crate::step_engine::{self, StepOutcome};
-use rand::Rng;
-
-pub use step_engine::DecisionRow;
 
 /// Hex-direction sector index 0..5 matching HexCoord::neighbors order.
 pub fn direction_to_sector(degrees: f64) -> usize {
@@ -86,34 +81,6 @@ pub fn edge_resources_ring(env: &Environment, pos: usize) -> [f64; 6] {
     let center = env.resources[pos % w];
     let right = env.resources[(pos + 1) % w];
     [left, left, center, right, right, center]
-}
-
-pub type HexStepOutcome = StepOutcome;
-
-pub fn step_individuals_cpu(
-    individuals: &mut [Individual],
-    env: &mut Environment,
-    cfg: &Config,
-    hidden_buf: &mut [f64],
-    out2_buf: &mut [f64],
-    rng: &mut impl Rng,
-    dish: Option<&HexDishLayout>,
-) -> HexStepOutcome {
-    step_engine::step_individuals_cpu(individuals, env, cfg, hidden_buf, out2_buf, rng, dish)
-}
-
-pub fn apply_hex_decision_move(
-    ind: &mut Individual,
-    decision: &ActionDecision,
-    cfg: &Config,
-    cell_count: usize,
-) -> i32 {
-    let row: DecisionRow = (*decision).into();
-    let mut occ = vec![0i32; cell_count];
-    let pos = ind.position % cell_count;
-    occ[pos] = 1;
-    let mut dummy_env = Environment::new(cell_count.max(1));
-    step_engine::apply_decision(ind, row, cfg, &mut dummy_env, cell_count, &mut occ, None)
 }
 
 #[cfg(test)]

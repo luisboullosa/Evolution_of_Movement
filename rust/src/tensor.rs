@@ -251,7 +251,7 @@ fn run_brain_forward_gpu(
     let positions_host = base.positions_host_u64(count);
     let positions_buf = sync_device_buffer(&mut gpu_state.positions_buf, &positions_host)?;
     let resources_buf =
-        sync_device_buffer(&mut gpu_state.resources_buf, &base.resources[..count])?;
+        sync_device_buffer(&mut gpu_state.resources_buf, base.resources_slice())?;
     let brain_kind_buf =
         sync_device_buffer(&mut gpu_state.brain_kind_buf, &tensor.brain_kind[..count])?;
 
@@ -363,10 +363,10 @@ fn run_brain_forward_gpu(
                 env_buf.as_device_ptr(),
                 occupancy_buf.as_device_ptr(),
                 config.movement_cost_factor,
-                base.nodes as i32,
-                base.inputs as i32,
-                base.nodes2 as i32,
-                base.layers,
+                base.nodes() as i32,
+                base.inputs() as i32,
+                base.nodes2() as i32,
+                base.layers(),
                 usize_to_i32(base.layer1_stride()),
                 usize_to_i32(base.multi_stride()),
                 usize_to_i32(base.layer2_weights_stride()),

@@ -1,3 +1,4 @@
+pub mod types;
 pub mod genome;
 pub mod goo_graph;
 #[cfg(not(feature = "playground"))]
@@ -9,7 +10,8 @@ pub mod perceptron;
 pub mod spatial_blob;
 pub mod spatial_graph;
 
-pub use genome::{BrainGenome, BrainInner, BrainKind, BrainOutput, ForwardContext, SpatialRuntime, PERCEPTRON_SENSOR_DIM, SENSOR_DIM, EMBED_DIM, THOUGHT_DIM};
+pub use types::*;
+pub use genome::{BrainGenome, BrainInner, BrainKind};
 pub use movement_output::default_movement_output_mode;
 pub use goo_graph::{GooGraphBrain, GooOp};
 pub use mlp::MlpBrain;
