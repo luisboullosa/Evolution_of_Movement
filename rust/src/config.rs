@@ -314,8 +314,45 @@ pub struct Config {
     pub env_out_path: String,
     pub individuals_out_path: String,
 
+    pub mutate_rates: bool,
+
+    // --- developmental plasticity & motility morphology ---
+    /// Duration of juvenile development in timesteps before morph commitment (0 = mature at birth).
+    #[serde(default = "default_developmental_steps")]
+    pub developmental_steps: u32,
+
+    /// Extra metabolic upkeep per step for possessing flagella.
+    #[serde(default = "default_flagella_maintenance_cost")]
+    pub flagella_maintenance_cost: f64,
+
+    /// Default developmental cue threshold for morph differentiation:
+    /// if average juvenile per-capita cue >= morph_threshold -> develops flagella (motile).
+    #[serde(default = "default_morph_threshold")]
+    pub default_morph_threshold: f64,
+
+    /// When true, individuals feed at their location (or arrival location when moving) every step.
+    /// When false, moving forfeits feeding for that step (legacy behavior).
+    #[serde(default = "default_allow_concurrent_eat_and_move")]
+    pub allow_concurrent_eat_and_move: bool,
+
     pub nn_index_flush_interval: i32,
     pub nn_index_flush_size: usize,
+}
+
+fn default_developmental_steps() -> u32 {
+    10
+}
+
+fn default_flagella_maintenance_cost() -> f64 {
+    0.02
+}
+
+fn default_morph_threshold() -> f64 {
+    0.5
+}
+
+fn default_allow_concurrent_eat_and_move() -> bool {
+    true
 }
 
 fn default_resource_contrast() -> f64 {
@@ -411,6 +448,11 @@ impl Default for Config {
             individuals_encoding: "jsonl".to_string(),
             env_out_path: "output/example_sim/env.tsv".to_string(),
             individuals_out_path: "output/example_sim/individuals.tsv".to_string(),
+            mutate_rates: false,
+            developmental_steps: default_developmental_steps(),
+            flagella_maintenance_cost: default_flagella_maintenance_cost(),
+            default_morph_threshold: default_morph_threshold(),
+            allow_concurrent_eat_and_move: default_allow_concurrent_eat_and_move(),
             nn_index_flush_interval: 0,
             nn_index_flush_size: 0,
         }

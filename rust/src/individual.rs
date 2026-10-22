@@ -34,6 +34,14 @@ pub struct Individual {
     pub parent_id: Option<i32>,
     /// Steps remaining before the next hex move is allowed (0 = ready).
     pub move_cooldown: u32,
+    /// Whether the individual possesses flagella for motility.
+    pub has_flagella: bool,
+    /// Cumulative per-capita resource cue experienced during development.
+    pub juvenile_cue_sum: f64,
+    /// Whether the individual has completed developmental morph commitment.
+    pub is_mature: bool,
+    /// Evolvable threshold for developing flagella: avg_juvenile_cue >= morph_threshold -> motile.
+    pub morph_threshold: f64,
 }
 
 impl Individual {
@@ -56,13 +64,22 @@ impl Individual {
             lineage_color: [128, 128, 128],
             parent_id: None,
             move_cooldown: 0,
+            has_flagella: true,
+            juvenile_cue_sum: 0.0,
+            is_mature: false,
+            morph_threshold: 0.5,
         }
     }
 
     pub fn new_founder(cfg: &Config, pos: usize, id: i32, rng: &mut impl Rng) -> Self {
         let mut brain = BrainGenome::new_founder(cfg);
         init_founder_weights(&mut brain, rng, cfg);
-        Self::new(brain, pos, id)
+        let mut ind = Self::new(brain, pos, id);
+        ind.morph_threshold = cfg.default_morph_threshold;
+        if cfg.developmental_steps == 0 {
+            ind.is_mature = true;
+        }
+        ind
     }
 
     pub fn new_founder_with_mode(
@@ -74,7 +91,12 @@ impl Individual {
     ) -> Self {
         let mut brain = BrainGenome::new_founder(cfg);
         crate::brain::init_founder_weights_with_mode(&mut brain, rng, mode, cfg);
-        Self::new(brain, pos, id)
+        let mut ind = Self::new(brain, pos, id);
+        ind.morph_threshold = cfg.default_morph_threshold;
+        if cfg.developmental_steps == 0 {
+            ind.is_mature = true;
+        }
+        ind
     }
 
     pub fn new_with_color(brain: BrainGenome, pos: usize, id: i32, color: [u8; 3]) -> Self {
@@ -160,7 +182,7 @@ impl Individual {
         let output = self.brain.forward(ctx);
 
         let direction_degrees = Self::direction_signal_to_degrees(output.direction_signal);
-        if output.move_signal <= 0.0 {
+        if !self.has_flagella || output.move_signal <= 0.0 {
             let denom = (local_population.max(1)) as f64;
             let gathered = center / denom;
             self.resources += gathered;
@@ -235,6 +257,17 @@ impl Individual {
         let mut child = Individual::new(child_brain, self.position, *next_id);
         child.lineage_color = self.lineage_color;
         child.parent_id = Some(self.id);
+        child.morph_threshold = self.morph_threshold;
+        if cfg.developmental_steps == 0 {
+            child.is_mature = true;
+            child.has_flagella = self.has_flagella;
+        }
+        if rng.gen::<f64>() < cfg.mutation_rate {
+            use rand_distr::{Distribution, Normal};
+            if let Ok(normal) = Normal::new(0.0, cfg.mutation_sigma) {
+                child.morph_threshold = (child.morph_threshold + normal.sample(rng)).max(0.0);
+            }
+        }
         *next_id += 1;
         Some(ReproductionResult {
             child,
@@ -266,11 +299,14 @@ impl Individual {
 
     pub fn debug_summary(&self) -> String {
         format!(
-            "id={} pos={} res={:.3} age={} brain={:?} complexity={}",
+            "id={} pos={} res={:.3} age={} flagella={} mature={} morph_th={:.3} brain={:?} complexity={}",
             self.id,
             self.position,
             self.resources,
             self.age,
+            self.has_flagella,
+            self.is_mature,
+            self.morph_threshold,
             self.brain.kind(),
             self.complexity()
         )

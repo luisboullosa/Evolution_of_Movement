@@ -79,8 +79,12 @@ pub fn apply_metabolism_and_cull(
 ) -> Vec<i32> {
     for ind in individuals.iter_mut() {
         let total_nodes = ind.complexity();
-        ind.resources -= config.basal_metabolic_cost
+        let mut cost = config.basal_metabolic_cost
             + (total_nodes as f64) * config.maintenance_cost_per_node;
+        if ind.has_flagella {
+            cost += config.flagella_maintenance_cost;
+        }
+        ind.resources -= cost;
     }
 
     use rand::distributions::{Distribution, Uniform};

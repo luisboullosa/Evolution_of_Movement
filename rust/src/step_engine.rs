@@ -154,6 +154,7 @@ pub fn forward_decision(
         local_population,
         ind.resources,
         movement_cost_factor,
+        ind.has_flagella,
     )
 }
 
@@ -163,9 +164,10 @@ pub fn decision_from_output(
     local_population: i32,
     individual_resources: f64,
     movement_cost_factor: f64,
+    has_flagella: bool,
 ) -> DecisionRow {
     let direction_degrees = direction_signal_to_degrees(output.direction_signal);
-    if output.move_signal <= 0.0 {
+    if !has_flagella || output.move_signal <= 0.0 {
         let denom = (local_population.max(1)) as f64;
         let gathered = center / denom;
         return DecisionRow {
@@ -206,26 +208,54 @@ pub fn apply_decision(
     let interval = cfg.movement_interval.max(1);
     let local_pop = occupancy.get(pos).copied().unwrap_or(1).max(1);
 
-    if decision.move_one_step {
-        if ind.move_cooldown > 0 {
+    let delta = if decision.move_one_step {
+        if !ind.has_flagella {
+            // Sessile / deflagellated individuals cannot move even if requested
+            apply_gather_at(ind, decision, env, pos, local_pop);
+            0
+        } else if ind.move_cooldown > 0 {
             ind.move_cooldown -= 1;
             apply_gather_at(ind, decision, env, pos, local_pop);
-            return 0;
+            0
+        } else {
+            ind.resources -= decision.movement_spend;
+            let new_pos = compute_new_position(pos, decision.direction_degrees, cfg, cell_count, dish);
+            let d = new_pos as i32 - pos as i32;
+            ind.position = new_pos;
+            occupancy[pos] = occupancy[pos].saturating_sub(1);
+            let dest_idx = new_pos % cell_count;
+            occupancy[dest_idx] = occupancy[dest_idx].saturating_add(1);
+            if interval > 1 {
+                ind.move_cooldown = interval - 1;
+            }
+            if cfg.allow_concurrent_eat_and_move {
+                let dest_pop = occupancy.get(dest_idx).copied().unwrap_or(1).max(1);
+                apply_gather_at(ind, decision, env, dest_idx, dest_pop);
+            }
+            d
         }
-        ind.resources -= decision.movement_spend;
-        let new_pos = compute_new_position(pos, decision.direction_degrees, cfg, cell_count, dish);
-        let delta = new_pos as i32 - pos as i32;
-        ind.position = new_pos;
-        occupancy[pos] = occupancy[pos].saturating_sub(1);
-        occupancy[new_pos % cell_count] = occupancy[new_pos % cell_count].saturating_add(1);
-        if interval > 1 {
-            ind.move_cooldown = interval - 1;
-        }
-        delta
     } else {
         apply_gather_at(ind, decision, env, pos, local_pop);
         0
+    };
+
+    // Developmental plasticity: sample experienced per-capita cue during juvenile phase and commit
+    if cfg.developmental_steps > 0 && !ind.is_mature {
+        let current_pos = ind.position % cell_count;
+        let current_pop = occupancy.get(current_pos).copied().unwrap_or(1).max(1);
+        let current_res = env.resources.get(current_pos).copied().unwrap_or(0.0);
+        let step_cue = current_res / (current_pop as f64);
+        ind.juvenile_cue_sum += step_cue;
+
+        if (ind.age + 1) >= cfg.developmental_steps as i32 {
+            ind.is_mature = true;
+            let dev_steps = (ind.age + 1).max(1) as f64;
+            let avg_cue = ind.juvenile_cue_sum / dev_steps;
+            ind.has_flagella = avg_cue >= ind.morph_threshold;
+        }
     }
+
+    delta
 }
 
 fn apply_gather_at(
@@ -471,5 +501,97 @@ mod tests {
         apply_decision(&mut ind, decision, &cfg, &mut env, 10, &mut occupancy, None);
         assert_eq!(ind.position, 2);
         assert_eq!(ind.move_cooldown, 2);
+    }
+
+    #[test]
+    fn concurrent_eat_and_move_gathers_at_destination() {
+        use crate::config::Config;
+        use crate::environment::Environment;
+
+        let mut cfg = Config::default();
+        cfg.movement_interval = 1;
+        cfg.grid_width = 10;
+        cfg.allow_concurrent_eat_and_move = true;
+
+        let mut env = Environment::new(10);
+        env.resources = vec![0.0; 10];
+        env.resources[1] = 8.0; // food at destination
+
+        let brain = BrainGenome {
+            kind: crate::brain::BrainKind::Perceptron,
+            inner: BrainInner::Perceptron(PerceptronBrain::new(3, 1)),
+        };
+        let mut ind = Individual::new(brain, 0, 1);
+        ind.resources = 10.0;
+
+        let decision = DecisionRow {
+            move_one_step: true,
+            move_signal: 1.0,
+            direction_degrees: 0.0, // moves 0 -> 1
+            movement_spend: 2.0,
+            gathered: 0.0,
+        };
+        let mut occupancy = vec![0i32; 10];
+        occupancy[0] = 1;
+
+        apply_decision(&mut ind, decision, &cfg, &mut env, 10, &mut occupancy, None);
+        assert_eq!(ind.position, 1);
+        // Spent 2.0 moving, gathered 8.0 at destination: 10 - 2 + 8 = 16
+        assert!((ind.resources - 16.0).abs() < 1e-6);
+        assert!((env.resources[1] - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn developmental_commitment_sheds_flagella_under_low_cue() {
+        use crate::config::Config;
+        use crate::environment::Environment;
+
+        let mut cfg = Config::default();
+        cfg.grid_width = 5;
+        cfg.developmental_steps = 2;
+
+        let mut env = Environment::new(5);
+        env.resources = vec![0.5; 5]; // low resource
+
+        let brain = BrainGenome {
+            kind: crate::brain::BrainKind::Perceptron,
+            inner: BrainInner::Perceptron(PerceptronBrain::new(3, 1)),
+        };
+        let mut ind = Individual::new(brain, 0, 1);
+        ind.morph_threshold = 2.0; // requires 2.0 avg cue to maintain motility
+        ind.has_flagella = true;
+        ind.is_mature = false;
+
+        let decision = DecisionRow {
+            move_one_step: false,
+            move_signal: -1.0,
+            direction_degrees: 0.0,
+            movement_spend: 0.0,
+            gathered: 0.5,
+        };
+        let mut occupancy = vec![1i32; 5];
+
+        // Step 1: age = 0, age+1 = 1 < 2
+        apply_decision(&mut ind, decision, &cfg, &mut env, 5, &mut occupancy, None);
+        assert!(!ind.is_mature);
+        assert!(ind.has_flagella);
+
+        ind.age = 1;
+        // Step 2: age = 1, age+1 = 2 == developmental_steps -> commits to sessile morph!
+        apply_decision(&mut ind, decision, &cfg, &mut env, 5, &mut occupancy, None);
+        assert!(ind.is_mature);
+        assert!(!ind.has_flagella);
+
+        // Subsequent step: attempt to move with no flagella
+        let move_decision = DecisionRow {
+            move_one_step: true,
+            move_signal: 1.0,
+            direction_degrees: 0.0,
+            movement_spend: 1.0,
+            gathered: 0.0,
+        };
+        let delta = apply_decision(&mut ind, move_decision, &cfg, &mut env, 5, &mut occupancy, None);
+        assert_eq!(delta, 0);
+        assert_eq!(ind.position, 0); // stayed put
     }
 }

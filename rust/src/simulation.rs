@@ -4,7 +4,8 @@ use crate::cladogram::Cladogram;
 use crate::config::Config;
 use crate::environment::Environment;
 use crate::hex_dish::HexDishLayout;
-use crate::hex_simulation::{grid_cell_count, step_individuals_cpu};
+use crate::hex_simulation::grid_cell_count;
+use crate::step_engine::step_individuals_cpu;
 use crate::individual::Individual;
 use crate::population_dynamics::{
     apply_metabolism_and_cull, clamp_initial_population, record_births_in_cladogram,
@@ -507,11 +508,18 @@ impl Simulation {
                         prop_now = moved as f64 / seen as f64;
                     }
                 }
+                let motile_count = self.individuals.iter().filter(|ind| ind.has_flagella).count();
+                let prop_motile = if self.individuals.is_empty() {
+                    0.0
+                } else {
+                    motile_count as f64 / self.individuals.len() as f64
+                };
                 ss.push_str(&format!(
-                    "  t={} pop={} prop_moved={:.3}",
+                    "  t={} pop={} prop_moved={:.3} motile={:.3}",
                     t,
                     self.individuals.len(),
-                    prop_now
+                    prop_now,
+                    prop_motile
                 ));
 
                 if progress_tty {
@@ -647,6 +655,21 @@ impl Simulation {
         } else {
             0.0
         };
+        let motile_count = self.individuals.iter().filter(|ind| ind.has_flagella).count();
+        let prop_motile = if self.individuals.is_empty() {
+            0.0
+        } else {
+            motile_count as f64 / self.individuals.len() as f64
+        };
+        let avg_morph_threshold = if self.individuals.is_empty() {
+            0.0
+        } else {
+            self.individuals
+                .iter()
+                .map(|ind| ind.morph_threshold)
+                .sum::<f64>()
+                / self.individuals.len() as f64
+        };
         let mut summary_map = serde_json::Map::new();
         summary_map.insert(
             "final_population".to_string(),
@@ -655,6 +678,14 @@ impl Simulation {
         summary_map.insert(
             "prop_moved".to_string(),
             serde_json::Value::from(prop_moved),
+        );
+        summary_map.insert(
+            "prop_motile".to_string(),
+            serde_json::Value::from(prop_motile),
+        );
+        summary_map.insert(
+            "avg_morph_threshold".to_string(),
+            serde_json::Value::from(avg_morph_threshold),
         );
         if let Ok(s) = serde_json::to_string(&summary_map) {
             // include build id in the JSON summary so external drivers can record it

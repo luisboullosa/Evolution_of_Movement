@@ -1,11 +1,10 @@
 //! Intracellular "macromolecule blob" spatial brain: layered nodes tuned to hex edges
 //! or cardinal (N/S/E/W) pools of neighbor resources.
-use super::genome::{BrainOutput, SENSOR_DIM};
+use super::types::{BrainOutput, SENSOR_DIM, l2_slices, perturb_param};
 use super::movement_output::{
     hidden_sum_output, hex_compass_output, readout_output, CARDINAL_ANGLES_DEG,
     HEX_SECTOR_ANGLES_DEG,
 };
-use super::perceptron::{l2_slices, perturb_param};
 use super::spatial_graph::SPATIAL_SECTOR_COUNT;
 use crate::config::MovementOutputMode;
 use rand::Rng;
@@ -41,6 +40,13 @@ impl SpatialBlobLayout {
         match raw.trim().to_ascii_lowercase().as_str() {
             "cardinal" | "cardinal_4" | "cardinal4" | "nsew" => SpatialBlobLayout::Cardinal4,
             _ => SpatialBlobLayout::HexEdge,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpatialBlobLayout::HexEdge => "hex_edge",
+            SpatialBlobLayout::Cardinal4 => "cardinal_4",
         }
     }
 }
@@ -131,8 +137,8 @@ impl SpatialBlobBrain {
 
     pub fn structure_signature(&self) -> String {
         format!(
-            "blob:{:?}:{}:{}",
-            self.layout,
+            "blob:{}:{}:{}",
+            self.layout.as_str(),
             self.layer_count,
             self.nodes_per_layer()
         )
