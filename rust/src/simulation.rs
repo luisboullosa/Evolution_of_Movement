@@ -514,12 +514,19 @@ impl Simulation {
                 } else {
                     motile_count as f64 / self.individuals.len() as f64
                 };
+                let avg_thresh = if self.individuals.is_empty() {
+                    0.0
+                } else {
+                    self.individuals.iter().map(|ind| ind.morph_threshold).sum::<f64>()
+                        / self.individuals.len() as f64
+                };
                 ss.push_str(&format!(
-                    "  t={} pop={} prop_moved={:.3} motile={:.3}",
+                    "  t={} pop={} prop_moved={:.4} motile={:.4} thresh={:.4}",
                     t,
                     self.individuals.len(),
                     prop_now,
-                    prop_motile
+                    prop_motile,
+                    avg_thresh
                 ));
 
                 if progress_tty {
@@ -661,15 +668,9 @@ impl Simulation {
         } else {
             motile_count as f64 / self.individuals.len() as f64
         };
-        let avg_morph_threshold = if self.individuals.is_empty() {
-            0.0
-        } else {
-            self.individuals
-                .iter()
-                .map(|ind| ind.morph_threshold)
-                .sum::<f64>()
-                / self.individuals.len() as f64
-        };
+        let (avg_morph_threshold, std_morph_threshold) = self.morph_threshold_stats();
+        let (prop_neural_move, avg_neural_drive) = self.evaluate_common_garden_motility();
+
         let mut summary_map = serde_json::Map::new();
         summary_map.insert(
             "final_population".to_string(),
@@ -686,6 +687,18 @@ impl Simulation {
         summary_map.insert(
             "avg_morph_threshold".to_string(),
             serde_json::Value::from(avg_morph_threshold),
+        );
+        summary_map.insert(
+            "std_morph_threshold".to_string(),
+            serde_json::Value::from(std_morph_threshold),
+        );
+        summary_map.insert(
+            "prop_neural_move".to_string(),
+            serde_json::Value::from(prop_neural_move),
+        );
+        summary_map.insert(
+            "avg_neural_drive".to_string(),
+            serde_json::Value::from(avg_neural_drive),
         );
         if let Ok(s) = serde_json::to_string(&summary_map) {
             // include build id in the JSON summary so external drivers can record it
@@ -719,6 +732,67 @@ impl Simulation {
             final_pop,
             prop_moved,
         );
+    }
+
+    /// Calculate mean and standard deviation of morph_threshold (developmental reaction norm).
+    pub fn morph_threshold_stats(&self) -> (f64, f64) {
+        if self.individuals.is_empty() {
+            return (0.0, 0.0);
+        }
+        let n = self.individuals.len() as f64;
+        let mean = self.individuals.iter().map(|ind| ind.morph_threshold).sum::<f64>() / n;
+        let variance = self
+            .individuals
+            .iter()
+            .map(|ind| (ind.morph_threshold - mean).powi(2))
+            .sum::<f64>()
+            / n;
+        (mean, variance.sqrt())
+    }
+
+    /// Standardized Common Garden Assay:
+    /// Probes every living individual's neural genome under neutral reference sensory conditions:
+    /// uniform edge food = 1.0, center food = 1.0, local population = 1 (uncontested), individual energy = 10.0 (baseline).
+    /// Returns:
+    /// - prop_neural_move: fraction of genomes whose neural network outputs move_signal > 0 (intrinsic desire to move)
+    /// - avg_neural_drive: population mean of move_signal
+    pub fn evaluate_common_garden_motility(&mut self) -> (f64, f64) {
+        if self.individuals.is_empty() {
+            return (0.0, 0.0);
+        }
+        let edges = [1.0f64; 6];
+        let center = 1.0f64;
+        let local_pop = 1i32;
+        let ind_res = 10.0f64;
+        let mode = self.config.resolved_movement_output_mode();
+        let mut move_count = 0usize;
+        let mut total_drive = 0.0f64;
+
+        for ind in &mut self.individuals {
+            let sensors = crate::step_engine::build_sensor_inputs_for_kind(
+                ind.brain.kind(),
+                edges,
+                center,
+                local_pop,
+                ind_res,
+            );
+            let mut runtime_clone = ind.spatial_runtime.clone();
+            let ctx = crate::brain::ForwardContext {
+                sensors,
+                position: ind.position,
+                hidden_buf: &mut self.nn_hidden_buf,
+                out2_buf: &mut self.nn_out2_buf,
+                spatial_runtime: runtime_clone.as_mut(),
+                movement_output_mode: mode,
+            };
+            let output = ind.brain.forward(ctx);
+            if output.move_signal > 0.0 {
+                move_count += 1;
+            }
+            total_drive += output.move_signal;
+        }
+        let n = self.individuals.len() as f64;
+        (move_count as f64 / n, total_drive / n)
     }
 
     fn write_config_artifacts(&self, simdir: &str, config_json: &str) {
@@ -1217,5 +1291,38 @@ mod progress_tests {
         assert!(should_emit_progress(99_999, 100_000, interval));
         assert!(!should_emit_progress(1, 100_000, interval));
         assert!(should_emit_progress(2000, 100_000, interval));
+    }
+
+    #[test]
+    fn test_morph_threshold_stats_calculation() {
+        let cfg = crate::config::Config::default();
+        let mut sim = super::Simulation::new(&cfg);
+        assert_eq!(sim.morph_threshold_stats(), (0.0, 0.0));
+
+        let mut ind1 = crate::individual::Individual::new_founder(&cfg, 0, 1, &mut sim.rng);
+        ind1.morph_threshold = 0.20;
+        let mut ind2 = crate::individual::Individual::new_founder(&cfg, 1, 2, &mut sim.rng);
+        ind2.morph_threshold = 0.40;
+
+        sim.individuals.push(ind1);
+        sim.individuals.push(ind2);
+
+        let (mean, std) = sim.morph_threshold_stats();
+        assert!((mean - 0.30).abs() < 1e-6);
+        assert!((std - 0.10).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_common_garden_assay_evaluates_motility() {
+        let cfg = crate::config::Config::default();
+        let mut sim = super::Simulation::new(&cfg);
+        assert_eq!(sim.evaluate_common_garden_motility(), (0.0, 0.0));
+
+        let ind = crate::individual::Individual::new_founder(&cfg, 0, 1, &mut sim.rng);
+        sim.individuals.push(ind);
+
+        let (prop, drive) = sim.evaluate_common_garden_motility();
+        assert!(prop >= 0.0 && prop <= 1.0);
+        assert!(drive.is_finite());
     }
 }

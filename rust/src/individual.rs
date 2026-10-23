@@ -42,6 +42,10 @@ pub struct Individual {
     pub is_mature: bool,
     /// Evolvable threshold for developing flagella: avg_juvenile_cue >= morph_threshold -> motile.
     pub morph_threshold: f64,
+    /// Remaining run ticks for directional persistence (run-and-tumble).
+    pub run_ticks: u32,
+    /// Persisted heading angle in degrees during an active run.
+    pub heading_degrees: f64,
 }
 
 impl Individual {
@@ -67,7 +71,9 @@ impl Individual {
             has_flagella: true,
             juvenile_cue_sum: 0.0,
             is_mature: false,
-            morph_threshold: 0.5,
+            morph_threshold: 0.25,
+            run_ticks: 0,
+            heading_degrees: 0.0,
         }
     }
 

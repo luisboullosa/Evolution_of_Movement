@@ -274,7 +274,12 @@ pub struct Config {
 
     pub mutation_rate: f64,
     pub mutation_sigma: f64,
+    #[serde(default = "default_movement_cost_factor")]
     pub movement_cost_factor: f64,
+
+    /// Duration of directional persistence / run length in timesteps (0 = evaluate every step).
+    #[serde(default = "default_run_duration")]
+    pub run_duration: u32,
 
     /// Minimum steps between hex moves when `move_signal > 0`. Overridden when
     /// `movement_speed` is set in JSON. Default 1 (one hex per step).
@@ -330,6 +335,11 @@ pub struct Config {
     #[serde(default = "default_morph_threshold")]
     pub default_morph_threshold: f64,
 
+    /// If true, heterosperma/dispersal plasticity: avg_juvenile_cue <= morph_threshold -> motile (lean patch develops flagella).
+    /// If false (classic): avg_juvenile_cue >= morph_threshold -> motile (rich patch develops flagella).
+    #[serde(default = "default_dispersal_on_low_cue")]
+    pub dispersal_on_low_cue: bool,
+
     /// When true, individuals feed at their location (or arrival location when moving) every step.
     /// When false, moving forfeits feeding for that step (legacy behavior).
     #[serde(default = "default_allow_concurrent_eat_and_move")]
@@ -343,12 +353,24 @@ fn default_developmental_steps() -> u32 {
     10
 }
 
+fn default_movement_cost_factor() -> f64 {
+    0.10
+}
+
+fn default_run_duration() -> u32 {
+    0
+}
+
 fn default_flagella_maintenance_cost() -> f64 {
     0.02
 }
 
 fn default_morph_threshold() -> f64 {
-    0.5
+    0.25
+}
+
+fn default_dispersal_on_low_cue() -> bool {
+    false
 }
 
 fn default_allow_concurrent_eat_and_move() -> bool {
@@ -428,7 +450,8 @@ impl Default for Config {
             basal_metabolic_cost: 0.05,
             mutation_rate: 0.01,
             mutation_sigma: 0.1,
-            movement_cost_factor: 2.0,
+            movement_cost_factor: default_movement_cost_factor(),
+            run_duration: default_run_duration(),
             movement_interval: 1,
             movement_speed: None,
             ecology_profile: EcologyProfile::default(),
@@ -452,6 +475,7 @@ impl Default for Config {
             developmental_steps: default_developmental_steps(),
             flagella_maintenance_cost: default_flagella_maintenance_cost(),
             default_morph_threshold: default_morph_threshold(),
+            dispersal_on_low_cue: default_dispersal_on_low_cue(),
             allow_concurrent_eat_and_move: default_allow_concurrent_eat_and_move(),
             nn_index_flush_interval: 0,
             nn_index_flush_size: 0,

@@ -672,10 +672,10 @@
     "semantic_hash": "784dc0deb8932604d25bebdbcb4ed013"
   },
   "rust/src/config.rs": {
-    "mtime": 1792692804.109692,
-    "seen": 1792694097.8737216,
-    "ast_hash": "246bf1370cf7115a7e3be7db16777a27",
-    "semantic_hash": "246bf1370cf7115a7e3be7db16777a27"
+    "mtime": 1792715056.8100376,
+    "seen": 1792741315.7304444,
+    "ast_hash": "f8f8eb0c48f122a87cc6901a0cee4af3",
+    "semantic_hash": ""
   },
   "rust/src/ecology_presets.rs": {
     "mtime": 1785147505.7458758,
@@ -756,10 +756,10 @@
     "semantic_hash": "3818cc3f9d17058788ec26b545292626"
   },
   "rust/src/individual.rs": {
-    "mtime": 1792692855.9264777,
-    "seen": 1792694097.876979,
-    "ast_hash": "86183c27f780e97427cfa57ce3698c04",
-    "semantic_hash": "86183c27f780e97427cfa57ce3698c04"
+    "mtime": 1792711363.3903563,
+    "seen": 1792711855.2111237,
+    "ast_hash": "25c45dbb3178aeda3ae39ad3754e0a31",
+    "semantic_hash": ""
   },
   "rust/src/lab_dish.rs": {
     "mtime": 1785147505.7506697,
@@ -822,10 +822,10 @@
     "semantic_hash": "66403594be8586276edd128f0d98d33d"
   },
   "rust/src/simulation.rs": {
-    "mtime": 1792693592.4277053,
-    "seen": 1792694097.8787947,
-    "ast_hash": "3c6b4ba2b0fd21e2d6a4c6c5c1889130",
-    "semantic_hash": "3c6b4ba2b0fd21e2d6a4c6c5c1889130"
+    "mtime": 1792752937.6308644,
+    "seen": 1792753761.6742651,
+    "ast_hash": "c301628264542462eeffcadda0ceabc5",
+    "semantic_hash": ""
   },
   "rust/src/snapshot.rs": {
     "mtime": 1785675424.4806635,
@@ -840,10 +840,10 @@
     "semantic_hash": "4a57195aa3f798ccab07eeda647e14bf"
   },
   "rust/src/step_engine.rs": {
-    "mtime": 1792692948.637311,
-    "seen": 1792694097.8791924,
-    "ast_hash": "daccdf3c163260d654d8f1a57270f8fa",
-    "semantic_hash": "daccdf3c163260d654d8f1a57270f8fa"
+    "mtime": 1792715417.565491,
+    "seen": 1792741315.7304733,
+    "ast_hash": "a2f704a3713d0db4888bc6fcc42a85b3",
+    "semantic_hash": ""
   },
   "rust/src/tensor.rs": {
     "mtime": 1785675424.012447,
@@ -1294,5 +1294,191 @@
     "seen": 1792694097.8994832,
     "ast_hash": "3bd20c9486f9879d92fb34109c9afdc6",
     "semantic_hash": "3bd20c9486f9879d92fb34109c9afdc6"
+  },
+  "scripts/analyze_botero_sweep.py": {
+    "mtime": 1792704445.2979,
+    "seen": 1792704616.0142207,
+    "ast_hash": "4a87065d11eff854969bc3aceaccc7cf",
+    "semantic_hash": ""
+  },
+  "scripts/run_botero_sweep.py": {
+    "mtime": 1792713986.5046856,
+    "seen": 1792714410.271321,
+    "ast_hash": "484bd843fcef0923180c8dfe7c47ba00",
+    "semantic_hash": ""
+  },
+  ".github/workflows/rust-ci.yml": {
+    "mtime": 1785148074.578325,
+    "seen": 1792704616.0144272,
+    "ast_hash": "a4de4351231a2b38aaa46babe2bd8a47",
+    "semantic_hash": ""
+  },
+  "GRAPHIFY_WORKFLOW.md": {
+    "mtime": 1792680984.7204745,
+    "seen": 1792704616.0144305,
+    "ast_hash": "c36191776e5665134079381c9461d416",
+    "semantic_hash": ""
+  },
+  "IMPLEMENTATION_SUMMARY.md": {
+    "mtime": 1771536146.454206,
+    "seen": 1792704616.0144336,
+    "ast_hash": "a01d031b6b648e13cffa655c710edb4c",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1785147505.3917382,
+    "seen": 1792704616.0144362,
+    "ast_hash": "648de151c4b0907e91a620057b04a056",
+    "semantic_hash": ""
+  },
+  "TESTS.md": {
+    "mtime": 1785147505.3917382,
+    "seen": 1792704616.014439,
+    "ast_hash": "0afef6fcafdaa7a8e3c636fac7a39840",
+    "semantic_hash": ""
+  },
+  "docs/IRREVERSIBLE_MOVEMENT_PLASTICITY.md": {
+    "mtime": 1792691741.5081491,
+    "seen": 1792704616.014442,
+    "ast_hash": "05e99422830a427c60bccf2445e8292c",
+    "semantic_hash": ""
+  },
+  "docs/brain_graph_playground.html": {
+    "mtime": 1785147505.3932498,
+    "seen": 1792704616.0144436,
+    "ast_hash": "e1ff9de458e160bfe29bd96668fcfac4",
+    "semantic_hash": ""
+  },
+  "docs/cuda_kernel_arguments.md": {
+    "mtime": 1785675424.215079,
+    "seen": 1792704616.0144455,
+    "ast_hash": "6462473b1ef4ed02549e2cf9556c1486",
+    "semantic_hash": ""
+  },
+  "docs/gpu_optimization.md": {
+    "mtime": 1785675424.4806635,
+    "seen": 1792704616.014448,
+    "ast_hash": "d4715884e95232023e0fddc08ade58f4",
+    "semantic_hash": ""
+  },
+  "docs/index.html": {
+    "mtime": 1785147505.3937542,
+    "seen": 1792704616.0144498,
+    "ast_hash": "a1d7870c08a29e8d0148fb0e5152a0fb",
+    "semantic_hash": ""
+  },
+  "docs/population_stability.md": {
+    "mtime": 1785147505.3949513,
+    "seen": 1792704616.0144515,
+    "ast_hash": "b1ae100fe69141b47d559d817fa76c62",
+    "semantic_hash": ""
+  },
+  "docs/sim_step_semantics.md": {
+    "mtime": 1785147505.3949513,
+    "seen": 1792704616.0144541,
+    "ast_hash": "755b4796422d417ca38c9d80c5558d59",
+    "semantic_hash": ""
+  },
+  "requirements-playwright.txt": {
+    "mtime": 1769340226.0568428,
+    "seen": 1792704616.0144565,
+    "ast_hash": "cd03ee143808cc598ee0ec87e0c9e526",
+    "semantic_hash": ""
+  },
+  "rust/HEX_COORDS.md": {
+    "mtime": 1771536146.4578378,
+    "seen": 1792704616.0144587,
+    "ast_hash": "965fa81493a5e277d7fcb64888aa0f10",
+    "semantic_hash": ""
+  },
+  "rust/INTERACTIVE_VIEWER.md": {
+    "mtime": 1785147505.694431,
+    "seen": 1792704616.014461,
+    "ast_hash": "9b1ae0e1d8405e2a437a084557ef4d9b",
+    "semantic_hash": ""
+  },
+  "rust/README.md": {
+    "mtime": 1785147505.695438,
+    "seen": 1792704616.0144637,
+    "ast_hash": "121f559a07c3d068d91877541f603049",
+    "semantic_hash": ""
+  },
+  "rust/RUNNING_SIMULATIONS.md": {
+    "mtime": 1785147505.6964376,
+    "seen": 1792704616.0144658,
+    "ast_hash": "f3525c9a82ccd7334a0b8285a8a4cf7a",
+    "semantic_hash": ""
+  },
+  "scripts/REMOTE_SCAN.md": {
+    "mtime": 1769340226.0582855,
+    "seen": 1792704616.0144672,
+    "ast_hash": "1d7ed058643ead61032c71ee74ec9a45",
+    "semantic_hash": ""
+  },
+  "webviewer/README.md": {
+    "mtime": 1771534410.1029525,
+    "seen": 1792704616.0144691,
+    "ast_hash": "4eccdbb8d8e82b0ca5ed07d93df61c39",
+    "semantic_hash": ""
+  },
+  "webviewer/index.html": {
+    "mtime": 1769340226.096385,
+    "seen": 1792704616.014471,
+    "ast_hash": "ec5bd6b7e091bfc458b23535837f5122",
+    "semantic_hash": ""
+  },
+  "scripts/run_ecology_sweep.py": {
+    "mtime": 1792712665.0372682,
+    "seen": 1792713220.8811076,
+    "ast_hash": "b51600d209eff95365537ef1d3bde8e8",
+    "semantic_hash": ""
+  },
+  "scripts/compare_expansive_torus.py": {
+    "mtime": 1792714285.0207648,
+    "seen": 1792714410.271303,
+    "ast_hash": "cbfe965e66089a2c7e8832c59c66c2db",
+    "semantic_hash": ""
+  },
+  "scripts/plot_comprehensive_benchmark.py": {
+    "mtime": 1792714364.935577,
+    "seen": 1792714410.2713137,
+    "ast_hash": "529d3ac30de144f683ae24afccfd0d2c",
+    "semantic_hash": ""
+  },
+  "scripts/analyze_dispersal_comparison.py": {
+    "mtime": 1792739925.1050446,
+    "seen": 1792741315.7304811,
+    "ast_hash": "65142e56ae4199725103348fb4cf93ae",
+    "semantic_hash": ""
+  },
+  "scripts/run_dispersal_comparison.py": {
+    "mtime": 1792715484.066657,
+    "seen": 1792741315.7305193,
+    "ast_hash": "ed8d8d4c3906eb5462a12522030e6ec2",
+    "semantic_hash": ""
+  },
+  "scripts/analyze_botero_triad.py": {
+    "mtime": 1792750386.878042,
+    "seen": 1792750462.8644307,
+    "ast_hash": "2ba56d0455e3c3a5e4780af40f66c847",
+    "semantic_hash": ""
+  },
+  "scripts/run_botero_both_mechanisms.py": {
+    "mtime": 1792750325.6203518,
+    "seen": 1792750462.864487,
+    "ast_hash": "862a28e48d7bfbb3e0a99adaa83f8321",
+    "semantic_hash": ""
+  },
+  "scripts/analyze_expanded_botero.py": {
+    "mtime": 1792751937.5550978,
+    "seen": 1792753761.6742802,
+    "ast_hash": "87f6c695178d6b320f2fcd29a627b2e4",
+    "semantic_hash": ""
+  },
+  "scripts/run_expanded_botero_sweep.py": {
+    "mtime": 1792753314.3796246,
+    "seen": 1792753761.6743119,
+    "ast_hash": "a222533b10140da14acd7862cd49ce5b",
+    "semantic_hash": ""
   }
 }

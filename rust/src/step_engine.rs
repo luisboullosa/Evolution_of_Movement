@@ -148,14 +148,25 @@ pub fn forward_decision(
     };
     let output = ind.brain.forward(ctx);
 
-    decision_from_output(
-        output,
-        center_resource,
-        local_population,
-        ind.resources,
-        movement_cost_factor,
-        ind.has_flagella,
-    )
+    if ind.has_flagella && ind.run_ticks > 0 {
+        let spend = (1.0 * movement_cost_factor).min(ind.resources);
+        DecisionRow {
+            move_one_step: true,
+            move_signal: 1.0,
+            direction_degrees: ind.heading_degrees,
+            movement_spend: spend,
+            gathered: 0.0,
+        }
+    } else {
+        decision_from_output(
+            output,
+            center_resource,
+            local_population,
+            ind.resources,
+            movement_cost_factor,
+            ind.has_flagella,
+        )
+    }
 }
 
 pub fn decision_from_output(
@@ -211,6 +222,7 @@ pub fn apply_decision(
     let delta = if decision.move_one_step {
         if !ind.has_flagella {
             // Sessile / deflagellated individuals cannot move even if requested
+            ind.run_ticks = 0;
             apply_gather_at(ind, decision, env, pos, local_pop);
             0
         } else if ind.move_cooldown > 0 {
@@ -220,6 +232,15 @@ pub fn apply_decision(
         } else {
             ind.resources -= decision.movement_spend;
             let new_pos = compute_new_position(pos, decision.direction_degrees, cfg, cell_count, dish);
+            if new_pos == pos {
+                // Hit arena boundary or could not advance: abort run so organism can tumble next step
+                ind.run_ticks = 0;
+            } else if ind.run_ticks > 0 {
+                ind.run_ticks -= 1;
+            } else if cfg.run_duration > 1 {
+                ind.run_ticks = cfg.run_duration - 1;
+                ind.heading_degrees = decision.direction_degrees;
+            }
             let d = new_pos as i32 - pos as i32;
             ind.position = new_pos;
             occupancy[pos] = occupancy[pos].saturating_sub(1);
@@ -235,6 +256,7 @@ pub fn apply_decision(
             d
         }
     } else {
+        ind.run_ticks = 0;
         apply_gather_at(ind, decision, env, pos, local_pop);
         0
     };
@@ -251,7 +273,15 @@ pub fn apply_decision(
             ind.is_mature = true;
             let dev_steps = (ind.age + 1).max(1) as f64;
             let avg_cue = ind.juvenile_cue_sum / dev_steps;
-            ind.has_flagella = avg_cue >= ind.morph_threshold;
+            let is_motile = if cfg.dispersal_on_low_cue {
+                avg_cue <= ind.morph_threshold
+            } else {
+                avg_cue >= ind.morph_threshold
+            };
+            ind.has_flagella = is_motile;
+            if !ind.has_flagella {
+                ind.run_ticks = 0;
+            }
         }
     }
 
@@ -593,5 +623,136 @@ mod tests {
         let delta = apply_decision(&mut ind, move_decision, &cfg, &mut env, 5, &mut occupancy, None);
         assert_eq!(delta, 0);
         assert_eq!(ind.position, 0); // stayed put
+    }
+
+    #[test]
+    fn heterosperma_dispersal_on_low_cue_develops_flagella_under_lean_patch() {
+        use crate::config::Config;
+        use crate::environment::Environment;
+
+        let mut cfg = Config::default();
+        cfg.grid_width = 5;
+        cfg.developmental_steps = 2;
+        cfg.dispersal_on_low_cue = true; // Heterosperma mode: lean patch -> motile, rich patch -> sessile
+
+        let mut env = Environment::new(5);
+        env.resources = vec![0.1; 5]; // very lean patch (0.1 food)
+
+        let brain = BrainGenome {
+            kind: crate::brain::BrainKind::Perceptron,
+            inner: BrainInner::Perceptron(PerceptronBrain::new(3, 1)),
+        };
+        let mut ind = Individual::new(brain, 0, 1);
+        ind.morph_threshold = 0.5; // cue <= 0.5 triggers dispersal morph (flagella)
+        ind.has_flagella = false;
+        ind.is_mature = false;
+
+        let decision = DecisionRow {
+            move_one_step: false,
+            move_signal: -1.0,
+            direction_degrees: 0.0,
+            movement_spend: 0.0,
+            gathered: 0.1,
+        };
+        let mut occupancy = vec![1i32; 5];
+
+        // Step 1: age = 0
+        apply_decision(&mut ind, decision, &cfg, &mut env, 5, &mut occupancy, None);
+        assert!(!ind.is_mature);
+
+        ind.age = 1;
+        // Step 2: age = 1 -> lean patch (cue <= 0.5) -> develops flagella!
+        apply_decision(&mut ind, decision, &cfg, &mut env, 5, &mut occupancy, None);
+        assert!(ind.is_mature);
+        assert!(ind.has_flagella); // Winged disperser produced!
+
+        // Now test rich patch case: food is abundant (2.0 food per cell)
+        let mut rich_env = Environment::new(5);
+        rich_env.resources = vec![2.0; 5];
+        let mut rich_ind = Individual::new(ind.brain.clone(), 0, 2);
+        rich_ind.morph_threshold = 0.5; // cue > 0.5 -> rich patch -> sessile grazer
+        rich_ind.has_flagella = true;
+        rich_ind.is_mature = false;
+
+        apply_decision(&mut rich_ind, decision, &cfg, &mut rich_env, 5, &mut occupancy, None);
+        rich_ind.age = 1;
+        apply_decision(&mut rich_ind, decision, &cfg, &mut rich_env, 5, &mut occupancy, None);
+        assert!(rich_ind.is_mature);
+        assert!(!rich_ind.has_flagella); // Sessile resident produced!
+    }
+
+    #[test]
+    fn run_and_tumble_heading_persistence_persists_for_run_duration() {
+        let mut cfg = Config::default();
+        cfg.grid_topology = crate::config::GridTopology::Ring1d;
+        cfg.grid_width = 10;
+        cfg.run_duration = 3;
+        cfg.movement_cost_factor = 0.10;
+        let mut env = Environment::new(10);
+        env.resources = vec![1.0; 10];
+
+        let brain = BrainGenome {
+            kind: crate::brain::BrainKind::Perceptron,
+            inner: BrainInner::Perceptron(PerceptronBrain::new(3, 1)),
+        };
+        let mut ind = Individual::new(brain, 0, 1);
+        ind.has_flagella = true;
+        ind.is_mature = true;
+        assert_eq!(ind.run_ticks, 0);
+
+        let mut occupancy = vec![1i32; 10];
+        let mut hb = [0.0; 4];
+        let mut ob = [0.0; 4];
+
+        // Step 1: Brain decides to move in direction 0 (positive delta on ring)
+        let decision1 = DecisionRow {
+            move_one_step: true,
+            move_signal: 1.0,
+            direction_degrees: 0.0,
+            movement_spend: 0.10,
+            gathered: 0.0,
+        };
+        apply_decision(&mut ind, decision1, &cfg, &mut env, 10, &mut occupancy, None);
+        assert_eq!(ind.position, 1);
+        assert_eq!(ind.run_ticks, 2);
+        assert_eq!(ind.heading_degrees, 0.0);
+
+        // Step 2: forward_decision should automatically persist heading without brain re-query
+        let edges = [1.0; 6];
+        let decision2 = forward_decision(
+            &mut ind,
+            edges,
+            1.0,
+            1,
+            cfg.movement_cost_factor,
+            cfg.resolved_movement_output_mode(),
+            &mut hb,
+            &mut ob,
+        );
+        assert!(decision2.move_one_step);
+        assert_eq!(decision2.direction_degrees, 0.0);
+        apply_decision(&mut ind, decision2, &cfg, &mut env, 10, &mut occupancy, None);
+        assert_eq!(ind.position, 2);
+        assert_eq!(ind.run_ticks, 1);
+
+        // Step 3: forward_decision persists again
+        let decision3 = forward_decision(
+            &mut ind,
+            edges,
+            1.0,
+            1,
+            cfg.movement_cost_factor,
+            cfg.resolved_movement_output_mode(),
+            &mut hb,
+            &mut ob,
+        );
+        assert!(decision3.move_one_step);
+        assert_eq!(decision3.direction_degrees, 0.0);
+        apply_decision(&mut ind, decision3, &cfg, &mut env, 10, &mut occupancy, None);
+        assert_eq!(ind.position, 3);
+        assert_eq!(ind.run_ticks, 0); // Run completed!
+
+        // Step 4: run_ticks is now 0; tumble/re-evaluation occurs on next step
+        assert_eq!(ind.run_ticks, 0);
     }
 }
