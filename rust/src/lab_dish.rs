@@ -59,7 +59,7 @@ pub struct LabDish {
     pub cladogram: Cladogram,
     pub timestep: i32,
     pub radius_cells: i32,
-    active_coords: Vec<HexCoord>,
+    pub active_coords: Vec<HexCoord>,
     coord_to_index: HashMap<HexCoord, usize>,
     dish_center: HexCoord,
     resource_base: Vec<f64>,

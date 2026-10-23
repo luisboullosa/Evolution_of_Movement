@@ -74,5 +74,9 @@ required-features = ["sqlite"]
 name = "evo_probe_timeline"
 path = "src/bin/evo_probe_timeline.rs"
 
+[[bin]]
+name = "evo_lab_bench_export"
+path = "src/bin/export_lab_bench.rs"
+
 [package.metadata]
 build_script = true

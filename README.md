@@ -1,181 +1,239 @@
-# evo-movement-sim
+# Evolution of Movement (`evo-movement`)
 
-Minimal C++ simulation of evolving movement in digital individuals.
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-67%20passed-brightgreen.svg)](rust/tests)
+[![Topology](https://img.shields.io/badge/topology-2D%20Hexagonal%20Torus-purple.svg)](rust/src/hex_grid.rs)
+[![Ecology](https://img.shields.io/badge/ecology-Botero%20Grid%20%7C%20Heterosperma-emerald.svg)](rust/src/simulation.rs)
 
-## Interactive Viewer (New!)
+**Evolutionary emergence of neural motility, developmental dispersal plasticity, and foraging strategies across environmental predictability frontiers.**
 
-An interactive visualization system for exploring evolution in real-time:
+---
+
+![Evolution of Movement — Lab Bench Simulation](assets/lab_bench_simulation.gif)
+
+*Figure 1: The Lab Bench ([`evo_movement_lab`](file:///d:/Development/Movement/rust/src/bin/lab.rs)). Real-time 2D hexagonal petri dish ($R=10$, 331 cells) rendered with shifting Perlin resource gradients, lineage-colored organisms, and a live synaptic wiring inspector ([`BrainDiagram`](file:///d:/Development/Movement/rust/src/brain_diagram.rs)) tracking sensory input sectors, hidden nodes, and motor readouts. High-definition video available at [`assets/lab_bench_simulation.mp4`](file:///d:/Movement/assets/lab_bench_simulation.mp4).*
+
+---
+
+## 1. Overview & Theoretical Framework
+
+Living organisms span a continuum between sessile exploitation and active chemotactic locomotion. Why and when does active movement evolve over sessility, and how do environmental predictability and variability shape neural motor control?
+
+`evo-movement` is a high-performance Rust simulation suite modeling the evolutionary dynamics of autonomous agents in dynamic spatial resource fields.
+
+```
++----------------------------------------------------------------------------------------------------+
+|                               THE BOTERO PREDICTABILITY MATRIX (R x P)                             |
+|                                                                                                    |
+|  Environmental                                                                                     |
+|  Predictability (P)                                                                                |
+|        ^                                                                                           |
+|   1.0  |   CHEMOTACTIC FORAGING                  RUN-AND-TUMBLE MIGRATION                         |
+|        |   High neural drive (G_move > 0.8)      Directed displacement, tracking                  |
+|        |   Agents surf spatial Perlin gradients  macro-scale patch drift                           |
+|        |                                                                                           |
+|   0.5  |   DEVELOPMENTAL PLASTICITY              BET-HEDGING                                       |
+|        |   *Heterosperma* seed dimorphism        Phenotypic bifurcation,                           |
+|        |   Lean patch -> motile dispersal        stochastic flagellar switching                    |
+|        |   Rich patch -> sessile exploitation                                                      |
+|        |                                                                                           |
+|   0.0  |   QUASI-STATIC SESSILITY                HYPER-VOLATILITY COLLAPSE                         |
+|        |   G_move -> 0.0, energy conserved       Environmental pace > adaptation speed             |
+|        |   Grazing local resource regrowth       Population extinction frontier                     |
+|        +-----------------------------------------------------------------------------------------> |
+|        0.0                                0.5                               1.0                    |
+|                                     Environmental Variability (R)                                  |
++----------------------------------------------------------------------------------------------------+
+```
+
+### Key Biological Hypotheses Modeled
+
+1. **The Botero Environmental Matrix ($R \times P$)**:
+   Following Botero et al. (2015), environments are parameterized by their rate of change / variability ($R$) and predictability ($P$).
+   - **Quasi-static Sessility ($R \le 0.05$)**: When food patches are static, the metabolic cost of movement ($\ge 0.08$ energy/step) selects against motility. Organisms evolve near-zero neural drive ($G_{\text{move}} \approx 0.03$), anchoring in local patches.
+   - **Chemotaxis Highways ($P \ge 0.6, R \ge 0.15$)**: Correlated shifting gradients reward directional movement. Organisms evolve positive coupling between directional edge sensors and motor readouts.
+   - **Hyper-volatility Collapse**: When temporal frequency outpaces generational turnover ($R \ge 0.35, P \le 0.1$), energetic expenditure outstrips replenishment, leading to population crashes.
+
+2. **Dispersal Plasticity (*Heterosperma* Seed Dimorphism Model)**:
+   Inspired by dimorphic plants (*Heterosperma pinnatum*) and wing-dimorphic insects, organisms express a developmental reaction norm allele ($\theta_{\text{morph}}$).
+   - If raised on a **lean patch** ($\text{Resource} < \theta_{\text{morph}}$), offspring commit to developing motile machinery (flagella/wings) to disperse.
+   - If raised on a **rich patch** ($\text{Resource} \ge \theta_{\text{morph}}$), offspring shed flagellar maintenance and remain sessile to maximize local reproduction.
+
+3. **Genetic vs. Phenotypic Motility Decomposition**:
+   A major challenge in evolutionary ecology is disentangling realized behavior from genetic adaptation. Under severe starvation, organisms may appear sessile simply because they lack energy to move.
+   - **Realized Locomotion (`prop_moved`)**: The fraction of organisms that physically displaced during simulation steps.
+   - **Common Garden Assay ($G_{\text{move}}$)**: At simulation checkpoints, individuals are placed in an unconstrained reference environment ($10\times$ resource saturation, zero movement cost). Their neural networks are probed to measure true intrinsic motor drive ($G_{\text{move}}$), free from environmental masking.
+
+---
+
+## 2. Architecture & Simulator Engine
+
+```
+                             +-------------------------------+
+                             |    HexDishLayout / HexGrid    |
+                             |   6-Connected Axial (q, r)    |
+                             +---------------+---------------+
+                                             |
+                     +-----------------------+-----------------------+
+                     |                                               |
+                     v                                               v
+       +----------------------------+                 +----------------------------+
+       |   Circular Isolated Dish   |                 |    2D Hexagonal Torus      |
+       |   R=10..14 (331..631 hexes) |                 |    Distance-Preserving     |
+       |   Natural wall boundaries  |                 |    Seamless Edge Wrapping  |
+       +----------------------------+                 +----------------------------+
+                     |                                               |
+                     +-----------------------+-----------------------+
+                                             |
+                                             v
+                             +-------------------------------+
+                             |      Simulation Engine        |
+                             |  - 2D Dynamic Perlin Noise    |
+                             |  - Discrete Hex Physics       |
+                             |  - Energy & Metabolism Ledger |
+                             |  - Cladogram & Lineage Colors |
+                             +---------------+---------------+
+                                             |
+         +-----------------------------------+-----------------------------------+
+         |                                   |                                   |
+         v                                   v                                   v
++------------------+                +------------------+                +------------------+
+|    Perceptron    |                |      MLP-2       |                |  Spatial Graphs  |
+| Direct 8-in-1-out|                | 8 -> H1 -> H2    |                | Evolved topology |
+| Fast linear map  |                | Latent dynamics  |                | & spatial blobs  |
++------------------+                +------------------+                +------------------+
+```
+
+- **Hexagonal Spatial Geometry**: Implements 6-connected hexagonal grids using axial coordinates $(q, r)$. Features both bounded circular petri dishes (for controlled laboratory trials) and toroidal wrapping (for continuous, infinite-plane ecological simulations).
+- **Spatiotemporal Perlin Resource Fields**: Continuous 2D Perlin noise evolutions with independent spatial scales ($\sigma_{\text{spatial}}$), time speeds ($v_{\text{time}}$), and contrast controls.
+- **Neural Brain Architectures**: Supports modular neural controllers:
+  - `Perceptron`: 8 inputs (6 directional hex resource sensors, local crowding, internal energy) $\to$ hidden nodes $\to$ motor decision.
+  - `MLP-2`: Deep 2-layer perceptrons with non-linear activation for complex gradient tracking.
+  - `SpatialGraph` & `SpatialBlob`: Topologically embedded intracellular nodes with Euclidean distance-based connectivity.
+
+---
+
+## 3. Interactive Visualizers & Lab Bench
+
+The suite provides three visualization and experimentation environments:
+
+### 1. The Lab Bench (`evo_movement_lab`)
+A dedicated experimental bench for testing mutation rates, reproduction thresholds, and environmental scales with real-time neural inspection:
+
+```bash
+cd rust
+cargo run --release --bin evo_movement_lab
+```
+
+- **7 Collapsible Control Sections**: Dish & population, manual insertion, time/step multipliers, structural mutations, reproduction economics, Perlin landscape knobs, and metabolism.
+- **Live Brain Inspector**: Click any cell to inspect the resident organism's neural wiring, synaptic weights (red=negative, blue=positive), and activation values.
+
+### 2. Multi-Dish Interactive Viewer (`evo_movement_interactive`)
+The full desktop application for running and managing multiple independent petri dishes simultaneously:
 
 ```bash
 cd rust
 cargo run --release --bin evo_movement_interactive
 ```
 
-Features:
-- **Real-time visualization** with hexagonal grid display
-- **Individual selection** and neural network inspection
-- **Multiple petri dishes** for parallel experiments
-- **Save/load functionality** for preserving states
-- **Cladogram tracking** for phylogenetic analysis
-- **Light-based resources** with dynamic environments
-- **GPU support planned** for future acceleration with large populations
+- **Lineage Color System**: Founders receive unique hues; descendants inherit parental colors to track clade competition in real time.
+- **Phylogenetic Cladogram**: Visual ancestry tree tracking divergence, lineage depth, and extinction events.
 
-See [rust/INTERACTIVE_VIEWER.md](rust/INTERACTIVE_VIEWER.md) for detailed documentation.
-
-## Command-Line Simulation
-
-Build (Windows, PowerShell):
-
-```powershell
-mkdir build; cd build
-cmake .. -G "Visual Studio 17 2022"; cmake --build . --config Release
-./Release/evo-movement-sim.exe
-```
-
-This project is intentionally small and dependency-free (uses only the C++ standard library).
-
-Prerequisites: CMake 3.10+, a C++17 compiler (`gcc-c++` on Fedora, `build-essential` on Ubuntu, MSVC/MinGW on Windows).
-
-Rust port
-
------
-A Rust port of the simulator lives in the `rust/` subdirectory. To build and run the Rust
-binary use Cargo (works on all platforms):
+### 3. Web & Dash Visualizer (`webviewer/`)
+For remote or headless deployment, an interactive Python/Dash explorer is included:
 
 ```bash
-cd rust
-cargo build --release
-./target/release/evo_movement_rust --help   # Linux/macOS
-# ./target/release/evo_movement_rust.exe --help   # Windows
-```
-
-Note: Perlin temporal evolution is always enabled in the Rust port (the previous
-`--perlin-time`/`--no-perlin-time` toggle and `env_change_rate` additive-noise option
-have been removed). Use the `--env-time-speed`, `--env-time-amplitude`,
-`--env-perlin-spatial-scale` and `--env-perlin-time-scale` flags to tune the time-varying
-component.
-
-Web viewer
-
------
-The `webviewer/index.html` page is a legacy viewer that loads a TSV frames file (typically `frames.tsv`).
-This workflow is deprecated; newer runs use JSONL/CBOR outputs (e.g. `env.jsonl`, `individuals.jsonl`/`individuals.cbor`, `nn_index.json`).
-
-Interactive dashboard (Python)
-
------
-For a Shiny-like playground that does not require simulator outputs, use the Dash app:
-
-```bash
-pip install dash plotly numpy    # or: pip install -r requirements-dash.txt
+pip install dash plotly numpy
 python webviewer/interactive_dash.py --port 8050
 ```
 
-It provides three panels: (1) live 1D Perlin-ish environment preview with tunable seed/scale/time; (2) NN response explorer where you can edit weights/biases and see movement vs gather thresholds; (3) rough carrying-capacity estimator (K) using the simulator's maintenance, death, and resource assumptions.
+---
 
-Scan driver (Rust)
+## 4. Quickstart & Command-Line Usage
 
------
-A convenience driver for batch parameter scans using the Rust binary is provided at `scripts/scan_rust_population_scan.py`.
-It performs a grid or sampled parameter sweep and writes summary outputs for consumption by the webviewer.
+### Prerequisites
+- [Rust 1.70+](https://www.rust-lang.org/) (`cargo`)
+- Python 3.10+ (for sweep drivers and animation rendering)
 
-Key flags:
-
-- `--outdir`: output base directory (default `output/scan_population`). A single timestamped `jobs...` folder will be created under this path containing summary files.
-- `--workers`: number of parallel workers for the sweep.
-- `--steps`: number of simulation steps for short/pilot runs.
-- `--initial-population`: initial population size for short runs.
-- `--pilot`: use a smaller, pilot parameter grid.
-- `--no-write-outputs`: tell the Rust simulator to suppress per-step outputs (env.jsonl, individuals.jsonl, frames, nn_index).
-- `--no-deep`: do not run deeper follow-up simulations for promising parameter sets.
-- `--deep-steps` / `--deep-population`: when deep runs are enabled, control their length and starting population.
-
-Behavior:
-
-- The driver writes per-job temporary config files to the system temp directory so the output folder only contains the summary files.
-- It forces `report_interval` to be larger than the number of steps and sets `write_outputs`/`write_frames` to `false` by default to avoid producing per-step files when possible.
-- Summary files produced in the jobs folder include `results_short.csv`, `deep_results.csv` (if deep runs executed), `progress.json`, and `promising.csv`.
-
-Example (short pilot, no deep runs):
-
-```powershell
-python scripts\scan_rust_population_scan.py --pilot --workers 2 --steps 200 --initial-population 100 --outdir output/scan_population --no-deep
+### Build the Rust Engine
+```bash
+cd rust
+cargo build --release
 ```
 
-After the scan starts, open the webviewer at `webviewer/scan_live.html` served from a local HTTP server (see below) to watch `progress.json` updates.
-
-## Remote scan runner (Orange Pi)
-
-For distributing scan jobs to a remote Linux machine over SSH/SCP (e.g. an Orange Pi) and fetching deep-run population snapshots, see `scripts/REMOTE_SCAN.md`.
-
-On Windows, you can use the convenience wrapper `scripts/remote_scan.ps1`.
-
-## Cleaning webviewer output
-
-The `webviewer/`-root output layout and associated cleanup tooling are deprecated.
-Historically, the simulator wrote generated files directly into `webviewer/` (timestamped `env.tsv.*.tsv`,
-`individuals.tsv.*.tsv`, `nn_index.json`, and sometimes `frames.tsv`).
-Newer workflows write into `output/prod_runs/simXXXX[/runYYYY]/`.
-
-From PowerShell (dry-run):
-
-```powershell
-python scripts\clean_webviewer.py
+### Run a Headless Simulation
+```bash
+./target/release/evo_movement_rust.exe \
+  --config-file=../rust/src/bin/sample_config.json \
+  --steps=500 \
+  --report-interval=10
 ```
 
-To actually delete the discovered files add `--yes`:
+### Run the Expanded Botero ($R \times P$) Sweep
+To execute the multi-seed environmental predictability vs. variability parameter sweep:
 
-```powershell
-python scripts\clean_webviewer.py --yes
+```bash
+python scripts/run_expanded_botero_sweep.py --workers=4
 ```
 
-Alternatively, if you use the included CMake target you can run:
+Outputs are automatically collated into publication-ready heatmaps and summary tables detailing:
+- Proportion of active movers (`prop_moved`)
+- Intrinsic Common Garden motor drive ($G_{\text{move}}$)
+- Mean reaction norm threshold ($\theta_{\text{morph}}$)
+- Adaptation speed and extinction boundaries
 
-```powershell
-# from the project root
-cmake --build build --target clean-webviewer --config Release
+### Export Lab Bench Animation
+To re-render the authentic Lab Bench animation:
+
+```bash
+# Export simulation frame stream (100 steps)
+cargo run --manifest-path rust/Cargo.toml --release --bin evo_lab_bench_export -- rust/temp_outputs/lab_bench_stream.jsonl 100
+
+# Render GIF and MP4
+python scripts/render_lab_bench_animation.py
 ```
 
-The CMake target runs the cleaner in dry-run mode by default and prints which files would be removed; to actually delete files run the Python script with `--yes` as shown above.
+---
 
-## Running with burn-in and steps
+## 5. Repository Layout
 
-You can set a burn-in period (timesteps to skip before recording frames/snapshots) and number of steps from the command line:
-
-```powershell
-# run 500 timesteps but only start recording after timestep 200
+```
 .
-# from build/Release or run the exe directly
-./evo-movement-sim.exe --burn-in=200 --steps=500 --config-out=webviewer\simNNNN\config.json
+├── assets/                       # Publication animations, GIF showcases, and preview posters
+│   ├── lab_bench_simulation.gif  # High-impact Lab Bench simulation animation
+│   ├── lab_bench_simulation.mp4  # 60fps MP4 video recording
+│   └── lab_bench_preview.png     # Static preview poster
+├── rust/                         # Core Rust simulation engine & GUI visualizers
+│   ├── src/
+│   │   ├── bin/                  # Executables: lab.rs, interactive.rs, export_lab_bench.rs
+│   │   ├── brain/                # Neural controllers (Perceptron, MLP, SpatialGraph, GooGraph)
+│   │   ├── brain_diagram.rs      # Decoupled diagram layout engine for UI rendering
+│   │   ├── hex_grid.rs           # 6-connected hexagonal coordinate math & geometry
+│   │   ├── hex_dish.rs           # Circular dish & toroidal boundary algorithms
+│   │   ├── lab_dish.rs           # State container for controlled Lab Bench trials
+│   │   ├── simulation.rs         # Core evolutionary loop & common garden assays
+│   │   └── step_engine.rs        # Action resolution, foraging, and heterosperma plasticity
+│   └── tests/                    # 67 unit and integration tests
+├── scripts/                      # Sweep runners and animation rendering pipelines
+│   ├── run_expanded_botero_sweep.py
+│   └── render_lab_bench_animation.py
+└── webviewer/                    # Dash & HTML5 browser exploration suite
 ```
 
-`--burn-in=N` causes the simulator to perform all timesteps but suppress console/frame/snapshot reporting until `t >= N`.
+---
 
-Running the tests
+## 6. License & Citation
 
-<<<<<<< HEAD
------
-Test instructions were moved to `TESTS.md`. See `TESTS.md` for commands to build and run the project's tests.
-=======
-GPU vs CPU comparison
-----------------------
-The Rust simulator now supports a CUDA-based tensor kernel. Use the helper script
-to run a small simulation with the GPU path enabled and compare it against the
-CPU fallback:
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
-```powershell
-python scripts\compare_cuda_simulations.py --release --steps 200 --initial-population 120
+If you use `evo-movement` or its developmental plasticity / common garden assays in academic work, please cite:
+
+```bibtex
+@software{boullosa2026evomovement,
+  author = {Luis Boullosa},
+  title = {Evolution of Movement: Emergence of Neural Motility and Developmental Plasticity in Hexagonal Spatial Environments},
+  year = {2026},
+  url = {https://github.com/luisboullosa/Evolution_of_Movement}
+}
 ```
-
-The script builds the `evo_movement_bin_old` binary, runs it twice (forcing the
-CPU fallback via an invalid `TENSOR_KERNEL_PTX` path and then normally), writes
-final outputs under `rust/temp_outputs/cpu-fallback` and
-`rust/temp_outputs/gpu`, prints wall-clock times for both runs, and reports
-any differing files. Adjust `--config-file`, `--output-base`, or `--cuda-arch`
-to match your local setup. If CUDA isn’t already installed, set up the toolkit
-and MSVC/SDK so `nvcc` can emit the PTX kernel before rerunning the script.
-See `docs/cuda_kernel_arguments.md` for an argument-by-argument alignment table
-that explains how the CUDA kernel signature maps to the host launch helpers,
-ensuring the comparison script exercises identical buffers on both paths.
-
->>>>>>> origin/main
