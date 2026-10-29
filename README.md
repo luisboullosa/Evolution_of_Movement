@@ -12,7 +12,7 @@
 
 ![Evolution of Movement — Lab Bench Simulation](assets/lab_bench_simulation.gif)
 
-*Figure 1: The Lab Bench ([`evo_movement_lab`](file:///d:/Development/Movement/rust/src/bin/lab.rs)). Real-time 2D hexagonal petri dish ($R=10$, 331 cells) rendered with shifting Perlin resource gradients, lineage-colored organisms, and a live synaptic wiring inspector ([`BrainDiagram`](file:///d:/Development/Movement/rust/src/brain_diagram.rs)) tracking sensory input sectors, hidden nodes, and motor readouts. High-definition video available at [`assets/lab_bench_simulation.mp4`](file:///d:/Movement/assets/lab_bench_simulation.mp4).*
+*Figure 1: The Lab Bench ([`evo_movement_lab`](rust/src/bin/lab.rs)). Real-time 2D hexagonal petri dish ($R=10$, 331 cells) rendered with shifting Perlin resource gradients, lineage-colored organisms, and a live synaptic wiring inspector ([`BrainDiagram`](rust/src/brain_diagram.rs)) tracking sensory input sectors, hidden nodes, and motor readouts. High-definition video available at [`assets/lab_bench_simulation.mp4`](assets/lab_bench_simulation.mp4).*
 
 ---
 
@@ -223,7 +223,17 @@ python scripts/render_lab_bench_animation.py
 
 ---
 
-## 6. License & Citation
+## 6. Acknowledgments & Credits
+
+This project builds upon foundational theoretical and computational work in evolutionary ecology:
+
+- **[Franjo Weissing](https://research.rug.nl/en/persons/franjo-weissing/)** (University of Groningen) — Foundational theoretical work on the evolutionary ecology of movement, dispersal plasticity, and adaptive dynamics.
+- **[Hanno Hildenbrandt](https://research.rug.nl/en/persons/hanno-hildenbrandt)** (University of Groningen) — Initial C++ simulation codebase and high-performance spatial modeling architecture.
+- **[Christoph Netz](https://www.su.se/english/profiles/c/chne0650)** (Stockholm University) — Theoretical modeling and evolutionary simulation work.
+
+---
+
+## 7. License & Citation
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
@@ -231,7 +241,7 @@ If you use `evo-movement` or its developmental plasticity / common garden assays
 
 ```bibtex
 @software{boullosa2026evomovement,
-  author = {Luis Boullosa},
+  author = {Luis Boullosa and Hanno Hildenbrandt and Christoph Netz and Franjo Weissing},
   title = {Evolution of Movement: Emergence of Neural Motility and Developmental Plasticity in Hexagonal Spatial Environments},
   year = {2026},
   url = {https://github.com/luisboullosa/Evolution_of_Movement}
